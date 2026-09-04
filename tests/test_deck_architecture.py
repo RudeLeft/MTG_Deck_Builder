@@ -190,6 +190,38 @@ def main():
         and _rejects_quantity(-1)
         and not _rejects_quantity(1))
 
+    # DECK-001 / VER-012: every mutation must reject an unknown board before
+    # touching deck state. Deleting the guard in add() is silent data loss --
+    # a mistyped board reports success while the card lands in neither
+    # mainboard nor sideboard and is unreachable from both.
+    def _rejects_board(mutate):
+        try:
+            mutate(Deck())
+        except ValueError:
+            return True
+        return False
+
+    bad = "sideboadr"
+    board_guard = (
+        _rejects_board(lambda deck: deck.add(first, bad, 1))
+        and _rejects_board(lambda deck: deck.set_qty(first["id"], bad, 2))
+        and _rejects_board(lambda deck: deck.change_qty(first["id"], bad, 1))
+        and _rejects_board(lambda deck: deck.remove(first["id"], bad))
+        and _rejects_board(lambda deck: deck.move(first["id"], bad, "side"))
+        and _rejects_board(lambda deck: deck.move(first["id"], "main", bad))
+        and not _rejects_board(lambda deck: deck.add(first, "side", 1)))
+
+    # An accepted bad board would not raise, so also prove the card cannot go
+    # missing: whatever add() accepts has to be reachable from a real board.
+    swallow_check = Deck()
+    try:
+        swallow_check.add(first, bad, 2)
+    except ValueError:
+        card_never_swallowed = True
+    else:
+        card_never_swallowed = (
+            swallow_check.total("main") + swallow_check.total("side") == 2)
+
     illegal = Deck("Illegal", "modern")
     illegal.add(first, "main", 3)
     illegal.add(second, "side", 2)
@@ -274,6 +306,8 @@ def main():
     }
 
     checks = {
+        "every deck mutation rejects an unknown board": (
+            board_guard and card_never_swallowed),
         "face rules text reaches the copy-limit engine through JSON columns": (
             faced_limit is None and "Trample." in faced_text),
         "zero-quantity line skips one entry without aborting the import": (

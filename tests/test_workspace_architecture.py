@@ -14,7 +14,8 @@ from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession, DeckSessionManager
 from mtgdb.search.results import SearchResultStore
 from mtgdb.ui.search import SearchFeatureMixin
-from mtgdb.workspace.repository import WorkspaceRepository
+from mtgdb.workspace.repository import (
+    DEFAULT_RECOVERY_KEEP, WorkspaceRepository)
 
 
 class Clock:
@@ -144,6 +145,24 @@ def main():
         recovery_files = sorted(repository.recovery_dir.glob("session_*.json"))
         temporary_files = list(Path(temporary).rglob("*.tmp"))
 
+        # WSP-011 bounds recovery history. The repository above is constructed
+        # with an explicit recovery_keep, which proves the mechanism but leaves
+        # the shipped default unverified -- raising DEFAULT_RECOVERY_KEEP to an
+        # unbounded value passed every gate. Exercise a default-constructed
+        # repository so the number the application actually uses is the one
+        # under test.
+        default_clock = Clock()
+        default_repository = WorkspaceRepository(
+            str(Path(temporary) / "defaults"), clock=default_clock)
+        for index in range(DEFAULT_RECOVERY_KEEP + 12):
+            default_clock.advance(1)
+            default_repository.save(
+                dict(payload, saved_at=default_clock(),
+                     search={"snapshot": index}),
+                force=True, recovery=True)
+        default_recovery_files = sorted(
+            default_repository.recovery_dir.glob("session_*.json"))
+
         repository.session_path.write_text("{broken", encoding="utf-8")
         recovered_payload = repository.load()
         repository.session_path.write_text(
@@ -207,6 +226,9 @@ def main():
             and not unchanged_save.wrote_recovery),
         "atomic writes leave no temporary files": not temporary_files,
         "recovery history remains bounded": len(recovery_files) == 8,
+        "the shipped recovery-history default is bounded and small": (
+            DEFAULT_RECOVERY_KEEP == 8
+            and len(default_recovery_files) == DEFAULT_RECOVERY_KEEP),
         "corrupt primary falls back to newest valid recovery": (
             recovered_payload is not None
             and recovered_payload["search"] == {"snapshot": 9}),

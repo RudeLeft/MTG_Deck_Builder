@@ -575,9 +575,7 @@ every feature together and is exempt.
   Subtype, and Rarity MUST use `Any` as their unrestricted
   button text. The Subtype picker summary MUST remain one horizontal line and
   MUST NOT insert line breaks; other picker summaries MAY wrap to preserve
-  readable widths without changing the underlying selection state. Mechanics and
-  Subtype picker helper text MUST be exactly `Choose one or several card mechanics.`
-  and `Choose one or several card subtypes.` respectively. Shared multi-select filter
+  readable widths without changing the underlying selection state. Shared multi-select filter
   dialogs MUST label their visible bulk-select action `Select All` and their visible
   bulk-clear action `Clear Selected`; the Exact Set bulk-select action MUST also read
   `Select All`. These label changes do not broaden the established visible/filtered
@@ -586,6 +584,14 @@ every feature together and is exempt.
   MAY retain its resolver-specific introductory guidance, and Exact Set guidance/status
   below the Exact Set section remains unchanged.
   _Verification:_ **AUTO**.
+
+- **SRCH-032 — SHOULD:** Word the Mechanics and Subtype picker helper text as
+  `Choose one or several card mechanics.` and `Choose one or several card
+  subtypes.` respectively. This is user-facing copy rather than structure, so a
+  clearer wording is a decision for the user to approve rather than a release
+  blocker under GOV-002. The picker's placement, summary behavior, and
+  unrestricted `Any` text stay mandatory under SRCH-023.
+  _Verification:_ **REVIEW**.
 
 - **SRCH-024 — MUST:** Search Rules Text against the normalized complete Oracle
   text of every card face. Within one unquoted Rules Text chip, every normalized
@@ -1125,9 +1131,11 @@ every feature together and is exempt.
 - **PRN-002 — MUST:** Preserve 2.5×3.5 in cards, a 3×3 grid, nine per page, the
   cutting gap, rounded hairline borders, and aspect-preserving placement.
   _Verification:_ **AUTO**.
-- **PRN-003 — MUST:** Render to a `.part` path, replace the PDF only after
-  complete rendering, and remove incomplete output after
-  success/failure/cancel. _Verification:_ **AUTO**.
+- **PRN-003 — MUST:** Write incomplete PDF output through the PORT-007 durable
+  replace pattern, publish the PDF only after complete rendering, and remove
+  incomplete output after success/failure/cancel. PORT-007 owns the temporary
+  naming and durability mechanism; this rule owns only the render lifecycle,
+  so no fixed `.part` filename is specified here. _Verification:_ **AUTO**.
 - **PRN-004 — MUST:** Keep snapshot creation, board expansion, PNG validation,
   download orchestration, render coordination, typed events, and worker lifecycle
   in `printing/service.py`. _Verification:_ **AUTO**.
@@ -1409,9 +1417,8 @@ every feature together and is exempt.
 - **LAY-009 — MUST:** Keep Deck Stats below the fixed Card Preview and let it
   consume the center column's remaining height. Omit the old top aggregate strip
   that listed total cards, lands, spells, average mana value, and sideboard count,
-  together with its separator. Deck Stats MUST be a professional vertically scrollable
-  dashboard with consistent dark header bands, gold section titles, comfortable
-  internal spacing, and one outer stats scrollbar rather than nested section scrollbars.
+  together with its separator. Deck Stats MUST use one outer stats scrollbar rather than
+  nested section scrollbars.
   Keep Deck Overview (composition plus color requirements/sources), Mana Curve,
   Opening Hand & Draw Odds (land consistency plus selected-card odds), Sample Hand,
   and Format Legality as clearly separated sections. The Sample Hand table MUST show
@@ -1420,13 +1427,21 @@ every feature together and is exempt.
   Format Legality status text MUST state the pass/failure status only and MUST NOT
   append `see Details`; the Details button remains the explicit drill-in action. The
   `BASIC FORMAT CHECK` dialog heading MUST use the same gold accent/dialog-title
-  treatment as Mechanics/Subtype picker titles. Land Consistency and Selected Card draw
-  odds MUST use plain-language probability labels that state what the percentage means,
-  rather than compressed abbreviations. The mana-source summary MUST put
+  treatment as Mechanics/Subtype picker titles. The mana-source summary MUST put
   `Red colored Sources numbers indicate missing/light mana source support.` on its own
   line directly below the `Mana-producing cards` count. Mana Curve `By type` and `By color`
   legends MUST show numeric totals for every displayed segment.
   _Verification:_ **AUTO**.
+
+- **LAY-010 — SHOULD:** Present Deck Stats as a polished dashboard: consistent
+  dark header bands, gold section titles, and unhurried internal spacing, with
+  Land Consistency and Selected Card draw odds labelled in plain language that
+  states what each percentage means rather than compressed abbreviations. No
+  deterministic check establishes whether spacing reads as polished, so this is
+  a judgement the user approves rather than a release blocker under GOV-002.
+  LAY-009 keeps the testable structure: section membership, the single outer
+  scrollbar, and the seven scrollbar-free Sample Hand rows.
+  _Verification:_ **MANUAL**.
 - **BEH-001 — MUST:** Preserve every existing command callback, filter function,
   Tk variable, event binding, protocol handler, and search meaning during a
   presentation-only change, comparing manifests with the pre-change source.
@@ -1630,6 +1645,14 @@ every feature together and is exempt.
   delivering code. _Verification:_ **AUTO**.
 - **VER-002 — MUST:** Run every `tests/test_*.py` file directly before delivering
   code or creating a source release. _Verification:_ **AUTO**.
+- **VER-014 — MUST:** Run every `windows_tests/test_*.py` file before
+  delivering code on Windows. VER-002 covers only the cross-platform suite and
+  BLD-004 runs the Windows gates during a build, so code delivered without a
+  build otherwise reaches the user with the single-instance, simulated-scaling
+  geometry, and startup gates never executed on the one platform this
+  application targets. `windows_tests/smoke_packaged_windows.py` requires a
+  completed PyInstaller output and remains a BLD-004 build gate.
+  _Verification:_ **WINDOWS**.
 - **VER-003 — MUST:** Run `tests/test_ui_component_contract.py` after a shared
   component or ownership change. _Verification:_ **AUTO**.
 - **VER-004 — MUST:** Run `tests/test_ui_visual_contract.py` after a UI token,
@@ -1659,9 +1682,15 @@ every feature together and is exempt.
   discovering Scryfall's current `default_cards` bulk export from `/bulk-data`,
   refreshing every trusted Scryfall catalog plus the current official Wizards
   Comprehensive Rules Supertype taxonomy, auditing the full snapshot, and
-  emitting a Markdown evidence report. Run it in the scheduled/manual
-  `taxonomy-audit.yml` workflow; it is intentionally separate from normal local
-  release gates because it downloads the full upstream dataset. _Verification:_ **AUTO**.
+  emitting a Markdown evidence report. This rule governs the script's contract
+  only, which `tests/test_taxonomy_audit_contract.py` checks without network
+  access. _Verification:_ **AUTO**.
+- **VER-013 — MUST:** Treat an actual full upstream taxonomy audit as evidence
+  only when `tests/taxonomy_audit.py --current` really ran through the
+  scheduled or manual `taxonomy-audit.yml` workflow. That run downloads the
+  complete upstream dataset and is deliberately outside the local and cloud
+  release gates, so passing VER-009 is never evidence that the audit itself
+  happened. _Verification:_ **USER**.
 - **VER-006 — MUST:** Run the Windows simulated-Tk-scaling geometry test at
   100/125/150% after a control, font, spacing, or layout change; report it only as
   Tk geometry coverage, not OS/per-monitor DPI certification.
@@ -1711,7 +1740,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | SRCH-* | `tests/test_search_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_future_magic.py`, `tests/test_hardening_regressions.py`, `tests/test_multiselect_interactions.py` |
 | DBI-* | `tests/test_database_internals_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
 | DBS-* | `tests/test_database_sync_architecture.py`, `tests/test_hardening_regressions.py` |
-| VER-010 through VER-012 | `tests/test_project_guardrails.py`, `tests/test_deck_architecture.py`, `tests/test_database_internals_architecture.py` |
+| VER-010 through VER-012, VER-014 | `tests/test_project_guardrails.py`, `tests/test_deck_architecture.py`, `tests/test_database_internals_architecture.py`, `windows_tests/test_*.py` |
 | DECK-* | `tests/test_deck_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
 | DUI-*, TBL-* (deck side) | `tests/test_deck_ui_architecture.py`, `tests/test_multiselect_interactions.py`, `tests/test_open_deck_printings_shared.py` |
 | WSP-* | `tests/test_workspace_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
@@ -1726,7 +1755,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | UI-011 | `tests/test_ui_component_contract.py`, `tests/test_deck_ui_architecture.py` |
 | CLR-*, TYP-*, SIZ-*, LAY-* | `tests/test_ui_visual_contract.py`, `windows_tests/test_ui_geometry_windows.py` |
 | BEH-*, callback safety | `tests/test_ui_callback_safety.py`, `tests/test_ui_component_contract.py` |
-| DATA-*, VER-009 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |
+| DATA-*, VER-009, VER-013 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |
 | PORT-001 through PORT-005, PORT-007 | `tests/test_portability_contract.py`, `tests/test_hardening_regressions.py` |
 | PORT-006, single-instance | `windows_tests/test_single_instance_windows.py`, `tests/test_portability_contract.py` |
 | SIZ-003, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py` |
