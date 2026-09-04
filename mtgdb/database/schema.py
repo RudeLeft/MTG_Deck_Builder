@@ -120,6 +120,11 @@ PRIMARY_PRAGMAS = (
     "PRAGMA temp_store=MEMORY",
     "PRAGMA cache_size=-32768",
     "PRAGMA mmap_size=268435456",
+    # The UI uses this connection from background threads as well as the Tk
+    # thread, so it contends with a bulk rebuild exactly like the reader does.
+    # Without this it inherits sqlite3's 5s default -- the shortest tolerance
+    # of the three connections, on the one most visible to the user.
+    "PRAGMA busy_timeout=30000",
 )
 
 READER_PRAGMAS = (

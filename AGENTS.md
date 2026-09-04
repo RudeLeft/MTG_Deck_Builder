@@ -639,7 +639,11 @@ rows override broader rows.
   _Verification:_ **AUTO**.
 - **DBI-009 — MUST:** Preserve schema version 10, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
-  functions. _Verification:_ **AUTO**.
+  functions. Every connection opened in `database/schema.py` MUST set an
+  explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;
+  the primary connection is used from background threads and is never the
+  first to give up while a bulk rebuild holds the database.
+  _Verification:_ **AUTO**.
 - **DBI-010 — MUST:** Preserve exact-printing identity, search semantics, import
   resolution, catalog fallback, and public `CardDB` method signatures.
   _Verification:_ **AUTO**.

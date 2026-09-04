@@ -1,7 +1,9 @@
 """Separated SQLite schema, import, query, taxonomy, and façade contracts."""
 
 import ast
+import atexit
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -124,7 +126,34 @@ def main():
             and db.count() == 1)
         db.close()
 
+    # DBI-009 busy timeouts. Ask each real connection what it will actually do
+    # rather than matching pragma text: a source-literal check passes while the
+    # connection silently keeps sqlite3's 5s default.
+    from mtgdb.database.schema import (
+        open_primary_connection, open_reader_connection, open_writer_connection)
+
+    timeout_dir = tempfile.mkdtemp(prefix="mtgdb-busy-")
+    atexit.register(shutil.rmtree, timeout_dir, True)
+    timeout_db = str(Path(timeout_dir) / "cards.db")
+    busy_timeouts = {}
+    for label, opener in (
+            ("primary", lambda: open_primary_connection(timeout_db, ())),
+            ("reader", lambda: open_reader_connection(timeout_db, ())),
+            ("writer", lambda: open_writer_connection(timeout_db))):
+        connection = opener()
+        try:
+            busy_timeouts[label] = connection.execute(
+                "PRAGMA busy_timeout").fetchone()[0]
+        finally:
+            connection.close()
+
     checks = {
+        "every connection sets an explicit busy timeout": (
+            all(value >= 30000 for value in busy_timeouts.values())
+            # 5000 is sqlite3's default: proof none of them merely inherited it.
+            and 5000 not in set(busy_timeouts.values())),
+        "the primary connection is not the first to give up": (
+            busy_timeouts["primary"] >= busy_timeouts["reader"]),
         "search projection rejects columns outside the allow-list": (
             projection_guarded),
         "schema version and columns survive extraction": (
