@@ -69,6 +69,12 @@ class _DeckImportPrintingFilter(PrintingFilter):
             self, generation, future, selected_types, selected_codes):
         if generation != self._catalog_generation:
             return
+        if self._catalog_pending_args is None:
+            # This generation was already applied -- by run_modal draining a
+            # future that finished before the event loop ran. The queued
+            # after() callback must not re-apply the captured selection over
+            # whatever the user has since chosen in the open picker.
+            return
         if not future.done():
             try:
                 self.owner.after(15, lambda: self._poll_catalog(
@@ -129,6 +135,23 @@ class DeckFileWorkflowMixin:
             if quantity > 0:
                 clone.add(card, board, quantity)
         return clone
+
+    def _await_deck_file_job(self, future, on_success, *, error_title):
+        """Block until one deck-file job finishes and report whether it wrote.
+
+        Used only where the caller destroys state on the strength of the
+        result -- closing a dirty deck session. The disk work still runs on the
+        deck-file worker (DUI-017); only the caller waits for its outcome, so a
+        failed save can never be mistaken for a completed one.
+        """
+        try:
+            result = future.result()
+        except Exception as exc:
+            log.exception("%s", error_title)
+            messagebox.showerror(error_title, str(exc))
+            return False
+        on_success(result)
+        return True
 
     def _poll_deck_file_job(self, future, on_success, *, error_title):
         if not future.done():
@@ -209,8 +232,13 @@ class DeckFileWorkflowMixin:
         self._poll_deck_file_job(future, opened, error_title="Open failed")
 
 
-    def _save_session_as(self, index):
-        """Save one deck session without losing the currently active tab."""
+    def _save_session_as(self, index, *, wait=False):
+        """Save one deck session without losing the currently active tab.
+
+        With ``wait=True`` the returned value reflects the completed write
+        rather than a successful submission, so a caller may discard the
+        session only once the deck is durably on disk.
+        """
         if not self.deck_sessions.is_valid_index(index):
             return False
 
@@ -236,6 +264,9 @@ class DeckFileWorkflowMixin:
 
         future = submit_deck_file_job(
             save_deck_text, path, detached, name="mtg-deck-save")
+        if wait:
+            return self._await_deck_file_job(
+                future, saved, error_title="Save failed")
         self._poll_deck_file_job(future, saved, error_title="Save failed")
         return True
 

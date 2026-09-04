@@ -580,8 +580,16 @@ class DeckBuilderApp(
     # ======================================================================
 
     def _status(self, msg):
-        """Status-bar compatibility hook; the persistent bottom bar was removed."""
-        return None
+        """Record a transient user-facing status line.
+
+        The persistent bottom status bar was removed, but several callers use
+        this as their only report of a non-fatal outcome (an invalid search
+        filter, a trusted-catalog load failure). Route it to the log file the
+        error dialogs already point users at rather than discarding it.
+        """
+        text = str(msg or "").strip()
+        if text:
+            log.info("status: %s", text)
 
     def report_callback_exception(self, exc, val, tb):
         """

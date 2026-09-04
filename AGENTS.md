@@ -845,6 +845,11 @@ rows override broader rows.
   deck-generation analysis snapshot rather than repeatedly sorting/traversing the
   same deck for composition, mana curve, pips, sources, and opening-land metrics.
   _Verification:_ **AUTO**.
+- **DUI-019 — MUST:** Never discard a deck session on the strength of a merely
+  submitted save. When closing a dirty session, `_confirm_close_session` MUST
+  wait for the deck-file write to complete and MUST keep the session open when
+  it fails, so a rejected path (read-only folder, full disk, disconnected
+  share) cannot destroy the only copy of a deck. _Verification:_ **AUTO**.
 
 ## Workspace and deck-session architecture
 

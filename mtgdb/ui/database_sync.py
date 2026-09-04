@@ -195,8 +195,16 @@ class DatabaseSyncMixin:
                 phase, float(elapsed or 0.0))
 
         if poll.progress is not None:
-            self._apply_sync_progress(
-                poll.progress.stage, poll.progress.payload)
+            try:
+                self._apply_sync_progress(
+                    poll.progress.stage, poll.progress.payload)
+            except Exception:
+                # The popup disables its close button and holds a grab, so a
+                # rendering error must not be allowed to kill the pump and
+                # strand an unclosable modal over the app.
+                log.exception(
+                    "Could not render database sync progress for stage %s",
+                    poll.progress.stage)
 
         if poll.terminal is not None:
             if poll.terminal.kind == "done":

@@ -290,7 +290,62 @@ def main():
         and _save_syncs(2, 1) == (0, False)
         and _save_syncs(9, 1) == (0, False))  # invalid index does nothing
 
+    # DUI-019. Closing a dirty session destroys it the moment
+    # _confirm_close_session returns True, so that value must mean "written",
+    # not "submitted". Exercise the waiting path against a failed write.
+    import concurrent.futures
+
+    from mtgdb.ui import deck_files as deck_files_module
+    from mtgdb.ui.deck_files import DeckFileWorkflowMixin
+
+    class _RecordingMessagebox:
+        def __init__(self):
+            self.errors = []
+
+        def showerror(self, title, message):
+            self.errors.append((title, message))
+
+    class _SaveHarness(DeckFileWorkflowMixin):
+        def __init__(self):
+            self.saved_calls = 0
+
+        def _saved(self, _result):
+            self.saved_calls += 1
+
+    recorded = _RecordingMessagebox()
+    original_messagebox = deck_files_module.messagebox
+    save_harness = _SaveHarness()
+    failed_future = concurrent.futures.Future()
+    failed_future.set_exception(OSError("target folder is read-only"))
+    ok_future = concurrent.futures.Future()
+    ok_future.set_result(None)
+    try:
+        deck_files_module.messagebox = recorded
+        failed_write_reported = save_harness._await_deck_file_job(
+            failed_future, save_harness._saved, error_title="Save failed")
+        saved_calls_after_failure = save_harness.saved_calls
+        good_write_reported = save_harness._await_deck_file_job(
+            ok_future, save_harness._saved, error_title="Save failed")
+        saved_calls_after_success = save_harness.saved_calls
+    finally:
+        deck_files_module.messagebox = original_messagebox
+
+    deck_file_source = sources["mtgdb/ui/deck_files.py"]
+
     checks = {
+        "failed save is reported as not written and keeps the session": (
+            failed_write_reported is False
+            and saved_calls_after_failure == 0
+            and len(recorded.errors) == 1
+            and recorded.errors[0][0] == "Save failed"),
+        "completed save is reported as written": (
+            good_write_reported is True
+            and saved_calls_after_success == 1),
+        "closing a dirty session waits for the deck-file write": (
+            "def _save_session_as(self, index, *, wait=False)"
+            in deck_file_source
+            and "_save_session_as(index, wait=True)" in editor_source
+            and "return self._await_deck_file_job(" in deck_file_source),
         "Save As syncs the live editors only for the active tab": (
             save_sync_scoping),
         "deck stats reuse one analysis snapshot until the deck changes": (

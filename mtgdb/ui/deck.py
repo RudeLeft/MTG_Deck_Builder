@@ -402,7 +402,9 @@ class DeckEditorMixin:
         if answer is None:
             return False
         if answer:
-            return self._save_session_as(index)
+            # The caller discards this session as soon as we return True, so
+            # wait for the write to land; a failed save must keep the deck open.
+            return self._save_session_as(index, wait=True)
         return True
 
     def _close_active_deck(self):

@@ -476,11 +476,11 @@ class DatabaseSyncService:
 
     def refresh_catalogs(self, progress_cb=None, cancel_event=None):
         """Refresh trusted Scryfall/Wizards taxonomy sources independently."""
-        def stage(name, payload):
-            if (progress_cb and name == "catalogs"
-                    and isinstance(payload, (tuple, list))
-                    and len(payload) >= 3):
-                progress_cb(*payload[:3])
+        def stage(name, payload=None):
+            # Same (name, payload) shape sync() emits, so one progress callback
+            # serves both entry points.
+            if progress_cb:
+                progress_cb(name, payload)
 
         result = self._refresh_catalogs(stage, cancel_event)
         self._record_compatibility_diagnostics()
