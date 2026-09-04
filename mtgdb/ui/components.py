@@ -21,6 +21,16 @@ from mtgdb.ui.tokens import (
 log = logging.getLogger("mtg")
 
 
+def deck_board_label(board):
+    """Return the display name for a deck board identifier.
+
+    Shared so the Mainboard/Sideboard wording cannot drift between the deck
+    pane, comparison provenance, and the stats panel. Anything that is not the
+    mainboard reads as the sideboard, matching Deck.BOARDS.
+    """
+    return "Mainboard" if board == "main" else "Sideboard"
+
+
 _BUTTON_STYLES = {
     "standard": "TButton",
     "primary": "Primary.TButton",

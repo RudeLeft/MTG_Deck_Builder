@@ -110,7 +110,7 @@ mtgdb/
     tokens.py            #   palette, typography, spacing, metrics, icon sizes
     styles.py            #   ttk theme registration and state appearance
     assets.py            #   bundled-asset path resolution + PIL availability
-    components.py        #   behavior-neutral controls, classic Tk wrappers, tooltips
+    components.py        #   behavior-neutral controls, classic Tk wrappers, tooltips, shared board label
     autocomplete.py      #   AutocompleteEntry + hidden-first suggestion popup behavior
     tables.py            #   shared table schema, formatting, sort, columns, reorder
     card_detail.py       #   main card preview, Legality/Rotate/Zoom actions, legality/text fallbacks
@@ -218,7 +218,7 @@ only in the module that owns X.
 | `mtgdb/ui/tokens.py` | Palette, typography, spacing, control metrics, comparison metrics, icon sizes |
 | `mtgdb/ui/styles.py` | Global ttk theme registration and ttk state appearance |
 | `mtgdb/ui/assets.py` | Bundled-asset path resolution (source and frozen) and shared PIL availability |
-| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, tooltips |
+| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, tooltips, shared display vocabulary such as the Mainboard/Sideboard board label |
 | `mtgdb/ui/autocomplete.py` | Hidden-first autocomplete-popup lifecycle/navigation plus the current `AutocompleteEntry` control |
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
 | `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
@@ -288,7 +288,7 @@ have at least two routing examples.
 | `mtgdb/ui/tokens.py` | change palette/typography/spacing constants<br>change shared control, comparison, or icon metrics | `mtgdb/ui/styles.py`; `mtgdb/ui/components.py`; `mtgdb/ui/window.py` | Do not create widgets or hard-code feature behavior here. |
 | `mtgdb/ui/styles.py` | change ttk theme registration or named widget/surface styles such as borderless `Preview.TFrame`<br>change ttk state-dependent appearance such as hover/disabled/selected styling | `mtgdb/ui/tokens.py`; `mtgdb/ui/components.py`; owning feature UI | Layout behavior and feature callbacks belong in components/features. |
 | `mtgdb/ui/assets.py` | change source/frozen bundled-asset resolution<br>change shared PIL availability/fallback handling | `mtgdb/ui/mana.py`; `mtgdb/ui/window.py`; `MTGDeckBuilder.spec` | Do not own image downloading or feature-specific rendering. |
-| `mtgdb/ui/components.py` | add a reusable behavior-neutral button/field/control wrapper<br>change tooltip or classic-Tk wrapper behavior shared across screens | `mtgdb/ui/tokens.py`; `mtgdb/ui/styles.py`; consuming UI modules | Feature-specific state/callback semantics stay with the feature owner. |
+| `mtgdb/ui/components.py` | add a reusable behavior-neutral button/field/control wrapper<br>change tooltip, classic-Tk wrapper, or shared display-vocabulary behavior used across screens | `mtgdb/ui/tokens.py`; `mtgdb/ui/styles.py`; consuming UI modules | Feature-specific state/callback semantics stay with the feature owner. |
 | `mtgdb/ui/autocomplete.py` | change autocomplete popup keyboard/focus/dismissal mechanics<br>change `AutocompleteEntry` suggestion/commit behavior | `mtgdb/ui/components.py`; consuming Search UI | Keep popup mechanics centralized; do not duplicate them in individual screens. |
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
 | `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Legality/Rotate/Zoom actions, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
@@ -1199,6 +1199,11 @@ rows override broader rows.
   MUST differ and MUST be asserted. `ClassicRadiobutton` stays correct for the
   dialog's own `Any`/`All` mode rows, which are not list rows.
   _Verification:_ **AUTO**.
+- **UI-011 — MUST:** Derive the Mainboard/Sideboard display name from the single
+  `deck_board_label` helper in `ui/components.py`. The wording previously existed
+  as six independent conditionals across the deck pane, comparison view,
+  comparison controls, and stats panel, which is how such text drifts apart.
+  _Verification:_ **AUTO**.
 - **UI-003 — MUST:** Use `TokenBubbleEntry` for multi-value rules-text input, the
   `ui/autocomplete.py` components for autocomplete fields, and `ToolTip` for
   application-owned tooltips. _Verification:_ **AUTO**.
@@ -1674,6 +1679,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | UI-001 through UI-008, WIN-* | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py` |
 | UI-009 | `tests/test_project_guardrails.py`, `tests/test_trusted_filter_contract.py` |
 | UI-010 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_search_architecture.py` |
+| UI-011 | `tests/test_ui_component_contract.py`, `tests/test_deck_ui_architecture.py` |
 | CLR-*, TYP-*, SIZ-*, LAY-* | `tests/test_ui_visual_contract.py`, `windows_tests/test_ui_geometry_windows.py` |
 | BEH-*, callback safety | `tests/test_ui_callback_safety.py`, `tests/test_ui_component_contract.py` |
 | DATA-*, VER-009 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |

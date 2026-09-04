@@ -3,6 +3,7 @@
 import ast
 import inspect
 import os
+import pathlib
 import re
 import sys
 
@@ -163,7 +164,28 @@ def main():
         and _commit(_hits, -1) == (False, "typed")
         and _commit([], 0) == (False, "typed"))
 
+    # UI-011: one definition of the board wording. Assert the behaviour and that
+    # no module re-implements the conditional inline.
+    from mtgdb.ui.components import deck_board_label as _board_label
+
+    _ui_dir = pathlib.Path(ROOT) / "mtgdb" / "ui"
+    _inline_board_label = sorted(
+        path.name for path in _ui_dir.glob("*.py")
+        if path.name != "components.py"
+        and '"Mainboard" if' in path.read_text(encoding="utf-8"))
+
+    board_label_shared = (
+        _board_label("main") == "Mainboard"
+        and _board_label("side") == "Sideboard"
+        # Anything that is not the mainboard reads as the sideboard.
+        and _board_label("") == "Sideboard"
+        and _board_label(None) == "Sideboard"
+        and _board_label("MAIN") == "Sideboard"
+        and _inline_board_label == [])
+
     checks = {
+        "the Mainboard/Sideboard label has exactly one definition": (
+            board_label_shared),
         "highlighted-suggestion commit refuses out-of-range indexes": (
             _suggestion_bounds_ok),
         "all ttk button roles resolve to a registered style": (

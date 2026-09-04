@@ -5,7 +5,8 @@ from tkinter import messagebox, ttk
 
 from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession
-from mtgdb.ui.components import AppButton, AppEntry, ClassicButton
+from mtgdb.ui.components import (
+    AppButton, AppEntry, ClassicButton, deck_board_label)
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 from mtgdb.ui.tokens import (
@@ -438,7 +439,7 @@ class DeckEditorMixin:
             self.deck.add(card, board, 1)
         self._mark_deck_dirty()
         self._refresh_changed_deck_views(board)
-        board_label = "Mainboard" if board == "main" else "Sideboard"
+        board_label = deck_board_label(board)
         if len(cards) > 1:
             self._status(f"Added {len(cards)} selected cards to {board_label}.")
 

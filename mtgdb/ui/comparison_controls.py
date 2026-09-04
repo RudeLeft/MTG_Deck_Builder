@@ -9,7 +9,7 @@ from mtgdb.comparison.models import (
     MAX_COMPARISON_CARDS, MIN_COMPARISON_CARDS, comparison_card_id,
 )
 from mtgdb.ui.comparison import CardComparisonWindow
-from mtgdb.ui.components import AppButton, AppMenubutton
+from mtgdb.ui.components import AppButton, AppMenubutton, deck_board_label
 from mtgdb.ui.tokens import (
     FONT_BODY,
     FONT_DIALOG_TITLE,
@@ -470,7 +470,7 @@ class ComparisonFeatureMixin:
             self._refresh_comparison_window_only()
 
         remaining = max(0, qty - 1)
-        board_label = "Mainboard" if board == "main" else "Sideboard"
+        board_label = deck_board_label(board)
         self._status(
             f"Removed one {name} from {board_label}"
             + (f" ({remaining} remaining)." if remaining else "."))
@@ -493,7 +493,7 @@ class ComparisonFeatureMixin:
         self.deck.add(card, board, 1)
         self._mark_deck_dirty()
         self._refresh_changed_deck_views(board)
-        board_label = "Mainboard" if board == "main" else "Sideboard"
+        board_label = deck_board_label(board)
         self._status(f"Added {card.get('name') or 'card'} to {board_label}.")
         return True
 

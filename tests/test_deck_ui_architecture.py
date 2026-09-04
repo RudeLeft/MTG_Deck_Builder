@@ -10,7 +10,8 @@ sys.path.insert(0, str(ROOT))
 
 from mtgdb.deck.model import Deck
 from mtgdb.ui.deck import DeckEditorMixin, deck_action_layout_mode
-from mtgdb.ui.deck_stats import DeckStatsMixin, deck_board_label
+from mtgdb.ui.components import deck_board_label
+from mtgdb.ui.deck_stats import DeckStatsMixin
 
 
 EDITOR_METHODS = {

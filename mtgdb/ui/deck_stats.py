@@ -8,7 +8,7 @@ from mtgdb.deck.analysis import (
     analyze_deck, card_draw_odds, curve_breakdown, sample_hand,
 )
 from mtgdb.deck.legality import legality_problems
-from mtgdb.ui.components import AppButton, ClassicButton
+from mtgdb.ui.components import AppButton, ClassicButton, deck_board_label
 from mtgdb.ui.tokens import (
     DECK_COLOR_SEGMENT_COLORS, DECK_TYPE_SEGMENT_COLORS, FONT_BODY,
     FONT_DIALOG_TITLE, FONT_HELPER_BOLD, FONT_MICRO, MANA_NAMES,
@@ -16,11 +16,6 @@ from mtgdb.ui.tokens import (
 )
 
 CMC_LABELS = ["0", "1", "2", "3", "4", "5", "6", "7+"]
-def deck_board_label(board):
-    """Return the display name for a deck board identifier."""
-    return "Mainboard" if board == "main" else "Sideboard"
-
-
 class DeckStatsMixin:
     """Render deck-domain calculations without owning their formulas."""
 

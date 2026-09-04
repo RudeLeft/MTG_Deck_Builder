@@ -19,7 +19,7 @@ from mtgdb.images.service import (
     card_face_image_url,
     card_viewable_faces,
 )
-from mtgdb.ui.components import AppButton
+from mtgdb.ui.components import AppButton, deck_board_label
 from mtgdb.ui.tokens import (
     COMPARISON_IMAGE_MAX_HEIGHT,
     COMPARISON_IMAGE_MAX_WIDTH,
@@ -319,7 +319,7 @@ class CardComparisonWindow:
                     if source is not None:
                         board = source["board"]
                         qty = int(source.get("qty", 0))
-                        board_label = "Mainboard" if board == "main" else "Sideboard"
+                        board_label = deck_board_label(board)
                         copy_label = "copy" if qty == 1 else "copies"
                         tk.Label(
                             meta,
@@ -334,7 +334,7 @@ class CardComparisonWindow:
                         board = source["board"]
                         qty = int(source.get("qty", 0))
                         if qty > 0:
-                            board_label = "Mainboard" if board == "main" else "Sideboard"
+                            board_label = deck_board_label(board)
                             AppButton(
                                 actions, text=f"Remove from\n{board_label}", role="compact",
                                 command=lambda c=cid, b=board:
