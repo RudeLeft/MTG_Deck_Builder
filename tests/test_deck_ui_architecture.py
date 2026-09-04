@@ -41,6 +41,54 @@ STATS_METHODS = {
 }
 
 
+def _own_returns(function):
+    """Return statements belonging to this function, not to a nested one."""
+    found = []
+
+    def walk(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.Lambda)):
+                continue  # a completion callback reports its own result
+            if isinstance(child, ast.Return):
+                found.append(child)
+            walk(child)
+
+    walk(function)
+    return found
+
+
+def _submitters_claiming_success(ui_directory):
+    """DUI-020: UI methods that report submitted background work as finished.
+
+    Moving disk work onto a deck-file worker (DUI-017) turns a return value
+    from "this happened" into "this started". A caller that discards state on
+    the strength of it -- closing a dirty deck session -- then destroys data
+    when the write later fails. Await the result instead.
+    """
+    offenders = []
+    for path in sorted(ui_directory.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in [node for node in ast.walk(tree)
+                         if isinstance(node, ast.FunctionDef)]:
+            calls = {node.func.id for node in ast.walk(function)
+                     if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Name)}
+            if "submit_deck_file_job" not in calls:
+                continue
+            attributes = {node.func.attr for node in ast.walk(function)
+                          if isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Attribute)}
+            if "_await_deck_file_job" in attributes:
+                continue
+            for statement in _own_returns(function):
+                value = statement.value
+                if isinstance(value, ast.Constant) and value.value is True:
+                    offenders.append(f"{path.name}::{function.name}")
+                    break
+    return offenders
+
+
 def _class_methods(source, class_name):
     tree = ast.parse(source)
     cls = next(
@@ -333,6 +381,8 @@ def main():
     deck_file_source = sources["mtgdb/ui/deck_files.py"]
 
     checks = {
+        "no UI method reports submitted background work as finished": (
+            _submitters_claiming_success(ROOT / "mtgdb" / "ui") == []),
         "failed save is reported as not written and keeps the session": (
             failed_write_reported is False
             and saved_calls_after_failure == 0

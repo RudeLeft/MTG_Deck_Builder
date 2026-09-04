@@ -854,6 +854,13 @@ rows override broader rows.
   wait for the deck-file write to complete and MUST keep the session open when
   it fails, so a rejected path (read-only folder, full disk, disconnected
   share) cannot destroy the only copy of a deck. _Verification:_ **AUTO**.
+- **DUI-020 — MUST NOT:** Report background work as finished when it has only
+  been submitted. A `ui/` method that hands work to a deck-file worker MUST NOT
+  return a truthy constant standing for that work's outcome. Moving work off Tk
+  under DUI-017 changes a return value from "this happened" to "this started",
+  so every caller that acts on the outcome — discarding a session, removing a
+  file, clearing dirty state — MUST receive the completed result instead, the
+  way `_save_session_as(wait=True)` serves DUI-019. _Verification:_ **AUTO**.
 
 ## Workspace and deck-session architecture
 
