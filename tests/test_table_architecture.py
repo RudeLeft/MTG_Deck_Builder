@@ -248,7 +248,38 @@ def main():
         popup_width=320, popup_height=360,
         work_area=(-1920, 0, 1920, 1040), margin=8)
 
+    # Table numeric bounds must refuse non-finite input the way Search does.
+    # A NaN bound is the damaging case: it compares False against every row, so
+    # the column advertises an active filter that filters nothing at all.
+    from mtgdb.ui.table_filters import _finite_bound as _bound
+    from mtgdb.search.results import row_passes_filters as _passes
+
+    def _rejects(text):
+        try:
+            _bound(text)
+        except ValueError:
+            return True
+        return False
+
+    _probe_card = {"name": "Probe", "cmc": 3.0, "type_line": "Creature"}
+    finite_filter_bounds = (
+        _bound("") is None and _bound("   ") is None
+        and _bound("3") == 3.0 and _bound("-2.5") == -2.5
+        and _rejects("nan") and _rejects("NaN")
+        and _rejects("inf") and _rejects("-inf") and _rejects("Infinity")
+        and _rejects("abc")
+        # The behaviour being prevented: a NaN bound leaves every row passing.
+        and _passes(_probe_card,
+                    {"cmc": {"kind": "numeric", "min": float("nan"),
+                             "max": None}}) is True
+        # A real bound still filters.
+        and _passes(_probe_card,
+                    {"cmc": {"kind": "numeric", "min": 5.0, "max": None}}) is False
+        and _passes(_probe_card,
+                    {"cmc": {"kind": "numeric", "min": 1.0, "max": 5.0}}) is True)
+
     checks = {
+        "table numeric filters refuse non-finite bounds": finite_filter_bounds,
         "column drag reorder lands on the dropped slot, including the last": (
             _column_reorder_matches_oracle()),
         "table schema has one production owner": (

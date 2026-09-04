@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import tkinter as tk
 
 from mtgdb.ui.components import AppCombobox, ClassicButton, ClassicEntry
@@ -9,6 +10,23 @@ from mtgdb.ui.search_checklist import VirtualChecklistView
 from mtgdb.ui.tokens import FONT_HELPER, FONT_HELPER_BOLD, PALETTE
 from mtgdb.search.results import row_passes_filters, table_value
 from mtgdb.ui.tables import TABLE_COLUMNS
+
+
+def _finite_bound(text):
+    """Parse one numeric filter bound, rejecting non-finite values.
+
+    Search already refuses these through math.isfinite, and accepting them here
+    is actively misleading: a NaN bound compares False against every row, so the
+    column shows an active filter that filters nothing at all. Infinities are
+    refused for the same reason a user cannot mean them.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return None
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text} is not a finite number")
+    return number
 
 
 class TableFilterMixin:
@@ -183,9 +201,11 @@ class TableFilterMixin:
 
         def apply_filter():
             try:
-                low = float(min_var.get()) if min_var.get().strip() else None
-                high = float(max_var.get()) if max_var.get().strip() else None
+                low = _finite_bound(min_var.get())
+                high = _finite_bound(max_var.get())
             except ValueError:
+                # Same treatment as unparseable text: leave the popup open with
+                # the rejected input visible rather than applying it.
                 return
             if low is None and high is None:
                 self._table_filters[view].pop(key, None)
