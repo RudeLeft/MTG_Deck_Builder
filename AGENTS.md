@@ -435,7 +435,10 @@ every feature together and is exempt.
 - **DOC-002 — MUST:** Limit this file to current rules, architecture, ownership,
   navigation, invariants, and verification. _Verification:_ **REVIEW**.
 - **DOC-003 — MUST NOT:** Turn this file into a changelog, work log, audit,
-  status report, roadmap, or before/after record. _Verification:_ **AUTO**.
+  status report, roadmap, or before/after record. No deterministic check
+  establishes this: the guardrail suite can confirm the prohibition is written
+  down, which is not the same as confirming the document obeys it, so the
+  reviewer states the result. _Verification:_ **REVIEW**.
 - **DOC-004 — MUST NOT:** Create README, CHANGELOG, ROADMAP, NOTES, TODO,
   CONTRIBUTING, nested agent instructions, or any other documentation file.
   _Verification:_ **AUTO**.
@@ -1309,8 +1312,12 @@ every feature together and is exempt.
   retained sash motion and use measured widget requested widths plus expansion
   hysteresis for responsive action/chip layouts; fixed pixel breakpoints MUST NOT
   choose an arrangement that cannot fit the current DPI/font scale. Controls
-  cannot oscillate, clip, or cross the retained board divider while it is dragged.
   _Verification:_ **AUTO**.
+- **WIN-010 — MUST:** Keep controls from oscillating, clipping, or crossing the
+  retained Mainboard/Sideboard divider while a person drags it. A drag is live
+  interaction, so no deterministic check establishes it; WIN-009 keeps the
+  measurable half — DPI-tolerant minima, measured requested widths, and
+  expansion hysteresis. _Verification:_ **MANUAL**.
 
 ## Color, typography, sizing
 
@@ -1749,7 +1756,8 @@ the behavior it governs, update its test in the same change (CHG-007).
 | PRN-* | `tests/test_printing_architecture.py` |
 | BGJ-* | `tests/test_background_jobs_architecture.py` |
 | TBL-* | `tests/test_table_architecture.py` |
-| UI-001 through UI-008, WIN-* | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py` |
+| UI-001 through UI-008, WIN-001 through WIN-009 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py` |
+| WIN-010, LAY-010 | manual Windows inspection under VER-007 |
 | UI-009 | `tests/test_project_guardrails.py`, `tests/test_trusted_filter_contract.py` |
 | UI-010 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_search_architecture.py` |
 | UI-011 | `tests/test_ui_component_contract.py`, `tests/test_deck_ui_architecture.py` |

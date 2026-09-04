@@ -68,6 +68,34 @@ def main():
         taxonomy_source = (ROOT / "mtgdb/database/taxonomy.py").read_text(encoding="utf-8")
 
         paper_cards = ("card",)
+
+        # DATA-004 / DATA-005 fail-closed. The rows above are identical, but no
+        # Scryfall catalog and no verified Wizards Supertype parse exist. Every
+        # picker vocabulary must be empty rather than falling back to names the
+        # application invented. Without this, replacing either "return []" with
+        # a hardcoded list passes every gate -- and "never invent vocabulary" is
+        # the claim the whole taxonomy architecture rests on.
+        starved = CardDB(os.path.join(temporary, "starved.db"))
+        starved.load_cards([
+            card("paper", "Trusted Goblin", "Legendary Creature — Goblin",
+                 "seta", "expansion", keywords=("Lifelink",), rarity="rare",
+                 legalities={"modern": "legal"}),
+        ])
+        starved_vocabulary = {
+            "card_types": starved.card_types(paper_cards, True),
+            "supertypes": starved.supertypes(paper_cards, True),
+            "subtypes": starved.subtypes(paper_cards, True),
+            "mechanics": starved.keyword_catalog(paper_cards, True),
+        }
+        # Sets and raw row keywords come from observed data rather than
+        # catalogs, so they stay available. That is the positive control: the
+        # emptiness above is missing upstream authority, not an empty database.
+        starved_still_observes_rows = (
+            starved.count() == 1
+            and {code for code, _ in starved.sets(None, paper_cards, True)}
+                == {"seta"}
+            and starved.keywords(paper_cards, True) == ["Lifelink"])
+        starved.close()
         checks = {
             "content classifier has no inferred supplemental bucket": (
                 _card_content_kind("normal", "Plane — Ravnica") == "card"
@@ -89,6 +117,9 @@ def main():
                 and {code for code, _ in db.sets(None, ("art",), True)} == {"aset"}
                 and {code for code, _ in db.sets(None, ("card", "art"), True)}
                     == {"seta", "aset", "pln", "fun"}),
+            "missing upstream authority yields no invented vocabulary": (
+                all(value == [] for value in starved_vocabulary.values())
+                and starved_still_observes_rows),
             "Card Type vocabulary is catalog-authorized and observed": (
                 set(db.card_types(paper_cards, True)) == {"Creature", "Plane"}
                 and "Eaturecray" not in db.card_types(paper_cards, True)),
