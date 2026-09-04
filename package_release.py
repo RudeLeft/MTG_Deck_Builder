@@ -25,6 +25,7 @@ EXCLUDED_DIRECTORY_NAMES = {
 }
 EXCLUDED_FILE_SUFFIXES = {".pyc", ".pyo", ".log", ".sqlite", ".db"}
 REQUIRED_RELEASE_MEMBERS = {
+    Path(".gitattributes"),
     Path(".gitignore"),
     Path("AGENTS.md"),
     Path("MTGDeckBuilder.spec"),
@@ -120,6 +121,7 @@ REQUIRED_RELEASE_MEMBERS = {
 # silently ships.  Directories are limited to the known project tree, and root
 # level files to this exact set.
 ALLOWED_ROOT_FILES = {
+    Path(".gitattributes"),
     Path(".gitignore"),
     Path("AGENTS.md"),
     Path("MTGDeckBuilder.spec"),

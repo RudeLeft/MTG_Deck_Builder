@@ -140,6 +140,7 @@ build_windows.bat        # local Windows verification + build orchestration
 .github/workflows/taxonomy-audit.yml  # scheduled/manual full upstream taxonomy audit
 package_release.py       # mandatory source-release gates, validation, ZIP creation
 .gitignore               # excludes build/dist/build-venv, portable data, caches, archives
+.gitattributes           # pins LF line endings so a Windows checkout cannot rewrite every file
 ```
 
 ## Feature map
@@ -1592,8 +1593,9 @@ rows override broader rows.
   archive and exits nonzero on any failed mandatory gate before the target is
   replaced. _Verification:_ **AUTO**.
 - **REL-002 — MUST:** Include source (`mtgdb/`), build config, assets, tests,
-  `pyproject.toml`, `.gitignore`, and `AGENTS.md` in a source release, with
-  `AGENTS.md` the only documentation member. _Verification:_ **AUTO**.
+  `pyproject.toml`, `.gitignore`, `.gitattributes`, and `AGENTS.md` in a source
+  release, with `AGENTS.md` the only documentation member.
+  _Verification:_ **AUTO**.
 - **REL-003 — MUST NOT:** Include `requirements.txt`, another documentation file,
   `__pycache__`, `.pyc`, `.pytest_cache`, `build`, `dist`, `build-venv`, local
   `data`, logs, databases, cached images, generated PDFs, or another ZIP.

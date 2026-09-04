@@ -1,0 +1,12 @@
+# This project is LF everywhere. Git for Windows sets core.autocrlf=true in its
+# system config, which would rewrite every file to CRLF on checkout and turn an
+# unrelated one-line edit into a whole-file diff. Pinning eol=lf here keeps the
+# working tree and the stored objects identical on every machine.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png  binary
+*.ico  binary
+*.svg  text eol=lf
+*.db   binary
+*.zip  binary
