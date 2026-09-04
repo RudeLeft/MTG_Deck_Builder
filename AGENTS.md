@@ -378,8 +378,9 @@ every feature together and is exempt.
   packages plus `mtgdb.core.*`. A cluster reaching into another feature's logic
   package — a mana-symbol module importing the PDF renderer — is a boundary
   break even where the broad `mtgdb/ui/**` row would permit it. Sibling
-  `mtgdb.ui.*` imports remain unrestricted, and `mtgdb/ui/app.py` is exempt as
-  the composition root. _Verification:_ **AUTO**.
+  `mtgdb.ui.*` imports remain unrestricted. `mtgdb/ui/app.py` is exempt as the
+  composition root, and the empty `mtgdb/ui/__init__.py` holds no imports to
+  place. _Verification:_ **AUTO**.
 
 ## Naming and placement
 

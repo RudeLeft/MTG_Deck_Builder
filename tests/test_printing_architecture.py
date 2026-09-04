@@ -135,7 +135,10 @@ def main():
             "PDF output is complete and atomically replaces its part file": (
                 result.output_path == str(output)
                 and pdf_bytes.startswith(b"%PDF-")
-                and not Path(str(output) + ".part").exists()),
+                # PORT-007 gives the temporary a unique mkstemp name, so
+                # checking for output + ".part" can never fail. Look for any
+                # leftover partial the render should have consumed instead.
+                and not list(output.parent.glob(f".{output.name}.*.part"))),
             "download layout and completion progress remain available": (
                 {stage for stage, *_rest in stages}
                 == {"download", "layout", "done"}
