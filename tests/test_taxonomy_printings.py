@@ -2,6 +2,8 @@
 
 Run anywhere (no GUI/network needed): python tests/test_taxonomy_printings.py
 """
+import shutil
+import atexit
 import json
 import os
 import sys
@@ -77,7 +79,9 @@ def build():
         base("token", "Test Token", "Token Creature — Marker", "15", layout="token"),
         base("emblem", "Test Emblem", "Emblem", "16", layout="emblem"),
     ]
-    db = CardDB(os.path.join(tempfile.mkdtemp(), "cards.db"))
+    workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = CardDB(os.path.join(workspace, "cards.db"))
     for name, values in {
         "card-types": ["Artifact", "Creature", "Enchantment", "Instant", "Land", "Plane", "Planeswalker", "Sorcery"],
         "creature-types": [

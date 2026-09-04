@@ -1,12 +1,16 @@
 """Informational search/discovery benchmark on a synthetic database.
 Not a pass/fail test. Run: python tests/db_benchmark.py [n_rows]"""
+import shutil
+import atexit
 import os, random, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mtgdb.database.db as S
 
 
 def main(n=60000):
-    db = S.CardDB(os.path.join(tempfile.mkdtemp(), "cards.db"))
+    workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = S.CardDB(os.path.join(workspace, "cards.db"))
     TYPES = ["Creature", "Instant", "Sorcery", "Land", "Artifact", "Enchantment"]
     SUBS = ["Goblin", "Elf", "Dragon", "Human Warrior", "Zombie", "Angel"]
     KWS = [["Flying"], ["Trample"], ["Haste"], [], ["Ward"], ["Menace"]]

@@ -157,6 +157,39 @@ def main():
     faced_limit = _card_copy_limit(faced_card, 4)
     faced_text = _legality_oracle_text(faced_card)
 
+    # _FORMAT_RULES copy limits drive user-facing legality verdicts, so pin the
+    # boundary itself: four copies are legal in Constructed and five are not.
+    standard_legal = Deck("Standard Legal", "standard")
+    standard_legal.add(first, "main", 4)
+    standard_four_problems = [
+        problem for problem in legality_problems(standard_legal)
+        if "copies" in problem]
+    standard_over = Deck("Standard Over", "standard")
+    standard_over.add(first, "main", 5)
+    standard_five_problems = [
+        problem for problem in legality_problems(standard_over)
+        if "copies" in problem]
+    # Singleton formats must reject a second copy through the same table.
+    singleton = Deck("Singleton", "commander")
+    singleton.add(first, "main", 2)
+    singleton_problems = [
+        problem for problem in legality_problems(singleton)
+        if "copies" in problem]
+
+    # Deck.add must refuse non-positive quantities: a zero-quantity entry would
+    # count toward unique() but not total() and serialize as "0 Cardname".
+    def _rejects_quantity(value):
+        try:
+            Deck().add(first, "main", value)
+        except ValueError:
+            return True
+        return False
+
+    quantity_guard = (
+        _rejects_quantity(0)
+        and _rejects_quantity(-1)
+        and not _rejects_quantity(1))
+
     illegal = Deck("Illegal", "modern")
     illegal.add(first, "main", 3)
     illegal.add(second, "side", 2)
@@ -270,12 +303,31 @@ def main():
             pips == {"W": 6, "U": 6, "B": 0, "R": 0, "G": 6}
             and sources == {"W": 2, "U": 2, "B": 0, "R": 0, "G": 10}
             and source_total == 12),
+        "format copy limits come from the verified rule table": (
+            standard_four_problems == []
+            and len(standard_five_problems) == 1
+            and "limit 4" in standard_five_problems[0]
+            and len(singleton_problems) == 1
+            and "limit 1" in singleton_problems[0]),
+        "Deck.add refuses non-positive quantities": quantity_guard,
         "probability calculations retain exact formulas": (
             math.isclose(
                 hyper_at_least(60, 4, 7),
                 1 - math.comb(56, 7) / math.comb(60, 7))
+            # Independent closed form, NOT a second call to the function
+            # under test: comparing hyper_between against itself is a tautology
+            # that cannot fail, which previously let an off-by-one in its
+            # summation bounds through undetected.
             and math.isclose(
-                lands[3], hyper_between(18, 10, 7, 2, 4))
+                hyper_between(18, 10, 7, 2, 4),
+                sum(math.comb(10, k) * math.comb(8, 7 - k)
+                    for k in range(2, 5)) / math.comb(18, 7))
+            # The deck-level helper must still route through that formula.
+            and math.isclose(lands[3], hyper_between(18, 10, 7, 2, 4))
+            # Inclusive bounds: a single-value window is one exact term.
+            and math.isclose(
+                hyper_between(18, 10, 7, 3, 3),
+                math.comb(10, 3) * math.comb(8, 4) / math.comb(18, 7))
             and hyper_at_least(0, 4, 7) == 0.0),
         "curve and opening-hand calculations remain complete": (
             type_labels[0] == "Creatures"

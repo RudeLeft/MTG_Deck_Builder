@@ -126,6 +126,42 @@ class _HydrationRepository:
         return self.cards.get(str(card_id))
 
 
+class _ScanCountingStore:
+    """Delegate to a real store while counting full view-index scans.
+
+    The sparse selection path must never walk the 100k view index. Counting the
+    scans proves that structurally, where a wall-clock budget only inferred it
+    and could fail spuriously on a loaded or throttled machine.
+    """
+
+    class _CountingIndex:
+        def __init__(self, index, owner):
+            self._index = index
+            self._owner = owner
+
+        def __iter__(self):
+            self._owner.view_index_scans += 1
+            return iter(self._index)
+
+        def __len__(self):
+            return len(self._index)
+
+        def __getitem__(self, item):
+            return self._index[item]
+
+    def __init__(self, store):
+        self._store = store
+        self.view_index_scans = 0
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    @property
+    def view_index(self):
+        index = self._store.view_index
+        return None if index is None else self._CountingIndex(index, self)
+
+
 class _TaxonomyRepository:
     def __init__(self):
         self.version = "old"
@@ -239,12 +275,12 @@ def main():
     selected = viewport._selected_results()
 
     store.swap_view_index(range(store.logical_count))
-    compact_selection = CompactResultSelection(store)
+    counting_store = _ScanCountingStore(store)
+    compact_selection = CompactResultSelection(counting_store)
     compact_selection.add("p-99999")
-    selection_started = time.perf_counter()
     sparse_visible = compact_selection.visible_count()
     sparse_ids = compact_selection.ids_in_view_order(limit=7)
-    sparse_selection_ms = (time.perf_counter() - selection_started) * 1000.0
+    sparse_view_scans = counting_store.view_index_scans
     sparse_selection_info = compact_selection.diagnostics()
     compact_selection.clear()
     store.reset_view()
@@ -355,7 +391,9 @@ def main():
             sparse_visible == 1
             and sparse_ids == ("p-99999",)
             and sparse_selection_info["sparse_selected"] == 1
-            and sparse_selection_ms < 25.0
+            # O(k), proven structurally: one selected row out of 100k must be
+            # resolved without a single walk of the full view index.
+            and sparse_view_scans == 0
             and dense_selection_info["selected"] == 100_000
             and dense_selection_info["bytes"] <= 12_500
             and dense_selection_info["sparse_selected"] is None),
@@ -371,7 +409,13 @@ def main():
             and vocabulary_direct == ("Common", "Rare")
             and store_info["vocabulary_cache_entries"] >= 1),
         "taxonomy request returns without waiting for repository scans": (
-            first_catalog.kind == "started" and request_elapsed < 0.05),
+            first_catalog.kind == "started"
+            # The fake repository blocks its first card_types() scan on an
+            # unset event for up to 2.0s, so a synchronous request would take
+            # about two seconds. Half of that keeps enormous headroom over the
+            # real sub-millisecond return while still failing loudly if the
+            # call ever starts waiting on the worker.
+            and request_elapsed < 1.0),
         "taxonomy invalidation rejects stale database generations": (
             newest_catalog.kind == "started"
             and catalog_event is not None

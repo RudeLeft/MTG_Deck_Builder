@@ -1,5 +1,7 @@
 """Regression: gzip bulk files parse with indeterminate progress (not a bogus
 determinate total). Guards the gzip magic-byte fix. Run: python tests/test_gzip_progress.py"""
+import shutil
+import atexit
 import gzip, json, os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mtgdb.database.bulk_import import iter_card_objects
@@ -7,6 +9,7 @@ from mtgdb.database.bulk_import import iter_card_objects
 
 def main():
     d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, d, ignore_errors=True)
     cards = [{"object": "card", "id": str(i), "name": f"Card {i}", "set": "x",
               "set_type": "core", "lang": "en", "collector_number": str(i),
               "games": ["paper"], "type_line": "Instant",

@@ -1587,6 +1587,24 @@ rows override broader rows.
 - **VER-005 — MUST:** Run `tests/test_project_guardrails.py` after changing this
   file, dependency metadata, build orchestration, tests, or packaging.
   _Verification:_ **AUTO**.
+- **VER-010 — MUST:** Verify a computed value against an independent expected
+  value: a literal, or a closed form written out in the test. A gate MUST NOT
+  compare the result of the function under test against another call to that
+  same function, because both sides then move together and the assertion passes
+  for every possible defect. This is how an off-by-one in the opening-hand
+  probability summation survived a check labelled "probability calculations
+  retain exact formulas". _Verification:_ **REVIEW**.
+- **VER-011 — MUST:** Remove every temporary directory a test creates, using
+  `tempfile.TemporaryDirectory` or a registered cleanup for the bare
+  `tempfile.mkdtemp` form. The suite runs on every local build, every cloud
+  build, and every source release, so an unmanaged directory leaks a database
+  per run. _Verification:_ **AUTO**.
+- **VER-012 — MUST:** Gate each validation guard with adversarial input, not
+  only with its happy path. A guard that no test attempts to defeat can be
+  deleted without any gate objecting; the card-search projection allow-list,
+  which is the only barrier between caller-supplied column names and the
+  interpolated `SELECT` list, MUST be exercised with rejected input.
+  _Verification:_ **AUTO**.
 - **VER-009 — MUST:** Keep `tests/taxonomy_audit.py --current` capable of
   discovering Scryfall's current `default_cards` bulk export from `/bulk-data`,
   refreshing every trusted Scryfall catalog plus the current official Wizards
@@ -1643,6 +1661,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | SRCH-* | `tests/test_search_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_future_magic.py`, `tests/test_hardening_regressions.py`, `tests/test_multiselect_interactions.py` |
 | DBI-* | `tests/test_database_internals_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
 | DBS-* | `tests/test_database_sync_architecture.py`, `tests/test_hardening_regressions.py` |
+| VER-010 through VER-012 | `tests/test_project_guardrails.py`, `tests/test_deck_architecture.py`, `tests/test_database_internals_architecture.py` |
 | DECK-* | `tests/test_deck_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
 | DUI-*, TBL-* (deck side) | `tests/test_deck_ui_architecture.py`, `tests/test_multiselect_interactions.py`, `tests/test_open_deck_printings_shared.py` |
 | WSP-* | `tests/test_workspace_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |

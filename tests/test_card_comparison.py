@@ -4,6 +4,8 @@ The comparison window no longer derives attribute/normalization data, so this
 guards the schema side: metadata a card carries survives a load/read round trip
 and remains available to the comparison collection.
 """
+import shutil
+import atexit
 import os
 import sys
 import tempfile
@@ -18,7 +20,13 @@ from mtgdb.comparison.models import (
 
 
 def main():
-    db = S.CardDB(os.path.join(tempfile.mkdtemp(), "cards.db"))
+    workspace = tempfile.mkdtemp()
+    # Registered at creation so the directory is removed on every exit path,
+    # including an exception mid-test. Left unmanaged, each suite run
+    # abandoned a database in the system temp folder, and the suite runs on
+    # every local build, every CI build, and every source release.
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = S.CardDB(os.path.join(workspace, "cards.db"))
     db.load_cards([{
         "id": "cmp1", "oracle_id": "oracle1", "name": "Comparison Test",
         "mana_cost": "{2}{W}", "cmc": 3,

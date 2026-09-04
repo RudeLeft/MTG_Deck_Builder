@@ -3,6 +3,8 @@ Synthetic "future Magic" regression test — proves the import→discovery→sea
 pipeline absorbs unknown Scryfall content without code changes or crashes.
 Runs anywhere (no GUI needed):  python tests/test_future_magic.py
 """
+import shutil
+import atexit
 import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mtgdb.database.db as S
@@ -13,7 +15,9 @@ import json
 
 
 def build():
-    db = S.CardDB(os.path.join(tempfile.mkdtemp(), "cards.db"))
+    workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = S.CardDB(os.path.join(workspace, "cards.db"))
     db.load_cards([
         {"object": "card", "id": "n1", "name": "Normal Bear",
          "type_line": "Creature — Bear", "cmc": 2.0, "colors": ["G"],
@@ -80,7 +84,9 @@ def build():
 
 
 def _unknown_set_type_import_fallback():
-    db = S.CardDB(os.path.join(tempfile.mkdtemp(), "import.db"))
+    import_workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, import_workspace, ignore_errors=True)
+    db = S.CardDB(os.path.join(import_workspace, "import.db"))
     db.load_cards([
         {"object": "card", "id": "u1", "name": "Future Choice",
          "type_line": "Artifact", "set": "new", "set_name": "New Product",
@@ -97,7 +103,9 @@ def _unknown_set_type_import_fallback():
 
 
 def _fingerprint_change_detection():
-    db = S.CardDB(os.path.join(tempfile.mkdtemp(), "fingerprint.db"))
+    fingerprint_workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, fingerprint_workspace, ignore_errors=True)
+    db = S.CardDB(os.path.join(fingerprint_workspace, "fingerprint.db"))
     db.load_cards([{
         "object": "card", "id": "b1", "name": "Baseline",
         "type_line": "Creature — Bear", "set": "base", "set_name": "Base",

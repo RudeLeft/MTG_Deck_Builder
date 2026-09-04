@@ -198,13 +198,24 @@ def main():
         "card_faces": json.dumps([{"name": "Fire"}, {"name": "Ice"}]),
     }
     def _auto_rotation(card, face_index):
-        """Return the rotation the service resolves when the caller omits one."""
-        probe = CardImageService(
-            Path(temporary_directory) / f"posture{face_index}",
-            max_workers=0, fetch_bytes=lambda _url: b"")
-        probe.request(card, "https://example.invalid/x.jpg", face_index=face_index)
-        queued = probe._tasks.get_nowait()
-        return queued[2][6]
+        """Return the rotation the service resolves when the caller omits one.
+
+        This runs after the enclosing TemporaryDirectory has already been
+        cleaned up, so it must not build a cache under `temporary_directory`:
+        CardImageService creates its cache directory on construction, which
+        silently resurrected the deleted tree and left it behind on every run.
+        """
+        with tempfile.TemporaryDirectory() as posture_directory:
+            probe = CardImageService(
+                Path(posture_directory) / f"posture{face_index}",
+                max_workers=0, fetch_bytes=lambda _url: b"")
+            try:
+                probe.request(
+                    card, "https://example.invalid/x.jpg", face_index=face_index)
+                queued = probe._tasks.get_nowait()
+                return queued[2][6]
+            finally:
+                probe.shutdown()
 
     def _zoom_title(text, available):
         """Fit a title with a deterministic 10px-per-character stand-in font."""

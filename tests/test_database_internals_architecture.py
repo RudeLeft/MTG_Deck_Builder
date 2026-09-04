@@ -97,9 +97,36 @@ def main():
             and len(db.search(subtypes=["Time Lord"], fmt="modern")) == 1
             and "Time Lord" in db.subtypes()
             and ("Flying", "Keyword ability") in db.keyword_catalog())
+
+        # The projection allow-list is the only thing between caller-supplied
+        # column names and the interpolated SELECT list, so exercise it with
+        # adversarial input rather than trusting it exists.
+        def _projection_rejected(columns):
+            try:
+                db.search(columns=columns)
+            except ValueError:
+                return True
+            return False
+
+        valid_projection = [
+            row["name"] for row in db.search(columns=("id", "name"))]
+        projection_guarded = (
+            valid_projection == ["Architecture Card"]
+            # Unknown column.
+            and _projection_rejected(("id", "not_a_column"))
+            # SQL smuggled through the projection.
+            and _projection_rejected(("id", "name FROM cards; DROP TABLE cards --"))
+            and _projection_rejected(("*",))
+            and _projection_rejected(("(SELECT 1)",))
+            # An empty projection must not silently become SELECT *.
+            and _projection_rejected(())
+            # The guard must not have destroyed the table it protects.
+            and db.count() == 1)
         db.close()
 
     checks = {
+        "search projection rejects columns outside the allow-list": (
+            projection_guarded),
         "schema version and columns survive extraction": (
             schema_version == str(_SCHEMA_VERSION) == "10"
             and table_columns == _CARD_COLUMN_NAMES),

@@ -169,6 +169,27 @@ def _internal_import_allowed(module, imported):
     return False
 
 
+def _unmanaged_temp_directories():
+    """Return test files whose tempfile.mkdtemp() has no registered cleanup.
+
+    The suite runs on every local build, every cloud build, and every source
+    release, so an unmanaged directory leaks a database per run. A managed call
+    either uses tempfile.TemporaryDirectory or registers rmtree cleanup.
+    """
+    offenders = []
+    for path in sorted((ROOT / "tests").glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if "tempfile.mkdtemp(" not in source:
+            continue
+        managed = (
+            "atexit.register(shutil.rmtree" in source
+            or "shutil.rmtree(" in source
+            or "TemporaryDirectory(" in source)
+        if not managed:
+            offenders.append(path.name)
+    return offenders
+
+
 def main():
     members = P.source_members()
     unauthorized = P.unauthorized_documents(members)
@@ -1074,6 +1095,8 @@ def main():
             and not P.unauthorized_directories({Path("mtgdb/main.py")})),
         "local build rebuilds the dependency environment": (
             'rmdir /s /q "build-venv"' in build_script),
+        "VER-011 tests clean up every temporary directory they create": (
+            _unmanaged_temp_directories() == []),
         "source archive uses stable root and exact membership validation": (
             P.ARCHIVE_ROOT == "MTG_Deck_Builder"
             and "actual != expected" in (ROOT / "package_release.py").read_text(encoding="utf-8")
