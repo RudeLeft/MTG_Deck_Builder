@@ -1,0 +1,272 @@
+"""Workspace repository, deck-session lifecycle, and UI adapter contracts."""
+
+import ast
+import json
+from pathlib import Path
+import tempfile
+import sys
+
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from mtgdb.deck.model import Deck
+from mtgdb.deck.sessions import DeckSession, DeckSessionManager
+from mtgdb.search.results import SearchResultStore
+from mtgdb.ui.search import SearchFeatureMixin
+from mtgdb.workspace.repository import WorkspaceRepository
+
+
+class Clock:
+    def __init__(self, value=1_700_000_000):
+        self.value = float(value)
+
+    def __call__(self):
+        return self.value
+
+    def advance(self, seconds=1):
+        self.value += seconds
+
+
+def _card(card_id="printing-a", name="Test Card"):
+    return {
+        "id": card_id,
+        "oracle_id": "oracle-a",
+        "name": name,
+        "set_code": "tst",
+        "collector_number": "7",
+        "type_line": "Creature",
+        "cmc": 2,
+        "mana_cost": "{1}{G}",
+    }
+
+
+def _class_methods(source, class_name):
+    tree = ast.parse(source)
+    cls = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == class_name)
+    return cls, {
+        node.name for node in cls.body if isinstance(node, ast.FunctionDef)}
+
+
+class _Value:
+    def __init__(self, value=""):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+
+class _PendingSelectionOwner:
+    def __init__(self):
+        self._pending_result_restore_id = "printing-b"
+        self._cards = [_card("printing-a"), _card("printing-b")]
+        self._result_store = SearchResultStore.from_rows(self._cards)
+        self.selected_id = None
+        self.shown = None
+
+    def _result_select_card_id(self, card_id, ensure_visible=True):
+        self.selected_id = card_id
+        return self._result_store.view_position_for_id(card_id) is not None
+
+    def _selected_result(self):
+        return next(
+            (card for card in self._cards if card["id"] == self.selected_id), None)
+
+    def _show_card(self, card):
+        self.shown = card
+
+
+
+def main():
+    first = Deck("First", "modern")
+    first.add(_card(), "main", 3)
+    second = Deck("Second", "commander")
+    second.add(_card("printing-b", "Other Card"), "side", 1)
+
+    session_a = DeckSession(
+        first, path="first.txt", dirty=True,
+        selected=["printing-a", "main"],
+        filters={"main": {"name": "Test"}, "side": {}},
+        sorts={"main": ["name", True], "side": [None, False]},
+    )
+    session_b = DeckSession(second)
+    manager = DeckSessionManager([session_a, session_b], active_index=1)
+    manager.activate(0)
+    activated_first = manager.active is session_a
+    appended_index = manager.append(DeckSession(Deck("Third", "vintage")))
+    removed = manager.remove(1)
+    manager.remove(1)
+    manager.remove(0)
+    default_after_last_close = (
+        len(manager) == 1 and manager.active_index == 0
+        and manager.active.deck.name == "Untitled Deck")
+
+
+    pending_owner = _PendingSelectionOwner()
+    SearchFeatureMixin._restore_pending_result_selection(pending_owner)
+
+    malformed = DeckSession(
+        Deck(), path=42, selected=["printing-a", "invalid"],
+        filters={"main": [], "side": "bad"},
+        sorts={"main": [], "side": ["qty"]},
+    )
+
+    with tempfile.TemporaryDirectory() as temporary:
+        clock = Clock()
+        repository = WorkspaceRepository(
+            temporary, recovery_interval=30, recovery_keep=8, clock=clock)
+        persisted_manager = DeckSessionManager(
+            [session_a, session_b], active_index=1)
+        payload = repository.build_payload(
+            persisted_manager, persisted_manager.active_index,
+            search={"name": "bolt", "had_results": True},
+            geometry={"boards": [520]},
+        )
+        first_save = repository.save(payload)
+        clock.advance(5)
+        same_payload = dict(payload, saved_at=clock())
+        unchanged_save = repository.save(same_payload)
+
+        serialized = repository.session_to_data(session_a)
+        restored = repository.session_from_data(serialized)
+        fresh = dict(_card(), artist="Fresh Artist")
+        restored_fresh = repository.deck_from_data(
+            serialized["deck"], lambda card_id: fresh
+            if card_id == "printing-a" else None)
+
+        for index in range(10):
+            clock.advance(1)
+            snapshot_payload = dict(
+                payload, saved_at=clock(), search={"snapshot": index})
+            repository.save(snapshot_payload, force=True, recovery=True)
+        recovery_files = sorted(repository.recovery_dir.glob("session_*.json"))
+        temporary_files = list(Path(temporary).rglob("*.tmp"))
+
+        repository.session_path.write_text("{broken", encoding="utf-8")
+        recovered_payload = repository.load()
+        repository.session_path.write_text(
+            json.dumps({"version": 1, "decks": "invalid"}),
+            encoding="utf-8")
+        invalid_candidate = repository.read_candidate(repository.session_path)
+
+    sources = {
+        name: (ROOT / name).read_text(encoding="utf-8")
+        for name in (
+            "mtgdb/ui/app.py", "mtgdb/ui/deck.py", "mtgdb/ui/search.py",
+            "mtgdb/ui/results.py", "mtgdb/ui/workspace.py", "mtgdb/deck/sessions.py",
+            "mtgdb/workspace/repository.py",
+        )
+    }
+    gui_class, gui_methods = _class_methods(sources["mtgdb/ui/app.py"], "DeckBuilderApp")
+    _, workspace_methods = _class_methods(
+        sources["mtgdb/ui/workspace.py"], "WorkspaceMixin")
+    gui_bases = {
+        base.id for base in gui_class.bases if isinstance(base, ast.Name)}
+
+    workspace_owned = {
+        "_initialize_workspace", "_workspace_geometry_state",
+        "_workspace_snapshot", "_save_workspace_session",
+        "_schedule_workspace_autosave", "_restore_workspace_session_async",
+        "_apply_workspace_restore", "_restore_workspace_geometry",
+    }
+    combined_core = sources["mtgdb/deck/sessions.py"] + sources["mtgdb/workspace/repository.py"]
+    production_sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in ROOT.glob("*.py")
+    }
+    checks = {
+        "session manager owns active-index lifecycle": (
+            activated_first and appended_index == 2
+            and removed is session_b and default_after_last_close),
+        "session state sanitizes malformed persisted views": (
+            malformed.path is None and malformed.selected is None
+            and malformed.filters == {"main": {}, "side": {}}
+            and malformed.sorts == {
+                "main": [None, False], "side": [None, False]}),
+        "workspace payload preserves deck sessions and exact printings": (
+            payload["version"] == 1 and payload["active_deck"] == 1
+            and len(payload["decks"]) == 2
+            and payload["decks"][0]["deck"]["entries"][0]["card"]["id"]
+            == "printing-a"
+            and payload["decks"][0]["dirty"] is True
+            and payload["decks"][0]["selected"] == ["printing-a", "main"]),
+        "session round trip preserves independent view state": (
+            restored.deck.name == "First" and restored.deck.total("main") == 3
+            and restored.path == "first.txt" and restored.dirty
+            and restored.selected == ("printing-a", "main")
+            and restored.filters["main"] == {"name": "Test"}
+            and restored.sorts["main"] == ["name", True]),
+        "workspace restore prefers fresh exact-printing metadata": (
+            restored_fresh.entries("main")[0]["card"]["artist"]
+            == "Fresh Artist"),
+        "unchanged autosave avoids rewriting the session": (
+            first_save.wrote_session and first_save.wrote_recovery
+            and not unchanged_save.wrote_session
+            and not unchanged_save.wrote_recovery),
+        "atomic writes leave no temporary files": not temporary_files,
+        "recovery history remains bounded": len(recovery_files) == 8,
+        "corrupt primary falls back to newest valid recovery": (
+            recovered_payload is not None
+            and recovered_payload["search"] == {"snapshot": 9}),
+        "invalid workspace payload is rejected": invalid_candidate is None,
+        "workspace core is Tk, SQLite, and UI free": all(
+            marker not in combined_core for marker in (
+                "tkinter", "sqlite3", "from ui_", "import ui_")),
+        "workspace adapter owns only retained board-sash geometry and autosave coordination": (
+            workspace_owned <= workspace_methods
+            and '(("boards", getattr(self, "_boards_panes", None)),)'
+                in sources["mtgdb/ui/workspace.py"]
+            and '"_main_panes"' not in sources["mtgdb/ui/workspace.py"]
+            and '"_middle_panes"' not in sources["mtgdb/ui/workspace.py"]),
+        "search feature owns its workspace capture and restore contract": (
+            "def _capture_search_workspace_state(" in sources["mtgdb/ui/search.py"]
+            and "def _restore_search_workspace_state(" in sources["mtgdb/ui/search.py"]
+            and "q_name" not in sources["mtgdb/ui/workspace.py"]
+            and "card_type_vars" not in sources["mtgdb/ui/workspace.py"]),
+        "workspace result selection waits for the logical Results view": (
+            pending_owner._pending_result_restore_id is None
+            and pending_owner.selected_id == "printing-b"
+            and pending_owner.shown["id"] == "printing-b"
+            and "self._restore_pending_result_selection()"
+            in sources["mtgdb/ui/results.py"]
+            and "selected_result_id" not in sources["mtgdb/ui/workspace.py"]),
+        "DeckBuilderApp delegates workspace UI ownership": (
+            "WorkspaceMixin" in gui_bases
+            and not workspace_owned & gui_methods),
+        "workspace adapter performs no direct file persistence": all(
+            marker not in sources["mtgdb/ui/workspace.py"] for marker in (
+                "open(", "json.dump", "json.load", "os.replace",
+                "os.remove", ".unlink(",
+            )),
+        "all production modules use typed deck sessions": all(
+            marker not in source
+            for source in production_sources.values()
+            for marker in ("_deck_sessions", "_active_deck_session")),
+        "application close retains forced recovery save": (
+            "def _on_app_close(" in sources["mtgdb/ui/app.py"]
+            and "self._save_workspace_session(force=True, recovery=True)"
+            in sources["mtgdb/ui/app.py"]),
+        "autosave starts only after asynchronous workspace restore finishes": (
+            "self._workspace_loaded = True" not in sources["mtgdb/ui/app.py"]
+            and "self._schedule_workspace_autosave()" not in sources["mtgdb/ui/app.py"]
+            and "def _finish_workspace_initialization(" in sources["mtgdb/ui/workspace.py"]
+            and "self._workspace_loaded = True" in sources["mtgdb/ui/workspace.py"]
+            and "self._schedule_workspace_autosave()" in sources["mtgdb/ui/workspace.py"]),
+        "workspace shutdown joins the background restore loader": (
+            "workspace_load_worker.shutdown(" in sources["mtgdb/ui/workspace.py"]
+            and '"_workspace_load_after"' in sources["mtgdb/ui/app.py"]
+            and "def shutdown(self, timeout=None):" in sources["mtgdb/workspace/repository.py"]),
+    }
+
+    ok = True
+    for label, passed in checks.items():
+        print(f"  [{'PASS' if passed else 'FAIL'}] {label}")
+        ok &= bool(passed)
+    print("\nWORKSPACE ARCHITECTURE:", "ALL PASS" if ok else "FAILURES")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

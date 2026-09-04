@@ -1,0 +1,83 @@
+name: Build Windows App
+
+# Build the portable Windows ONEDIR app without needing a Windows machine of your own.
+# Trigger it manually from the repo's Actions tab (Run workflow), or it
+# runs automatically when you push a version tag like v1.0.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*'
+
+# One build per ref. A superseded run is cancelled instead of competing for
+# runners with the run that replaced it.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match the version used for local builds so the packaged runtime is
+          # the one actually exercised during development.
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install ".[build]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path "mtg_deck_builder.egg-info") {
+            Remove-Item -Recurse -Force "mtg_deck_builder.egg-info"
+          }
+
+      - name: Run compilation and cross-platform guardrails
+        shell: pwsh
+        run: |
+          python -m compileall -q mtgdb tests windows_tests package_release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem -Path tests -Filter "test_*.py" |
+            Sort-Object Name |
+            ForEach-Object {
+              python $_.FullName
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+
+      - name: Run Windows pre-build guardrails
+        shell: pwsh
+        run: |
+          python windows_tests/test_single_instance_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python windows_tests/test_ui_geometry_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python windows_tests/test_app_startup_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build the portable app
+        run: pyinstaller MTGDeckBuilder.spec --noconfirm
+
+      - name: Run packaged portability smoke test
+        run: python windows_tests/smoke_packaged_windows.py
+
+      - name: Upload the portable app as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MTGDeckBuilder-windows
+          # The smoke test removes dist/MTGDeckBuilder/data after it runs. This
+          # exclusion is a second line of defence: a runtime database or a saved
+          # session must never be published inside the program artifact.
+          path: |
+            dist/MTGDeckBuilder/
+            !dist/MTGDeckBuilder/data/
+          if-no-files-found: error
+          retention-days: 30

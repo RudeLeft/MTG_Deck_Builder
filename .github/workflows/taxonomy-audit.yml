@@ -1,0 +1,36 @@
+name: Full Scryfall Taxonomy Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 11 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  taxonomy-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install -e .
+
+      - name: Audit current Scryfall Default Cards snapshot
+        run: python tests/taxonomy_audit.py --current --report taxonomy-audit.md
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scryfall-taxonomy-audit
+          path: taxonomy-audit.md
+          if-no-files-found: warn

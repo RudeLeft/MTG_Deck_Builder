@@ -1,0 +1,17 @@
+# Build and packaging output
+build/
+build-venv/
+dist/
+*.egg-info/
+
+# Portable runtime data: databases, cached images, logs, workspace state.
+# This is created by the application, never by a developer.
+data/
+
+# Python bytecode and tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Release archives
+*.zip
