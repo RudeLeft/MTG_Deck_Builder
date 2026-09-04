@@ -35,6 +35,8 @@ class SearchCriteria:
     keyword_mode: str = "any"
     colors: tuple[str, ...] = ()
     color_mode: str = "within"
+    produces: tuple[str, ...] = ()
+    produces_mode: str = "includes"
     cmc_min: float | None = None
     cmc_max: float | None = None
     power_min: float | None = None
@@ -55,7 +57,7 @@ class SearchCriteria:
         data = dict(values)
         tuple_fields = {
             "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-            "colors", "rarities", "content_types",
+            "colors", "produces", "rarities", "content_types",
         }
         optional_tuple_fields = {"set_codes", "set_types"}
         for name in tuple_fields:
@@ -75,7 +77,7 @@ class SearchCriteria:
         values = {field.name: getattr(self, field.name) for field in fields(self)}
         for name in (
                 "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-                "colors", "rarities", "content_types"):
+                "colors", "produces", "rarities", "content_types"):
             values[name] = list(values[name])
         for name in ("set_codes", "set_types"):
             if values[name] is not None:

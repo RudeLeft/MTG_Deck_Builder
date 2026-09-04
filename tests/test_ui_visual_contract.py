@@ -230,7 +230,7 @@ def main():
     search_pack = gui_source.find('search_actions.pack(side="left")')
     advanced_format_rarity_alignment = all(fragment in sources["search.py"] for fragment in (
         'self._build_format_rarity_filters(',
-        'self._advanced_filters_frame, format_row=3, rarity_row=4)',
+        'self._advanced_filters_frame, format_row=4, rarity_row=5)',
         'row=format_row, column=1, sticky="ew", pady=2',
         'row=rarity_row, column=1, sticky="ew", pady=2',
     ))

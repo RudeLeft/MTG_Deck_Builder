@@ -101,10 +101,53 @@ def main():
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         db = CardDB(os.path.join(temporary_directory, "cards.db"))
+        # SRCH-033. Produced mana is a different axis from colour identity,
+        # and the stored encoding is alphabetical while COLORS is WUBRG, so an
+        # exact match has to sort. Model the three cards that make the
+        # distinction real.
         db.load_cards([
             _card("1", "First Bird"),
             _card("2", "Second Bird", "Vigilance"),
+            dict(_card("3", "Birds of Paradise"), color_identity=["G"],
+                 colors=["G"], type_line="Creature — Bird",
+                 produced_mana=["W", "U", "B", "R", "G"]),
+            dict(_card("4", "Command Tower"), color_identity=[], colors=[],
+                 type_line="Land", mana_cost="", cmc=0,
+                 produced_mana=["W", "U", "B", "R", "G"]),
+            dict(_card("5", "Sol Ring"), color_identity=[], colors=[],
+                 type_line="Artifact", produced_mana=["C"]),
+            dict(_card("6", "Azorius Signet"), color_identity=[], colors=[],
+                 type_line="Artifact", produced_mana=["W", "U"]),
+            # Identity supplied in WUBRG order, stored alphabetically: an exact
+            # match only works if both import and query agree on the ordering.
+            dict(_card("7", "Azorius Charm"), color_identity=["W", "U"],
+                 colors=["W", "U"], type_line="Instant", produced_mana=[]),
         ])
+
+        def _produces(values, mode):
+            return {row["name"] for row in db.search(
+                produces=list(values), produces_mode=mode,
+                columns=("id", "name"))}
+
+        produces_ignores_identity = (
+            "Birds of Paradise" in _produces(("W",), "includes")
+            and "Command Tower" in _produces(("W",), "includes")
+            and "First Bird" not in _produces(("W",), "includes"))
+        produces_exact_sorts_the_needle = (
+            _produces(("W", "U"), "exact") == {"Azorius Signet"})
+        produces_within_excludes_wider_sources = (
+            "Azorius Signet" in _produces(("W", "U"), "within")
+            and "Birds of Paradise" not in _produces(("W", "U"), "within")
+            and "First Bird" not in _produces(("W", "U"), "within"))
+        produces_treats_colorless_as_a_member = (
+            _produces(("C",), "includes") == {"Sol Ring"})
+        empty_produces_filters_nothing = (
+            len(_produces((), "includes")) == 7)
+        # The same helper serves colour identity, where an exact multi-colour
+        # request previously built "W,U" against stored "U,W" and matched none.
+        identity_exact_multicolor = {row["name"] for row in db.search(
+            colors=["W", "U"], color_mode="exact", columns=("id", "name"))}
+
         repository = SearchRepository(db)
         reader = repository.open_reader()
         try:
@@ -204,6 +247,30 @@ def main():
         and _edit((), "", "Forest") == ((), ""))
 
     checks = {
+        "Produces is captured, cleared, and restored with the other criteria": (
+            "produces_mode=self.q_produces_mode.get()," in search_source
+            and "produces=[value for value, variable in self.produces_vars.items()"
+                in search_source
+            and 'self.q_produces_mode.set("includes")' in search_source
+            and "for variable in self.produces_vars.values():" in search_source
+            and '"produces_mode": self.q_produces_mode.get(),' in search_source
+            and '"produces": [key for key, variable in self.produces_vars.items()'
+                in search_source
+            and 'wanted_produces = {str(value) for value in state.get("produces", [])}'
+                in search_source
+            and 'f"Produces ({self.q_produces_mode.get()}): "' in search_source),
+        "produced mana is filtered independently of colour identity": (
+            produces_ignores_identity),
+        "exact produced mana sorts the requested set": (
+            produces_exact_sorts_the_needle),
+        "within produced mana excludes wider sources": (
+            produces_within_excludes_wider_sources),
+        "colourless produced mana is an explicit member": (
+            produces_treats_colorless_as_a_member),
+        "an empty produces selection filters nothing": (
+            empty_produces_filters_nothing),
+        "exact multicolour identity matches stored ordering": (
+            identity_exact_multicolor == {"Azorius Charm"}),
         "editing the Name field drops a stale exact-name batch": _name_batch_ok,
         "criteria signatures normalize equivalent snapshots": (
             criteria.signature() == same.signature()),
@@ -279,14 +346,16 @@ def main():
             'self._pending_search_request = False' in search_source
             and 'set_count = getattr(self, "_set_result_count", None)' in search_source
             and 'text="RESULTS | Trusted filters unavailable"' in search_source),
-        "Rules Text Subtype Format Rarity and Printings share the Advanced grid": (
+        "Produces Rules Text Subtype Format Rarity and Printings share the Advanced grid": (
             'text="Active Filters"' not in search_source
             and 'self._build_advanced_filters(parent)' in search_source
-            and 'self._build_rules_text_filter(\n            self._advanced_filters_frame, row=1, advanced=True)' in search_source
-            and 'text="Subtype").grid(\n            row=2' in search_source
-            and 'self._build_format_rarity_filters(\n            self._advanced_filters_frame, format_row=3, rarity_row=4)'
+            and 'self._build_produces_filter(self._advanced_filters_frame, row=1)'
                 in search_source
-            and 'self._build_printing_filter(self._advanced_filters_frame, row=5)'
+            and 'self._build_rules_text_filter(\n            self._advanced_filters_frame, row=2, advanced=True)' in search_source
+            and 'text="Subtype").grid(\n            row=3' in search_source
+            and 'self._build_format_rarity_filters(\n            self._advanced_filters_frame, format_row=4, rarity_row=5)'
+                in search_source
+            and 'self._build_printing_filter(self._advanced_filters_frame, row=6)'
                 in search_source
             and 'printing = ttk.Frame(self._advanced_filters_frame)' not in search_source
             and 'row=row, column=1, sticky="ew", pady=2' in printings_source),

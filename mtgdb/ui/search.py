@@ -211,6 +211,48 @@ class SearchFeatureMixin:
             self._add_tooltip(radio, color_mode_help[value], wraplength=390)
 
 
+    def _build_produces_filter(self, parent, row):
+        """Mana a card can actually produce, distinct from its colour identity.
+
+        Deliberately a twin of the Colors control: the same pip checkboxes and
+        the same within/contains/exactly modes, because the two filters read
+        the same comma-joined WUBRG(+C) encoding. Only the default mode differs
+        -- "contains" answers the mana-base question people actually ask.
+        """
+        ttk.Label(parent, text="Produces").grid(
+            row=row, column=0, sticky="nw", padx=(0, 8), pady=2)
+        wrap = ttk.Frame(parent)
+        wrap.grid(row=row, column=1, sticky="ew", pady=2)
+        box = ttk.Frame(wrap)
+        box.pack(fill="x")
+        self.produces_vars = {}
+        for color in (*COLORS, "C"):
+            variable = tk.BooleanVar(value=False)
+            self.produces_vars[color] = variable
+            kw = {"text": " " + MANA_NAMES[color], "variable": variable,
+                  "style": "Color.TCheckbutton",
+                  "command": self._update_search_filter_summary}
+            if self.pips.get(color):
+                kw["image"] = self.pips[color]
+                kw["compound"] = "left"
+            ttk.Checkbutton(box, **kw).pack(side="left", padx=(0, 8))
+        mode = ttk.Frame(wrap)
+        mode.pack(fill="x", pady=(2, 0))
+        ttk.Label(mode, text="Produces mana:", style="Muted.TLabel").pack(side="left")
+        self.q_produces_mode = tk.StringVar(value="includes")
+        help_text = {
+            "within": "Within: everything the card produces must fit inside the selected colors.",
+            "includes": "Contains: the card must produce every selected color and may produce others.",
+            "exact": "Exactly: the card must produce exactly the selected colors.",
+        }
+        for label, value in (("Within", "within"), ("Contains", "includes"),
+                             ("Exactly", "exact")):
+            radio = ttk.Radiobutton(
+                mode, text=label, variable=self.q_produces_mode, value=value,
+                command=self._update_search_filter_summary)
+            radio.pack(side="left", padx=(3, 0))
+            self._add_tooltip(radio, help_text[value], wraplength=390)
+
     def _configure_zero_start_spinbox(self, spin):
         def mouse(event):
             if spin.get().strip():
@@ -369,27 +411,28 @@ class SearchFeatureMixin:
         self._advanced_filters_frame.columnconfigure(1, weight=1)
 
         self._build_content_filter(self._advanced_filters_frame)
+        self._build_produces_filter(self._advanced_filters_frame, row=1)
         self._build_rules_text_filter(
-            self._advanced_filters_frame, row=1, advanced=True)
+            self._advanced_filters_frame, row=2, advanced=True)
         ttk.Label(self._advanced_filters_frame, text="Subtype").grid(
-            row=2, column=0, sticky="w", padx=(0, 8), pady=2)
+            row=3, column=0, sticky="w", padx=(0, 8), pady=2)
         self._selected_subtypes = set()
         self._subtype_catalog = []
         self.q_subtype_mode = tk.StringVar(value="any")
         subtypebox = ttk.Frame(self._advanced_filters_frame)
-        subtypebox.grid(row=2, column=1, sticky="ew", pady=2)
+        subtypebox.grid(row=3, column=1, sticky="ew", pady=2)
         self._subtype_btn = AppButton(
             subtypebox, text="Any", role="picker",
             command=self._choose_subtypes)
         self._subtype_btn.pack(fill="x", expand=True)
 
         self._build_format_rarity_filters(
-            self._advanced_filters_frame, format_row=3, rarity_row=4)
+            self._advanced_filters_frame, format_row=4, rarity_row=5)
 
         # Keep Printings on the same outer label/control grid as Rules Text
         # and Subtype. A nested two-column frame gives its label a different
         # natural width and visibly pushes the picker to the right.
-        self._build_printing_filter(self._advanced_filters_frame, row=5)
+        self._build_printing_filter(self._advanced_filters_frame, row=6)
 
         # Each picker summarizes itself; there is no duplicate aggregate
         # Active Filters line above the Search actions.
@@ -605,6 +648,7 @@ class SearchFeatureMixin:
         self.q_subtype_mode.set("any")
         self.q_keyword_mode.set("any")
         self.q_color_mode.set("within")
+        self.q_produces_mode.set("includes")
         for variable in self.card_type_vars.values():
             variable.set(False)
         for variable in self.property_vars.values():
@@ -619,6 +663,8 @@ class SearchFeatureMixin:
                        self.q_power_max, self.q_toughness_min, self.q_toughness_max):
             widget.delete(0, "end")
         for variable in self.color_vars.values():
+            variable.set(False)
+        for variable in self.produces_vars.values():
             variable.set(False)
         self.q_format.set("")
         self._format_btn.configure(text="Any")
@@ -986,6 +1032,11 @@ class SearchFeatureMixin:
         colors = [value for value, variable in self.color_vars.items() if variable.get()]
         if colors:
             parts.append(f"Colors ({self.q_color_mode.get()}): " + "".join(colors))
+        produces = [value for value, variable in self.produces_vars.items()
+                    if variable.get()]
+        if produces:
+            parts.append(
+                f"Produces ({self.q_produces_mode.get()}): " + "".join(produces))
         if self._selected_keywords:
             parts.append("Mechanics: " + ", ".join(sorted(self._selected_keywords)))
         rules = self.q_rules.values(commit_pending=False) if hasattr(self, "q_rules") else []
@@ -1072,9 +1123,12 @@ class SearchFeatureMixin:
             "subtype_mode": self.q_subtype_mode.get(),
             "keyword_mode": self.q_keyword_mode.get(),
             "color_mode": self.q_color_mode.get(),
+            "produces_mode": self.q_produces_mode.get(),
             "card_types": card_types,
             "supertypes": supertypes,
             "colors": [key for key, variable in self.color_vars.items() if variable.get()],
+            "produces": [key for key, variable in self.produces_vars.items()
+                         if variable.get()],
             "subtypes": subtypes,
             "keywords": keywords,
             "rarities": rarities,
@@ -1159,6 +1213,8 @@ class SearchFeatureMixin:
             (self.q_subtype_mode, state.get("subtype_mode"), {"all", "any"}, "any"),
             (self.q_keyword_mode, state.get("keyword_mode"), {"all", "any"}, "any"),
             (self.q_color_mode, state.get("color_mode"), {"within", "includes", "exact"}, "within"),
+            (self.q_produces_mode, state.get("produces_mode"),
+             {"within", "includes", "exact"}, "includes"),
         )
         for variable, value, allowed, default in safe_modes:
             variable.set(value if value in allowed else default)
@@ -1166,6 +1222,10 @@ class SearchFeatureMixin:
         wanted_colors = {str(value) for value in state.get("colors", [])}
         for key, variable in self.color_vars.items():
             variable.set(key in wanted_colors)
+
+        wanted_produces = {str(value) for value in state.get("produces", [])}
+        for key, variable in self.produces_vars.items():
+            variable.set(key in wanted_produces)
 
         for widget, key in (
             (self.q_cmc_min, "cmc_min"), (self.q_cmc_max, "cmc_max"),
@@ -1286,6 +1346,9 @@ class SearchFeatureMixin:
             keywords=sorted(self._selected_keywords), keyword_mode=self.q_keyword_mode.get(),
             colors=[value for value, variable in self.color_vars.items() if variable.get()],
             color_mode=self.q_color_mode.get(),
+            produces=[value for value, variable in self.produces_vars.items()
+                      if variable.get()],
+            produces_mode=self.q_produces_mode.get(),
             cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
             power_min=numeric["power_min"], power_max=numeric["power_max"],
             toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],

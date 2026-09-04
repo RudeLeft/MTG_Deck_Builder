@@ -147,26 +147,59 @@ class SearchQueryBuilder:
         self.clauses.append("(" + joiner.join(sql_expr for _ in clean) + ")")
         self.params.extend(clean)
 
+    def _add_color_set_filter(self, column, selected, mode, members):
+        """Filter one comma-joined WUBRG(+C) column by within/includes/exact.
+
+        ``color_identity`` and ``produced_mana`` share this encoding, so both
+        filters share one implementation rather than drifting apart.
+
+        Stored values are joined in alphabetical order (``B,G,R,U,W``) while
+        ``COLORS`` is in WUBRG order, so an exact match MUST sort the requested
+        set. Building the needle in COLORS order made every multi-colour
+        "Exactly" search silently return nothing.
+        """
+        if not selected:
+            return
+        if mode == "includes":
+            for color in selected:
+                self.clauses.append(f"{column} LIKE ?")
+                self.params.append(f"%{color}%")
+        elif mode == "exact":
+            self.clauses.append(f"COALESCE({column}, '') = ?")
+            self.params.append(",".join(sorted(selected)))
+        else:
+            for color in members:
+                if color not in selected:
+                    self.clauses.append(f"{column} NOT LIKE ?")
+                    self.params.append(f"%{color}%")
+
     def add_color_filter(self, colors, color_mode):
+        """Filter by colour identity, where colourless is an empty identity."""
         requested = [color for color in (colors or []) if color in (*COLORS, "C")]
         selected = [color for color in requested if color in COLORS]
-        wants_colorless = "C" in requested
         if selected:
-            if color_mode == "includes":
-                for color in selected:
-                    self.clauses.append("color_identity LIKE ?")
-                    self.params.append(f"%{color}%")
-            elif color_mode == "exact":
-                self.clauses.append("COALESCE(color_identity, '') = ?")
-                self.params.append(",".join(
-                    color for color in COLORS if color in selected))
-            else:
-                for color in COLORS:
-                    if color not in selected:
-                        self.clauses.append("color_identity NOT LIKE ?")
-                        self.params.append(f"%{color}%")
-        elif wants_colorless:
+            self._add_color_set_filter(
+                "color_identity", selected, color_mode, COLORS)
+        elif "C" in requested:
             self.clauses.append("COALESCE(color_identity, '') = ''")
+
+    def add_produces_filter(self, produces, produces_mode):
+        """Filter by the mana a card can actually produce.
+
+        Distinct from colour identity: Birds of Paradise has identity ``G`` and
+        produces every colour, and Command Tower has no identity at all. Here
+        colourless is a real member stored inline as ``C`` (``B,C,G``) rather
+        than an empty value, so it participates like any other colour.
+        """
+        members = (*COLORS, "C")
+        selected = [color for color in (produces or []) if color in members]
+        if not selected:
+            return
+        self._add_color_set_filter(
+            "produced_mana", selected, produces_mode, members)
+        if produces_mode != "exact":
+            # "within" alone would match the 99k cards that produce nothing.
+            self.clauses.append("COALESCE(produced_mana, '') != ''")
 
     def add_numeric_filters(self, cmc_min, cmc_max, power_min, power_max,
                             toughness_min, toughness_max):
@@ -295,7 +328,8 @@ class CardSearchQueryMixin:
                supertypes=None, supertype_mode="all", characteristics=None,
                characteristic_mode="all", subtypes=None,
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
-               color_mode="within", cmc_min=None, cmc_max=None, power_min=None,
+               color_mode="within", produces=None, produces_mode="includes",
+               cmc_min=None, cmc_max=None, power_min=None,
                power_max=None, toughness_min=None, toughness_max=None, rarity="",
                rarities=None, fmt="", set_code="", set_codes=None, set_types=None,
                lang="", paper_only=False, limit=None, exclude_art=True, show_tokens=True,
@@ -332,6 +366,7 @@ class CardSearchQueryMixin:
             card_types, card_type_mode, supertypes, supertype_mode,
             subtypes, subtype_mode, keywords, keyword_mode, type_line)
         builder.add_color_filter(colors, color_mode)
+        builder.add_produces_filter(produces, produces_mode)
         builder.add_numeric_filters(
             cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
         builder.add_rarity_and_format(rarities, fmt)

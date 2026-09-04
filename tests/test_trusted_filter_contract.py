@@ -212,10 +212,11 @@ def main():
             "def _build_advanced_filters(" in search_source
             and 'text="Advanced Filters ▾"' in search_source
             and search_source.index("self._build_content_filter(self._advanced_filters_frame)")
+                < search_source.index("self._build_produces_filter(")
                 < search_source.index("self._build_rules_text_filter(")
                 < search_source.index('text="Subtype").grid(')
                 < search_source.index("self._build_format_rarity_filters(")
-                < search_source.index("self._build_printing_filter(self._advanced_filters_frame, row=5)")),
+                < search_source.index("self._build_printing_filter(self._advanced_filters_frame, row=6)")),
         "Advanced labels match primary Search field typography": (
             'text="Content").grid(' in search_source
             and 'text="Rules text", **label_options).grid(' in search_source

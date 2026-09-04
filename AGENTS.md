@@ -493,6 +493,17 @@ every feature together and is exempt.
   **Any** radio choice: it MUST display selected whenever no specific format is
   active, and selecting it MUST replace/unselect every specific format. An empty Set
   Type or Exact Set selection means Any. _Verification:_ **AUTO**.
+- **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
+  column, never from colour identity or rules text. Colour identity answers a
+  different question — Birds of Paradise has identity `G` and produces every
+  colour, Command Tower has no identity at all — and 653 producers carry no
+  mana symbol in their text because they read "add one mana of any color".
+  `produced_mana` and `color_identity` share one comma-joined WUBRG(+C)
+  encoding stored in alphabetical order, so both filters MUST share one
+  builder helper and an exact match MUST sort the requested set; building the
+  needle in `COLORS` order makes every multi-colour `Exactly` search return
+  nothing. Colourless is an empty colour identity but an explicit `C` member of
+  produced mana. _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.
@@ -537,7 +548,7 @@ every feature together and is exempt.
 - **SRCH-019 — MUST:** `Clear` resets every Search criterion and its visible control
   summary to the trusted defaults: Cards-only content with Tokens, Emblems, and Art
   Series off; Paper-only; Any Set Type/Set;
-  no Subtype/Mechanic/Rarity/Card Type/Supertype/Color/Format/numeric restriction,
+  no Subtype/Mechanic/Rarity/Card Type/Supertype/Color/Produces/Format/numeric restriction,
   empty Rules Text and name/exact-name batch, and English-only enabled. It MUST also
   deselect current Results/Mainboard/Sideboard highlights without removing cards
   already stored in the comparison collection. Subtype, Mechanics, Format, and
@@ -548,10 +559,10 @@ every feature together and is exempt.
   MAY display the batch summary, but SQL ownership remains in
   `database/search_queries.py`. _Verification:_ **AUTO**.
 - **SRCH-021 — MUST:** Keep the normal Search surface focused on Card Name, Card Type,
-  Supertypes, Colors, numeric ranges, and Mechanics. Place Content, Rules Text,
+  Supertypes, Colors, numeric ranges, and Mechanics. Place Content, Produces, Rules Text,
   Subtype, Format, Rarity, and Printings behind `Advanced Filters` in that exact order,
-  with Rules Text immediately above Subtype and Format/Rarity immediately below
-  Subtype. Content MUST show one compact horizontal choice group in the exact order
+  with Produces immediately below Content, Rules Text immediately above Subtype, and
+  Format/Rarity immediately below Subtype. Content MUST show one compact horizontal choice group in the exact order
   `Cards | Tokens | Emblems | Art Series` on the same row as the Content label. The
   `Cards` choice MUST begin at the same shared Advanced control-column x-position as
   Rules Text, Subtype, Format, Rarity, and Printings; the Content choices MUST remain

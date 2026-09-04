@@ -39,7 +39,9 @@ def _extract_row(card):
         colors = face.get("colors")
     colors = colors or []
 
-    identity = card.get("color_identity") or []
+    # SRCH-033: exact colour/produced-mana matching compares against the
+    # stored string, so the member order must not depend on upstream.
+    identity = sorted(card.get("color_identity") or [])
 
     artist_values = []
     for value in [card.get("artist")] + [
@@ -98,7 +100,7 @@ def _extract_row(card):
         ",".join(indicator),
         card.get("security_stamp"),
         0,  # universes_beyond is derived set-wide after the bulk load
-        ",".join(card.get("produced_mana") or []),
+        ",".join(sorted(card.get("produced_mana") or [])),
         img.get("small"),
         img.get("normal"),
         img.get("png"),
