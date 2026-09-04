@@ -364,7 +364,28 @@ def main():
     gui_bases = {
         base.id for base in gui_class.bases if isinstance(base, ast.Name)}
 
+    # DBS-008: a killed process never runs the download finally block, so the
+    # service must clear abandoned bulk temps when it is constructed.
+    with tempfile.TemporaryDirectory() as _sync_dir:
+        _sync_root = Path(_sync_dir)
+        _orphan = _sync_root / "scryfall_default_cards.download"
+        _unrelated = _sync_root / "keep_me.download"
+        _plain = _sync_root / "scryfall_notes.txt"
+        for _path in (_orphan, _unrelated, _plain):
+            _path.write_bytes(b"partial")
+        _sweep_db = CardDB(str(_sync_root / "cards.db"))
+        try:
+            DatabaseSyncService(_sweep_db)
+            stale_bulk_temp_swept = (
+                not _orphan.exists()
+                and _unrelated.exists()
+                and _plain.exists())
+        finally:
+            _sweep_db.close()
+
     checks = {
+        "abandoned bulk temp files are cleared at sync-service start": (
+            stale_bulk_temp_swept),
         "first launch is due when the database is empty": (
             initial_due == "first_launch"),
         "service imports the complete bulk dataset": (

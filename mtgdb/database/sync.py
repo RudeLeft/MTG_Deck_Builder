@@ -304,6 +304,28 @@ class DatabaseSyncService:
         self.http = http
         self.clock = clock
         self.monotonic = monotonic
+        self._remove_stale_bulk_downloads()
+
+    def _remove_stale_bulk_downloads(self):
+        """Remove bulk temp files abandoned by a killed or crashed process.
+
+        The active download is cleaned by a ``finally`` block, but that cannot
+        run when the process is terminated mid-sync. Without this startup sweep
+        a partial bulk export -- tens of megabytes -- stays in the portable data
+        folder until another full sync happens to overwrite the same name.
+        """
+        try:
+            directory = os.path.dirname(os.path.abspath(self.db.path))
+            names = os.listdir(directory)
+        except (AttributeError, OSError, TypeError):
+            return
+        for name in names:
+            if not (name.startswith("scryfall_") and name.endswith(".download")):
+                continue
+            try:
+                os.remove(os.path.join(directory, name))
+            except OSError:
+                pass
 
     def database_age_seconds(self):
         """Return the age of the last successful refresh, or None when empty."""

@@ -355,18 +355,26 @@ class CardImageService:
             worker.join(timeout=0.25)
 
     def _remove_stale_downloads(self):
-        """Remove partial image downloads left by an interrupted prior process."""
+        """Remove partial image downloads left by an interrupted prior process.
+
+        The walk is recursive because the print-template cache lives in a
+        ``print_png`` subdirectory of this cache and writes partials under the
+        same ``.download`` convention. A top-level-only scan left those behind
+        permanently, and unlike the bulk temp they carry distinct per-card names
+        so they accumulate instead of being overwritten.
+        """
         try:
-            names = os.listdir(self.cache_dir)
+            tree = list(os.walk(self.cache_dir))
         except OSError:
             return
-        for name in names:
-            if not name.endswith(".download"):
-                continue
-            try:
-                os.remove(os.path.join(self.cache_dir, name))
-            except OSError:
-                pass
+        for directory, _subdirectories, names in tree:
+            for name in names:
+                if not name.endswith(".download"):
+                    continue
+                try:
+                    os.remove(os.path.join(directory, name))
+                except OSError:
+                    pass
 
     def _worker_loop(self):
         while True:

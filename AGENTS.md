@@ -666,7 +666,10 @@ rows override broader rows.
 - **DBS-007 — MUST:** Refresh catalogs but skip bulk download/import when the
   local DB matches the current upstream bulk revision. _Verification:_ **AUTO**.
 - **DBS-008 — MUST:** Remove the bulk temp file after success/failure/cancel and
-  preserve the committed DB after an incomplete import. _Verification:_ **AUTO**.
+  preserve the committed DB after an incomplete import. Because a terminated or
+  crashed process never runs that cleanup, the sync service MUST also remove
+  abandoned `scryfall_*.download` files beside the database when it is
+  constructed. _Verification:_ **AUTO**.
 - **DBS-009 — MUST:** Keep refresh scheduling, progress dialog, Tk polling,
   completion reconciliation, error presentation, and shutdown adaptation in
   `ui/database_sync.py`. _Verification:_ **AUTO**.
@@ -1030,7 +1033,11 @@ rows override broader rows.
   _Verification:_ **AUTO**.
 - **IMG-010 — MUST:** Remove abandoned `*.download` image-cache partials when
   the image service starts and give worker threads a bounded shutdown join without
-  permitting new requests after shutdown begins. _Verification:_ **AUTO**.
+  permitting new requests after shutdown begins. The sweep MUST recurse into
+  nested cache directories: the print-template cache is a `print_png`
+  subdirectory using the same partial-file convention, and its orphans carry
+  distinct per-card names, so a top-level-only scan lets them accumulate
+  permanently. _Verification:_ **AUTO**.
 - **IMG-011 — MUST:** Expose `Legality`, `Rotate`, and `Zoom` actions in the main
   card preview. The preview surface MUST NOT reserve a persistent inline legality
   text row. `Legality` opens a small app-owned dark popup listing the previewed
@@ -1513,6 +1520,15 @@ rows override broader rows.
   one-file. _Verification:_ **AUTO**.
 - **PORT-005 — MAY:** Read/write a path the user explicitly selects for Open,
   Save, or Export. _Verification:_ **REVIEW**.
+- **PORT-007 — MUST:** Write every persisted application file through one
+  durable replace pattern: a unique temporary name from `tempfile.mkstemp` in
+  the destination directory, `flush` and `fsync` before closing, `os.replace`
+  onto the final path, and unconditional temporary cleanup. A fixed temporary
+  filename lets two writers interleave into one path, and omitting `fsync` lets
+  the rename become visible before the bytes it points at, publishing an empty
+  file that a tolerant reader silently treats as "no saved settings". Governs
+  `workspace/repository.py`, `preferences/repository.py`, and `deck/io.py`.
+  _Verification:_ **AUTO**.
 - **PORT-006 — MUST:** Preserve the Windows named-mutex single-instance guard.
   `acquire_single_instance` MUST be detection-only: it reports whether this
   process claimed the mutex and MUST NOT display a dialog or otherwise block.
@@ -1641,7 +1657,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | CLR-*, TYP-*, SIZ-*, LAY-* | `tests/test_ui_visual_contract.py`, `windows_tests/test_ui_geometry_windows.py` |
 | BEH-*, callback safety | `tests/test_ui_callback_safety.py`, `tests/test_ui_component_contract.py` |
 | DATA-*, VER-009 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |
-| PORT-001 through PORT-005 | `tests/test_portability_contract.py`, `tests/test_hardening_regressions.py` |
+| PORT-001 through PORT-005, PORT-007 | `tests/test_portability_contract.py`, `tests/test_hardening_regressions.py` |
 | PORT-006, single-instance | `windows_tests/test_single_instance_windows.py`, `tests/test_portability_contract.py` |
 | SIZ-003, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py` |
 | BLD-*, REL-* | `tests/test_project_guardrails.py`, `tests/test_hardening_regressions.py` |

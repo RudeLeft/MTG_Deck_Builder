@@ -54,7 +54,45 @@ def main():
         and "notify_already_running()" in main_source.split(
             "def main(", 1)[1])
 
+    # PORT-007: one durable replace pattern for every persisted file. Asserted
+    # behaviourally (a real save leaves no temp and preserves unrelated keys)
+    # and structurally (no writer may reintroduce a fixed temp name or drop
+    # fsync, which a behavioural test alone cannot detect).
+    from mtgdb.preferences.repository import UIPreferencesRepository
+    import json as _json
+    with tempfile.TemporaryDirectory() as _prefs_dir:
+        _prefs_path = Path(_prefs_dir) / "ui_preferences.json"
+        _prefs_path.write_text(
+            _json.dumps({"unrelated": "keep"}), encoding="utf-8")
+        UIPreferencesRepository(_prefs_path).save_table_columns(
+            {"results": ["name", "cost"]})
+        _saved = _json.loads(_prefs_path.read_text(encoding="utf-8"))
+        durable_preference_save = (
+            _saved.get("unrelated") == "keep"
+            and _saved["table_columns"]["results"] == ["name", "cost"]
+            and not list(Path(_prefs_dir).glob("*.tmp"))
+            and not (Path(_prefs_dir) / "ui_preferences.json.tmp").exists())
+
+    _writers = {
+        name: (ROOT / name).read_text(encoding="utf-8")
+        for name in ("mtgdb/preferences/repository.py",
+                     "mtgdb/workspace/repository.py",
+                     "mtgdb/deck/io.py")
+    }
+    durable_write_pattern = all(
+        "tempfile.mkstemp(" in source
+        and "os.fsync(" in source
+        # os.replace() and Path.replace() are the same atomic rename.
+        and ("os.replace(" in source or "temporary_path.replace(" in source)
+        # A fixed temp name lets two writers interleave into one path.
+        and '.with_name(self.path.name + ".tmp")' not in source
+        for source in _writers.values())
+
     checks = {
+        "PORT-007 preference save is atomic and preserves unrelated keys": (
+            durable_preference_save),
+        "PORT-007 every persisted writer uses unique temp plus fsync": (
+            durable_write_pattern),
         "single-instance claim detects without showing a blocking dialog": (
             silent_single_instance_claim),
         "automatic data stays beside the portable application": local_data_only,

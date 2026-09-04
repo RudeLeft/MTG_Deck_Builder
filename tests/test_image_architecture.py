@@ -229,7 +229,28 @@ def main():
     bases = {
         base.id for base in gui_class.bases if isinstance(base, ast.Name)
     }
+    # IMG-010: the print-template cache is a print_png subdirectory using the
+    # same partial convention, so a top-level-only sweep leaks its orphans.
+    with tempfile.TemporaryDirectory() as _cache_root:
+        _nested = Path(_cache_root) / "print_png"
+        _nested.mkdir()
+        _top_partial = Path(_cache_root) / "Card [SET].jpg.download"
+        _nested_partial = _nested / "Card [SET].png.download"
+        _real_asset = _nested / "Card [SET].png"
+        for _path in (_top_partial, _nested_partial, _real_asset):
+            _path.write_bytes(b"partial")
+        _sweep_service = CardImageService(_cache_root)
+        try:
+            recursive_partial_sweep = (
+                not _top_partial.exists()
+                and not _nested_partial.exists()
+                and _real_asset.exists())
+        finally:
+            _sweep_service.shutdown()
+
     checks = {
+        "abandoned partials are swept from nested caches too": (
+            recursive_partial_sweep),
         "image service uses fixed daemon concurrency": (
             stats["workers"] == 2 and capped_workers == 4
             and 'spawn_daemon(' in service_source
