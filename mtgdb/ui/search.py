@@ -11,9 +11,13 @@ from mtgdb.database.constants import COLORS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
-    AppButton, AppSpinbox, ClassicCheckbutton, TokenBubbleEntry,
+    AppButton, AppEntry, AppMenubutton, AppSpinbox, ClassicCheckbutton,
+    TokenBubbleEntry,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
+from mtgdb.ui.search_filters import (
+    FILTER_BY_KEY, filter_catalog, ordered_active_filters,
+)
 from mtgdb.ui.search_printings import SearchPrintingFilter
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 from mtgdb.ui.tokens import (
@@ -27,6 +31,23 @@ CARD_TYPE_MAX_COLUMNS = 5
 SUPERTYPE_COLUMNS = 5
 CHIP_GRID_X_GAP = 4
 SEARCH_ROW_PADY = 3
+# Keeps every optional filter label on the same x-position as the fixed
+# Advanced rows above them, so the control column does not step in and out.
+OPTIONAL_FILTER_LABEL_WIDTH = 76
+TRAIT_CHOICES = (
+    ("not_universes_beyond", "Not Universes Beyond"),
+    ("universes_beyond", "Universes Beyond"),
+    ("reserved", "Reserved List"),
+    ("game_changer", "Commander game changer"),
+    ("multi_faced", "Multi-faced card"),
+    ("single_faced", "Single-faced card"),
+    ("hybrid_mana", "Hybrid mana in cost"),
+    ("phyrexian_mana", "Phyrexian mana in cost"),
+    ("has_x_cost", "X in mana cost"),
+    ("color_indicator", "Has a color indicator"),
+    ("top_heavy", "Power greater than toughness"),
+)
+TRAIT_LABELS = dict(TRAIT_CHOICES)
 PICKER_SUMMARY_PER_LINE = 5
 
 
@@ -434,9 +455,273 @@ class SearchFeatureMixin:
         # natural width and visibly pushes the picker to the right.
         self._build_printing_filter(self._advanced_filters_frame, row=6)
 
+        self._build_optional_filter_zone(self._advanced_filters_frame, row=7)
+
         # Each picker summarizes itself; there is no duplicate aggregate
         # Active Filters line above the Search actions.
         self._active_filter_label = None
+
+    # ------------------------------------------------------------------
+    # optional filter controls
+    # ------------------------------------------------------------------
+
+    def _numeric_pair(self, parent, attribute_prefix, width=5):
+        """Two spinboxes as one unplaced frame; the caller positions it.
+
+        Returned rather than placed so the same helper serves grid rows and
+        packed sub-frames without fighting the geometry manager.
+        """
+        box = ttk.Frame(parent)
+        low = AppSpinbox(box, from_=0, to=999, width=width)
+        low.pack(side="left")
+        ttk.Label(box, text="to", style="Muted.TLabel").pack(side="left", padx=5)
+        high = AppSpinbox(box, from_=0, to=999, width=width)
+        high.pack(side="left")
+        for widget in (low, high):
+            widget.delete(0, "end")
+            self._configure_zero_start_spinbox(widget)
+        setattr(self, f"{attribute_prefix}_min", low)
+        setattr(self, f"{attribute_prefix}_max", high)
+        return box
+
+    def _build_filter_traits(self, parent):
+        self._traits_btn = AppButton(
+            parent, text="Any", role="picker",
+            command=self._choose_traits)
+        self._traits_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_traits(self):
+        self._selected_traits = set()
+        self._traits_btn = None
+
+    def _choose_traits(self):
+        """Pick boolean card properties through the shared checklist dialog."""
+        by_label = {label: key for key, label in TRAIT_CHOICES}
+
+        def apply(chosen):
+            self._selected_traits = {
+                by_label[label] for label in chosen if label in by_label}
+            if self._traits_btn is not None:
+                self._traits_btn.configure(text=self._picker_button_text(
+                    {TRAIT_LABELS[key]
+                     for key in self._selected_traits},
+                    "Any", "traits", max_visible=10, single_line=True))
+            self._update_search_filter_summary()
+
+        selected = {
+            TRAIT_LABELS[key]
+            for key in getattr(self, "_selected_traits", set()) or ()
+            if key in TRAIT_LABELS}
+        self._open_search_multi_picker(
+            "Card Traits", [label for _key, label in TRAIT_CHOICES],
+            selected, apply,
+            mode_label="Selected traits:",
+            help_text="Choose one or several card traits.")
+
+    def _build_filter_loyalty(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        ttk.Label(box, text="Loyalty", style="Muted.TLabel").pack(
+            side="left", padx=(0, 5))
+        self._numeric_pair(box, "q_loyalty").pack(side="left")
+        ttk.Label(box, text="Defense", style="Muted.TLabel").pack(
+            side="left", padx=(14, 5))
+        self._numeric_pair(box, "q_defense").pack(side="left")
+
+    def _reset_filter_loyalty(self):
+        for name in ("q_loyalty_min", "q_loyalty_max",
+                     "q_defense_min", "q_defense_max"):
+            setattr(self, name, None)
+
+    def _build_filter_released(self, parent):
+        pair = self._numeric_pair(parent, "q_released", width=6)
+        pair.grid(row=0, column=1, sticky="w", pady=2)
+
+    def _reset_filter_released(self):
+        self.q_released_min = None
+        self.q_released_max = None
+
+    def _build_filter_artist(self, parent):
+        self.q_artist = AppEntry(parent)
+        self.q_artist.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_artist(self):
+        self.q_artist = None
+
+    def _build_filter_mana_cost(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        self.cost_feature_vars = {}
+        for key, label in (("hybrid_mana", "Hybrid"),
+                           ("phyrexian_mana", "Phyrexian"),
+                           ("has_x_cost", "Has X")):
+            variable = tk.BooleanVar(value=False)
+            self.cost_feature_vars[key] = variable
+            ttk.Checkbutton(
+                box, text=" " + label, variable=variable,
+                command=self._update_search_filter_summary).pack(
+                    side="left", padx=(0, 10))
+
+    def _reset_filter_mana_cost(self):
+        self.cost_feature_vars = {}
+
+    def _optional_numeric(self, widget):
+        """Spinbox value as a number, or None when absent or blank."""
+        if widget is None:
+            return None
+        try:
+            text = str(widget.get()).strip()
+        except tk.TclError:
+            return None
+        if not text:
+            return None
+        return self._parse_search_number(text, "filter value")
+
+    OPTIONAL_TEXT_FIELDS = (
+        "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
+        "q_released_min", "q_released_max", "q_artist",
+    )
+
+    def _capture_optional_filter_values(self):
+        """Text currently held by optional filter controls, by attribute name."""
+        values = {}
+        for name in self.OPTIONAL_TEXT_FIELDS:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                values[name] = str(widget.get()).strip()
+            except tk.TclError:
+                continue
+        return {name: value for name, value in values.items() if value}
+
+    def _restore_optional_filter_values(self, values):
+        """Refill optional controls after their rows have been rebuilt."""
+        for name, value in dict(values or {}).items():
+            widget = getattr(self, name, None)
+            if widget is None or name not in self.OPTIONAL_TEXT_FIELDS:
+                continue
+            try:
+                widget.delete(0, "end")
+                widget.insert(0, str(value))
+            except tk.TclError:
+                continue
+
+    def _selected_trait_keys(self):
+        keys = set(getattr(self, "_selected_traits", set()) or ())
+        for key, variable in (getattr(self, "cost_feature_vars", {}) or {}).items():
+            try:
+                if variable.get():
+                    keys.add(key)
+            except tk.TclError:
+                continue
+        return tuple(sorted(keys))
+
+    # ------------------------------------------------------------------
+    # optional filters, built on demand
+    # ------------------------------------------------------------------
+
+    def _build_optional_filter_zone(self, parent, *, row):
+        """Host for filters that exist only while they are in use.
+
+        The Search form and the Results table share one column with no sash
+        between them, so a permanently-rendered filter takes its height out of
+        Results for every user. Optional filters are built when added and
+        destroyed when removed, so an unused one costs nothing.
+        """
+        self._optional_filter_rows = {}
+        host = ttk.Frame(parent)
+        host.grid(row=row, column=0, columnspan=2, sticky="ew")
+        host.columnconfigure(0, weight=1)
+        self._optional_filter_host = host
+
+        self._add_filter_btn = AppMenubutton(
+            parent, text="+ Add filter", role="menu")
+        self._add_filter_btn.grid(
+            row=row + 1, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        self._add_filter_menu = self._dark_menu(self._add_filter_btn)
+        self._add_filter_btn.configure(menu=self._add_filter_menu)
+        self._add_tooltip(
+            self._add_filter_btn,
+            "Add a filter to this search. Filters you have not added take no "
+            "space, so the Results list stays as tall as possible.",
+            wraplength=360)
+        self._refresh_add_filter_menu()
+
+    def _refresh_add_filter_menu(self):
+        """Rebuild the catalogue, grouping by category and marking what is on."""
+        menu = getattr(self, "_add_filter_menu", None)
+        if menu is None:
+            return
+        menu.delete(0, "end")
+        active = set(getattr(self, "_optional_filter_rows", {}))
+        first = True
+        for category, entries in filter_catalog(active):
+            if not first:
+                menu.add_separator()
+            first = False
+            menu.add_command(label=category, state="disabled")
+            for entry in entries:
+                menu.add_command(
+                    label=("   " + entry["label"]
+                           + ("  (added)" if entry["active"] else "")),
+                    state="disabled" if entry["active"] else "normal",
+                    command=(None if entry["active"]
+                             else lambda key=entry["key"]:
+                                 self._add_optional_filter(key)))
+
+    def _add_optional_filter(self, key, *, notify=True):
+        """Build one optional filter row, or focus it when already present."""
+        if key in getattr(self, "_optional_filter_rows", {}):
+            return
+        definition = FILTER_BY_KEY.get(key)
+        builder = getattr(self, f"_build_filter_{key}", None)
+        if definition is None or builder is None:
+            return
+
+        frame = ttk.Frame(self._optional_filter_host)
+        frame.pack(fill="x")
+        frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)
+        frame.columnconfigure(1, weight=1)
+
+        label = ttk.Label(frame, text=definition["label"])
+        label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
+        self._add_tooltip(label, definition["tooltip"], wraplength=380)
+
+        builder(frame)
+
+        remove = AppButton(
+            frame, text="×", role="compact",
+            command=lambda: self._remove_optional_filter(key))
+        remove.grid(row=0, column=2, sticky="ne", padx=(6, 0), pady=2)
+        self._add_tooltip(
+            remove, f"Remove the {definition['label']} filter from this search.",
+            wraplength=300)
+
+        self._optional_filter_rows[key] = frame
+        self._refresh_add_filter_menu()
+        if notify:
+            self._update_search_filter_summary()
+
+    def _remove_optional_filter(self, key, *, notify=True):
+        """Destroy one optional filter row and reset the state it owned."""
+        frame = getattr(self, "_optional_filter_rows", {}).pop(key, None)
+        if frame is None:
+            return
+        reset = getattr(self, f"_reset_filter_{key}", None)
+        if reset is not None:
+            reset()
+        frame.destroy()
+        self._refresh_add_filter_menu()
+        if notify:
+            self._update_search_filter_summary()
+
+    def _active_optional_filters(self):
+        return ordered_active_filters(getattr(self, "_optional_filter_rows", {}))
+
+    def _clear_optional_filters(self):
+        for key in list(getattr(self, "_optional_filter_rows", {})):
+            self._remove_optional_filter(key, notify=False)
 
     def _toggle_advanced_filters(self):
         self._advanced_filters_visible = not self._advanced_filters_visible
@@ -649,6 +934,7 @@ class SearchFeatureMixin:
         self.q_keyword_mode.set("any")
         self.q_color_mode.set("within")
         self.q_produces_mode.set("includes")
+        self._clear_optional_filters()
         for variable in self.card_type_vars.values():
             variable.set(False)
         for variable in self.property_vars.values():
@@ -1037,6 +1323,24 @@ class SearchFeatureMixin:
         if produces:
             parts.append(
                 f"Produces ({self.q_produces_mode.get()}): " + "".join(produces))
+        properties = self._selected_trait_keys()
+        if properties:
+            parts.append("Card traits: " + ", ".join(
+                TRAIT_LABELS.get(key, key) for key in properties))
+        for label, low, high in (
+                ("Loyalty", "q_loyalty_min", "q_loyalty_max"),
+                ("Defense", "q_defense_min", "q_defense_max"),
+                ("Released", "q_released_min", "q_released_max")):
+            bounds = [str(getattr(self, name).get()).strip()
+                      for name in (low, high)
+                      if getattr(self, name, None) is not None]
+            bounds = [value for value in bounds if value]
+            if bounds:
+                parts.append(f"{label}: " + "-".join(bounds))
+        artist = (str(self.q_artist.get()).strip()
+                  if getattr(self, "q_artist", None) is not None else "")
+        if artist:
+            parts.append(f"Artist: {artist}")
         if self._selected_keywords:
             parts.append("Mechanics: " + ", ".join(sorted(self._selected_keywords)))
         rules = self.q_rules.values(commit_pending=False) if hasattr(self, "q_rules") else []
@@ -1124,6 +1428,14 @@ class SearchFeatureMixin:
             "keyword_mode": self.q_keyword_mode.get(),
             "color_mode": self.q_color_mode.get(),
             "produces_mode": self.q_produces_mode.get(),
+            "optional_filters": list(self._active_optional_filters()),
+            "optional_values": self._capture_optional_filter_values(),
+            "cost_features": sorted(
+                key for key, variable
+                in (getattr(self, "cost_feature_vars", {}) or {}).items()
+                if variable.get()),
+            "traits": sorted(
+                getattr(self, "_selected_traits", set()) or ()),
             "card_types": card_types,
             "supertypes": supertypes,
             "colors": [key for key, variable in self.color_vars.items() if variable.get()],
@@ -1226,6 +1538,24 @@ class SearchFeatureMixin:
         wanted_produces = {str(value) for value in state.get("produces", [])}
         for key, variable in self.produces_vars.items():
             variable.set(key in wanted_produces)
+
+        # Rebuild the optional rows before restoring their values, so a
+        # restored session shows the same panel it was saved with.
+        self._clear_optional_filters()
+        for key in ordered_active_filters(
+                state.get("optional_filters", []) or ()):
+            self._add_optional_filter(key, notify=False)
+        self._selected_traits = {
+            str(value) for value in state.get("traits", []) or ()
+            if str(value) in TRAIT_LABELS}
+        if getattr(self, "_traits_btn", None) is not None:
+            self._traits_btn.configure(text=self._picker_button_text(
+                {TRAIT_LABELS[key] for key in self._selected_traits},
+                "Any", "traits", max_visible=10, single_line=True))
+        self._restore_optional_filter_values(state.get("optional_values", {}))
+        wanted_costs = {str(value) for value in state.get("cost_features", []) or ()}
+        for key, variable in (getattr(self, "cost_feature_vars", {}) or {}).items():
+            variable.set(key in wanted_costs)
 
         for widget, key in (
             (self.q_cmc_min, "cmc_min"), (self.q_cmc_max, "cmc_max"),
@@ -1349,6 +1679,15 @@ class SearchFeatureMixin:
             produces=[value for value, variable in self.produces_vars.items()
                       if variable.get()],
             produces_mode=self.q_produces_mode.get(),
+            traits=self._selected_trait_keys(),
+            loyalty_min=self._optional_numeric(getattr(self, "q_loyalty_min", None)),
+            loyalty_max=self._optional_numeric(getattr(self, "q_loyalty_max", None)),
+            defense_min=self._optional_numeric(getattr(self, "q_defense_min", None)),
+            defense_max=self._optional_numeric(getattr(self, "q_defense_max", None)),
+            released_from=self._optional_numeric(getattr(self, "q_released_min", None)),
+            released_to=self._optional_numeric(getattr(self, "q_released_max", None)),
+            artist=(str(self.q_artist.get()).strip()
+                    if getattr(self, "q_artist", None) is not None else ""),
             cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
             power_min=numeric["power_min"], power_max=numeric["power_max"],
             toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],

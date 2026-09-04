@@ -173,15 +173,20 @@ class SearchQueryBuilder:
                     self.clauses.append(f"{column} NOT LIKE ?")
                     self.params.append(f"%{color}%")
 
-    def add_color_filter(self, colors, color_mode):
-        """Filter by colour identity, where colourless is an empty identity."""
+    def add_color_filter(self, colors, color_mode, scope="identity"):
+        """Filter by colour identity, or by the card's own colours.
+
+        Scryfall separates these and so does the stored schema: Ghostfire
+        is a colourless card with a red identity. Both columns share one
+        encoding, so only the column name changes.
+        """
+        column = "colors" if str(scope) == "colors" else "color_identity"
         requested = [color for color in (colors or []) if color in (*COLORS, "C")]
         selected = [color for color in requested if color in COLORS]
         if selected:
-            self._add_color_set_filter(
-                "color_identity", selected, color_mode, COLORS)
+            self._add_color_set_filter(column, selected, color_mode, COLORS)
         elif "C" in requested:
-            self.clauses.append("COALESCE(color_identity, '') = ''")
+            self.clauses.append(f"COALESCE({column}, '') = ''")
 
     def add_produces_filter(self, produces, produces_mode):
         """Filter by the mana a card can actually produce.
@@ -218,6 +223,20 @@ class SearchQueryBuilder:
         self._add_numeric_stat("power", power_min, power_max)
         self._add_numeric_stat("toughness", toughness_min, toughness_max)
 
+    def add_stat_filters(self, loyalty_min, loyalty_max,
+                         defense_min, defense_max):
+        """Planeswalker starting loyalty and battle defense.
+
+        Same shape as power and toughness, against columns that were
+        stored from the first import and never exposed to a filter.
+        """
+        self._add_numeric_stat(
+            "loyalty", self._finite_number(loyalty_min, "loyalty minimum"),
+            self._finite_number(loyalty_max, "loyalty maximum"))
+        self._add_numeric_stat(
+            "defense", self._finite_number(defense_min, "defense minimum"),
+            self._finite_number(defense_max, "defense maximum"))
+
     @staticmethod
     def _finite_number(value, label):
         if value is None:
@@ -242,6 +261,76 @@ class SearchQueryBuilder:
         if maximum is not None:
             self.clauses.append(f"CAST({field} AS REAL) <= ?")
             self.params.append(float(maximum))
+
+    MULTI_FACE_LAYOUTS = (
+        "transform", "modal_dfc", "split", "flip", "adventure", "meld",
+        "leveler", "saga", "class", "case", "prototype", "mutate",
+        "double_faced_token", "reversible_card",
+    )
+    TRAIT_CLAUSES = {
+        "universes_beyond": "universes_beyond = 1",
+        "not_universes_beyond": "COALESCE(universes_beyond, 0) = 0",
+        "reserved": "reserved = 1",
+        "game_changer": "game_changer = 1",
+        "multi_faced": None,
+        "single_faced": None,
+        "hybrid_mana": "mana_cost LIKE '%/%' AND mana_cost NOT LIKE '%/P%'",
+        "phyrexian_mana": "mana_cost LIKE '%/P%'",
+        "has_x_cost": "mana_cost LIKE '%{X}%'",
+        "color_indicator": "color_indicator IS NOT NULL AND color_indicator <> ''",
+        "top_heavy": (
+            "power NOT GLOB '*[^0-9.-]*' AND toughness NOT GLOB '*[^0-9.-]*' "
+            "AND power <> '' AND toughness <> '' "
+            "AND CAST(power AS REAL) > CAST(toughness AS REAL)"),
+    }
+
+    def add_trait_filters(self, traits):
+        """Filter by stable boolean card properties.
+
+        These are application semantics rather than upstream vocabulary
+        (DATA-011), so the keys are fixed here rather than discovered. Each
+        selected property narrows the search; an unknown key is ignored so a
+        restored workspace from a newer build cannot widen a query.
+        """
+        placeholders = ",".join("?" * len(self.MULTI_FACE_LAYOUTS))
+        for key in sorted({str(value) for value in (traits or [])}):
+            if key == "multi_faced":
+                self.clauses.append(
+                    f"COALESCE(layout, '') IN ({placeholders})")
+                self.params.extend(self.MULTI_FACE_LAYOUTS)
+                continue
+            if key == "single_faced":
+                # NOT IN against a NULL layout yields NULL, which would drop a
+                # row that simply has no recorded layout rather than keeping it.
+                self.clauses.append(
+                    f"COALESCE(layout, '') NOT IN ({placeholders})")
+                self.params.extend(self.MULTI_FACE_LAYOUTS)
+                continue
+            clause = self.TRAIT_CLAUSES.get(key)
+            if clause:
+                self.clauses.append(f"({clause})")
+
+    def add_release_filters(self, released_from, released_to):
+        """Bound the printing release date. Stored as an ISO yyyy-mm-dd string."""
+        for value, operator, label in (
+                (released_from, ">=", "release year from"),
+                (released_to, "<=", "release year to")):
+            if value in (None, ""):
+                continue
+            year = self._finite_number(value, label)
+            if year is None:
+                continue
+            boundary = f"{int(year):04d}-01-01" if operator == ">="                 else f"{int(year):04d}-12-31"
+            self.clauses.append(
+                f"released_at IS NOT NULL AND released_at <> '' "
+                f"AND released_at {operator} ?")
+            self.params.append(boundary)
+
+    def add_artist_filter(self, artist):
+        value = str(artist or "").strip()
+        if value:
+            self.clauses.append("artist LIKE ? ESCAPE '\\'")
+            self.params.append(f"%{_escape_like(value)}%")
 
     def add_rarity_and_format(self, rarities, fmt):
         rarity_values = sorted({
@@ -328,7 +417,11 @@ class CardSearchQueryMixin:
                supertypes=None, supertype_mode="all", characteristics=None,
                characteristic_mode="all", subtypes=None,
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
-               color_mode="within", produces=None, produces_mode="includes",
+               color_mode="within", color_scope="identity",
+               produces=None, produces_mode="includes",
+               traits=None, loyalty_min=None, loyalty_max=None,
+               defense_min=None, defense_max=None, released_from=None,
+               released_to=None, artist="",
                cmc_min=None, cmc_max=None, power_min=None,
                power_max=None, toughness_min=None, toughness_max=None, rarity="",
                rarities=None, fmt="", set_code="", set_codes=None, set_types=None,
@@ -365,8 +458,13 @@ class CardSearchQueryMixin:
         builder.add_type_filters(
             card_types, card_type_mode, supertypes, supertype_mode,
             subtypes, subtype_mode, keywords, keyword_mode, type_line)
-        builder.add_color_filter(colors, color_mode)
+        builder.add_color_filter(colors, color_mode, color_scope)
         builder.add_produces_filter(produces, produces_mode)
+        builder.add_trait_filters(traits)
+        builder.add_stat_filters(
+            loyalty_min, loyalty_max, defense_min, defense_max)
+        builder.add_release_filters(released_from, released_to)
+        builder.add_artist_filter(artist)
         builder.add_numeric_filters(
             cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
         builder.add_rarity_and_format(rarities, fmt)

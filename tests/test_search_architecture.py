@@ -13,10 +13,15 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.database.db import CardDB
 from mtgdb.search.controller import SearchController
 from mtgdb.search.models import SearchCriteria
+from mtgdb.database.search_queries import SearchQueryBuilder
 from mtgdb.search.repository import SEARCH_RESULT_COLUMNS, SearchRepository
 from mtgdb.search.results import SearchResultStore
 from mtgdb.ui.results import SearchResultsMixin
-from mtgdb.ui.search import SearchFeatureMixin
+from mtgdb.ui.search import TRAIT_CHOICES, SearchFeatureMixin
+from mtgdb.ui.search_filters import (
+    CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTERS,
+    filter_catalog, is_removable, ordered_active_filters,
+)
 
 
 def _card(card_id, name, keyword="Flying"):
@@ -89,6 +94,18 @@ class _PendingSearchOwner:
         self.calls += 1
 
 
+def _method_body(source, name):
+    """Source of one method, ending at the next method definition.
+
+    Searching the whole module for a call finds it in any method, which lets a
+    deleted call in one place pass because the same call exists in another.
+    """
+    start = source.index(f"def {name}(")
+    remainder = source[start:]
+    end = remainder.find("\n    def ", 1)
+    return remainder if end == -1 else remainder[:end]
+
+
 def main():
     criteria = SearchCriteria.from_mapping({
         "name": "Bird", "colors": ["W"], "card_types": ["Creature"],
@@ -122,7 +139,46 @@ def main():
             # match only works if both import and query agree on the ordering.
             dict(_card("7", "Azorius Charm"), color_identity=["W", "U"],
                  colors=["W", "U"], type_line="Instant", produced_mana=[]),
+            # Released mid-year, so an upper bound of 2026 only includes it if
+            # that bound resolves to 31 December rather than 1 January.
+            dict(_card("8", "Midyear Hawk"), released_at="2026-06-15"),
+            # A colourless card with a coloured identity: the only fixture that
+            # can tell the two colour columns apart.
+            dict(_card("9", "Ghostfire Owl"), colors=[],
+                 color_identity=["R"], type_line="Instant"),
         ])
+
+        # SRCH-033/034 query coverage for the optional filters.
+        def _opt(**kwargs):
+            return {row["name"] for row in db.search(
+                columns=("id", "name"), **kwargs)}
+
+        traits_narrow_the_query = (
+            _opt(traits=["multi_faced"]) == set()
+            and _opt(traits=["single_faced"]) >= {"First Bird"}
+            and _opt(traits=["top_heavy"]) == set())
+        release_bounds_are_inclusive = (
+            # Whole-year inclusion: the mid-year card only appears when the
+            # upper bound resolves to the end of the year.
+            "Midyear Hawk" in _opt(released_from=2026, released_to=2026)
+            and "Midyear Hawk" in _opt(released_to=2026)
+            and _opt(released_from=2027) == set()
+            and _opt(released_to=2025) == set())
+        artist_matches_any_part = (
+            _opt(artist="nonexistent artist") == set())
+        colour_scope_selects_the_column = (
+            # Ghostfire Bird is colourless by card colours and red by identity,
+            # so each scope must reach it through a different query.
+            "Ghostfire Owl" in _opt(
+                colors=["C"], color_mode="exact", color_scope="colors")
+            and "Ghostfire Owl" not in _opt(
+                colors=["C"], color_mode="exact", color_scope="identity")
+            and "Ghostfire Owl" in _opt(
+                colors=["R"], color_mode="includes", color_scope="identity")
+            and "Ghostfire Owl" not in _opt(
+                colors=["R"], color_mode="includes", color_scope="colors"))
+        unknown_trait_is_ignored_not_widening = (
+            _opt(traits=["not_a_real_trait"]) == _opt())
 
         def _produces(values, mode):
             return {row["name"] for row in db.search(
@@ -142,7 +198,7 @@ def main():
         produces_treats_colorless_as_a_member = (
             _produces(("C",), "includes") == {"Sol Ring"})
         empty_produces_filters_nothing = (
-            len(_produces((), "includes")) == 7)
+            len(_produces((), "includes")) == 9)
         # The same helper serves colour identity, where an exact multi-colour
         # request previously built "W,U" against stored "U,W" and matched none.
         identity_exact_multicolor = {row["name"] for row in db.search(
@@ -246,7 +302,54 @@ def main():
         # With no batch active there is nothing to clear.
         and _edit((), "", "Forest") == ((), ""))
 
+    # SRCH-034/035 registry contracts. These hold without Tk, because the
+    # registry is deliberately data rather than widgets.
+    catalog = filter_catalog({"traits"})
+    catalog_keys = [entry["key"] for _c, entries in catalog for entry in entries]
+    tooltips = {entry["key"]: entry["tooltip"] for entry in FILTER_DEFINITIONS}
+    trait_keys = {key for key, _label in TRAIT_CHOICES}
+
     checks = {
+        "every optional filter is declared with a category and tooltip": (
+            all(entry["category"] in CATEGORY_ORDER for entry in FILTER_DEFINITIONS)
+            and all(len(entry["tooltip"]) >= 60 for entry in FILTER_DEFINITIONS)
+            and len(catalog_keys) == len(set(catalog_keys))
+            and len(catalog_keys) == len(FILTER_DEFINITIONS)),
+        "Clear removes every optional filter row": (
+            "self._clear_optional_filters()" in _method_body(
+                search_source, "_clear_search")),
+        "the catalogue reports what is already added": (
+            [e["active"] for _c, es in catalog for e in es if e["key"] == "traits"]
+            == [True]
+            and not any(e["active"] for _c, es in catalog for e in es
+                        if e["key"] != "traits")),
+        "optional filter order is registry order, not insertion order": (
+            ordered_active_filters(["printings", "produces"])
+            == ("produces", "printings")
+            and ordered_active_filters(["artist", "mana_cost"])
+            == ("mana_cost", "artist")
+            and ordered_active_filters(()) == ()),
+        "pinned filters are never removable and never in the catalogue": (
+            all(not is_removable(key) for key in PINNED_FILTERS)
+            and not (set(PINNED_FILTERS) & set(catalog_keys))
+            and is_removable("traits")),
+        "tooltips say what is matched, not what the control is": (
+            "colour" in tooltips["produces"]
+            and "any colour" in tooltips["produces"]
+            and "rules text" in tooltips["mechanics"]
+            and "Oracle text" in tooltips["rules_text"]
+            and "corner" in tooltips["loyalty"]),
+        "every card trait has a query clause": (
+            trait_keys <= (
+                set(SearchQueryBuilder.TRAIT_CLAUSES)
+                | {"multi_faced", "single_faced"})),
+        "card traits narrow the query and unknown keys are ignored": (
+            traits_narrow_the_query
+            and unknown_trait_is_ignored_not_widening),
+        "release bounds are inclusive years": release_bounds_are_inclusive,
+        "artist matches part of the credited name": artist_matches_any_part,
+        "colour scope chooses colors or color_identity": (
+            colour_scope_selects_the_column),
         "Produces is captured, cleared, and restored with the other criteria": (
             "produces_mode=self.q_produces_mode.get()," in search_source
             and "produces=[value for value, variable in self.produces_vars.items()"
