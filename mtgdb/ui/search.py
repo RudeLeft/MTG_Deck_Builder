@@ -107,6 +107,25 @@ class SearchFeatureMixin:
             "art": tk.BooleanVar(value=False),
         }
         self._rules_text_shadow = []
+        self._rules_pending_shadow = ""
+        # Widget handles for optional rows. They must exist as None from the
+        # start: a guard that reads self._rarity_btn raises AttributeError just
+        # as readily as the call it was written to protect.
+        self.q_rules = None
+        self._format_btn = None
+        self._rarity_btn = None
+        self._subtype_btn = None
+        self._keyword_btn = None
+        self._traits_btn = None
+        self._property_chip_frame = None
+        self._supertype_empty_text = ""
+        for name in (
+                "q_cmc_min", "q_cmc_max", "q_power_min", "q_power_max",
+                "q_toughness_min", "q_toughness_max",
+                "q_loyalty_min", "q_loyalty_max",
+                "q_defense_min", "q_defense_max",
+                "q_released_min", "q_released_max", "q_artist"):
+            setattr(self, name, None)
 
     def _build_search_pane(self, parent):
         form = ttk.Frame(parent)
@@ -471,6 +490,17 @@ class SearchFeatureMixin:
 
     def _reset_filter_mana_cost(self):
         self.cost_feature_vars = {}
+
+    @staticmethod
+    def _set_picker_text(button, text):
+        """Update an optional picker's caption, or do nothing when absent.
+
+        The trusted-catalog refresh runs on every startup and does not know
+        which optional rows exist, so it must be able to record vocabulary
+        without a button to show it on.
+        """
+        if button is not None:
+            button.configure(text=text)
 
     def _rules_text_values(self):
         """Rules-text chips from the widget, or its shadow while removed."""
@@ -1102,8 +1132,9 @@ class SearchFeatureMixin:
         if value not in self._format_catalog:
             value = ""
         self.q_format.set(value)
-        if hasattr(self, "_format_btn"):
-            self._format_btn.configure(text=(value.replace("_", " ").capitalize() if value else "Any"))
+        self._set_picker_text(
+            self._format_btn,
+            value.replace("_", " ").capitalize() if value else "Any")
 
 
     def _choose_format(self):
@@ -1294,7 +1325,7 @@ class SearchFeatureMixin:
         self._rarity_catalog = list(snapshot.rarities)
         self._selected_rarities = set(pending["rarities"]).intersection(
             self._rarity_catalog)
-        self._rarity_btn.configure(text=self._picker_button_text(
+        self._set_picker_text(self._rarity_btn, self._picker_button_text(
             {value.capitalize() for value in self._selected_rarities},
             "Any", "rarities"))
 
@@ -1303,7 +1334,7 @@ class SearchFeatureMixin:
         ]
         valid_keywords = {value for value, _display in self._keyword_catalog}
         self._selected_keywords = set(pending["keywords"]).intersection(valid_keywords)
-        self._keyword_btn.configure(text=self._picker_button_text(
+        self._set_picker_text(self._keyword_btn, self._picker_button_text(
             self._selected_keywords, "Any", "mechanics", max_visible=10))
 
         self._subtype_catalog = [
@@ -1311,7 +1342,7 @@ class SearchFeatureMixin:
         ]
         valid_subtypes = {value for value, _display in self._subtype_catalog}
         self._selected_subtypes = set(pending["subtypes"]).intersection(valid_subtypes)
-        self._subtype_btn.configure(text=self._picker_button_text(
+        self._set_picker_text(self._subtype_btn, self._picker_button_text(
             self._selected_subtypes, "Any", "subtypes",
             max_visible=10, single_line=True))
 

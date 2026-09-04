@@ -309,7 +309,29 @@ def main():
     tooltips = {entry["key"]: entry["tooltip"] for entry in FILTER_DEFINITIONS}
     trait_keys = {key for key, _label in TRAIT_CHOICES}
 
+    # SRCH-034. The trusted-catalog refresh runs on every startup and does not
+    # know which optional rows exist. Reading a picker it does not own crashed
+    # the real app with AttributeError while every headless gate stayed green,
+    # because a guard written as `if self._rarity_btn is not None` raises just
+    # as readily as the call it protects when the attribute was never created.
+    catalog_refresh_touches_no_missing_widget = all(
+        f"self._set_picker_text(self.{name}" in search_source
+        or f"self._set_picker_text(\n            self.{name}" in search_source
+        for name in ("_rarity_btn", "_keyword_btn", "_subtype_btn", "_format_btn")
+    ) and "def _set_picker_text(" in search_source
+
+    optional_handles_start_as_none = all(
+        f"self.{name} = None" in _method_body(
+            search_source, "_initialize_search_filter_state")
+        for name in ("q_rules", "_format_btn", "_rarity_btn", "_subtype_btn",
+                     "_keyword_btn", "_traits_btn", "_property_chip_frame")
+    )
+
     checks = {
+        "the catalog refresh never touches an unbuilt picker": (
+            catalog_refresh_touches_no_missing_widget),
+        "optional widget handles exist as None before any row is built": (
+            optional_handles_start_as_none),
         "every optional filter is declared with a category and tooltip": (
             all(entry["category"] in CATEGORY_ORDER for entry in FILTER_DEFINITIONS)
             and all(len(entry["tooltip"]) >= 60 for entry in FILTER_DEFINITIONS)
