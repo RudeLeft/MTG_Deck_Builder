@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from mtgdb.printing.renderer import page_count
 from mtgdb.printing.service import PrintJob
 from mtgdb.ui.tokens import (
     FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD,
     FONT_PROGRESS_TITLE, PALETTE,
 )
+
+
+log = logging.getLogger("mtg")
 
 
 class PrintingMixin:
@@ -29,6 +32,11 @@ class PrintingMixin:
 
     def _show_print_popup(self, total_cards):
         self._cancel_print_popup_close()
+        # Match the sync adapter: a popup left over from a previous job would
+        # otherwise be overwritten without being destroyed, stranding a grabbed
+        # window whose close button is disabled.
+        if self._print_popup is not None and self._print_popup.winfo_exists():
+            self._close_print_popup()
         palette = PALETTE
         popup = self._create_hidden_popup(
             "Creating Print Template", transient=self, resizable=False)
@@ -175,9 +183,16 @@ class PrintingMixin:
         self._print_poll_after = None
         poll = self.print_controller.poll()
         if poll.progress is not None:
-            current, maximum, detail = poll.progress.payload
-            self._update_print_progress(
-                poll.progress.stage, current, maximum, detail)
+            try:
+                current, maximum, detail = poll.progress.payload
+                self._update_print_progress(
+                    poll.progress.stage, current, maximum, detail)
+            except Exception:
+                # As in the sync adapter: the popup holds a grab and disables
+                # its close button, so a rendering error must not kill the pump.
+                log.exception(
+                    "Could not render print progress for stage %s",
+                    poll.progress.stage)
 
         if poll.terminal is not None:
             if poll.terminal.kind == "done":
@@ -222,7 +237,9 @@ class PrintingMixin:
         if self._print_stage_label is not None:
             self._print_stage_label.configure(text="Print template is ready")
         if self._print_detail_label is not None:
-            pages = page_count(result.total_cards)
+            # PrintResult already carries the renderer's own page count; do not
+            # derive a second one here that could disagree with the PDF.
+            pages = result.pages
             self._print_detail_label.configure(
                 text=(
                     f"Created {pages} page{'s' if pages != 1 else ''} "
