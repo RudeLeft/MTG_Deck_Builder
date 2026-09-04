@@ -164,22 +164,16 @@ FILTER_DEFINITIONS = (
             "Vincent Proce. Cards with several artists match if any of them "
             "matches."),
     },
-    {
-        "key": "printings",
-        "category": "Printing",
-        "label": "Printings",
-        "tooltip": (
-            "Which printings of a card the search may return — paper or "
-            "digital, language, set type and exact set. Narrowing this "
-            "changes which printings appear, not which cards exist."),
-    },
 )
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}
 
 # Present in most searches, so they are never removable and never appear in the
-# catalogue. Everything else is opt-in.
-PINNED_FILTERS = ("name", "colors", "card_type")
+# catalogue. Printings is pinned for a second reason: it carries the Paper and
+# English scope every search depends on, and it composes the shared
+# PrintingFilter that Open Deck also builds, so its widget lifecycle is not the
+# Search panel's to shorten.
+PINNED_FILTERS = ("name", "colors", "card_type", "printings")
 
 
 def filter_catalog(active_keys):

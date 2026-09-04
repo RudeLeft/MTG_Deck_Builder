@@ -580,11 +580,13 @@ every feature together and is exempt.
   MAY display the batch summary, but SQL ownership remains in
   `database/search_queries.py`. _Verification:_ **AUTO**.
 - **SRCH-021 — MUST:** Keep the normal Search surface focused on Card Name, Card Type,
-  Supertypes, Colors, numeric ranges, and Mechanics. Place Content, Produces, Rules Text,
-  Subtype, Format, Rarity, and Printings behind `Advanced Filters` in that exact order,
-  with Produces immediately below Content, Rules Text immediately above Subtype, and
-  Format/Rarity immediately below Subtype. Every filter added after those MUST be
-  optional and on-demand under SRCH-034 rather than extending this fixed list. Content MUST show one compact horizontal choice group in the exact order
+  Supertypes, Colors, numeric ranges, and Mechanics. Pin exactly Card Name, Card Type, Colors, and Printings, and
+  build every other filter on demand under SRCH-034. Printings is pinned because
+  it carries the Paper/English scope every search depends on and composes the
+  shared `PrintingFilter` that Open Deck also builds. There is no `Advanced
+  Filters` accordion: a fixed list of always-rendered rows takes Results height
+  from users who never touch those filters, which is what made each added filter
+  a cost to everyone. Content MUST show one compact horizontal choice group in the exact order
   `Cards | Tokens | Emblems | Art Series` on the same row as the Content label. The
   `Cards` choice MUST begin at the same shared Advanced control-column x-position as
   Rules Text, Subtype, Format, Rarity, and Printings; the Content choices MUST remain

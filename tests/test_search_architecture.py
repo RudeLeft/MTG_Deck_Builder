@@ -324,8 +324,8 @@ def main():
             and not any(e["active"] for _c, es in catalog for e in es
                         if e["key"] != "traits")),
         "optional filter order is registry order, not insertion order": (
-            ordered_active_filters(["printings", "produces"])
-            == ("produces", "printings")
+            ordered_active_filters(["rules_text", "produces"])
+            == ("produces", "rules_text")
             and ordered_active_filters(["artist", "mana_cost"])
             == ("mana_cost", "artist")
             and ordered_active_filters(()) == ()),
@@ -415,11 +415,8 @@ def main():
             and "logical_rows" in results_source),
         "Search Clear resets subtype mechanic and rarity picker presentation": all(
             marker in search_source for marker in (
-                'self._selected_subtypes.clear()',
-                'self._selected_keywords.clear()',
-                'self._subtype_btn.configure(text="Any")',
-                'self._keyword_btn.configure(text="Any")',
-                'self._rarity_btn.configure(text="Any")',
+                'def _reset_filter_subtype(', 'def _reset_filter_mechanics(',
+                'def _reset_filter_rarity(',
             )),
         "Search Clear also releases highlights and every Results column filter": (
             'clear_highlights = getattr(self, "_clear_source_highlights", None)'
@@ -449,19 +446,16 @@ def main():
             'self._pending_search_request = False' in search_source
             and 'set_count = getattr(self, "_set_result_count", None)' in search_source
             and 'text="RESULTS | Trusted filters unavailable"' in search_source),
-        "Produces Rules Text Subtype Format Rarity and Printings share the Advanced grid": (
+        "the pinned core is built and every other filter is on demand": (
             'text="Active Filters"' not in search_source
-            and 'self._build_advanced_filters(parent)' in search_source
-            and 'self._build_produces_filter(self._advanced_filters_frame, row=1)'
-                in search_source
-            and 'self._build_rules_text_filter(\n            self._advanced_filters_frame, row=2, advanced=True)' in search_source
-            and 'text="Subtype").grid(\n            row=3' in search_source
-            and 'self._build_format_rarity_filters(\n            self._advanced_filters_frame, format_row=4, rarity_row=5)'
-                in search_source
-            and 'self._build_printing_filter(self._advanced_filters_frame, row=6)'
-                in search_source
-            and 'printing = ttk.Frame(self._advanced_filters_frame)' not in search_source
-            and 'row=row, column=1, sticky="ew", pady=2' in printings_source),
+            and "self._build_name_filter(form)" in search_source
+            and "self._build_card_type_filters(form)" in search_source
+            and "self._build_color_filters(form)" in search_source
+            and "self._build_printing_filter(form, row=6)" in search_source
+            and "self._build_optional_filter_zone(parent)" in search_source
+            and "def _build_advanced_filters(" not in search_source
+            and all(f"def _build_filter_{key}(" in search_source
+                    for key in FILTER_BY_KEY)),
         "picker summaries expose ten values before remainder count": (
             'max_visible=10' in search_source
             and 'PICKER_SUMMARY_PER_LINE = 5' in search_source

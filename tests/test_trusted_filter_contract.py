@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.database.db import CardDB
 from mtgdb.database.semantics import _card_content_kind
 from mtgdb.database.schema import RULES_SUPERTYPES_META_KEY
+from mtgdb.ui.search_filters import FILTER_BY_KEY, FILTER_DEFINITIONS
 from mtgdb.search.models import SearchCriteria
 
 
@@ -190,12 +191,14 @@ def main():
         "Search has no More Types or Characteristics UI": (
             "More Types" not in search_source and "Characteristics" not in search_source),
         "Abilities are presented as Mechanics": (
-            'text="Mechanics"' in search_source and 'text="Any", role="picker"' in search_source
-            and "Choose Abilities" not in search_source),
+            FILTER_BY_KEY["mechanics"]["label"] == "Mechanics"
+            and "Choose Abilities" not in search_source
+            and "Abilities" not in FILTER_BY_KEY["mechanics"]["tooltip"]),
         "trusted type filters expose explicit authority failures": (
-            'text="Supertypes"' in search_source
+            FILTER_BY_KEY["supertypes"]["label"] == "Supertypes"
             and '"Supertypes: "' in search_source
-            and 'text="Properties"' not in search_source
+            and not any(entry["label"] == "Properties"
+                        for entry in FILTER_DEFINITIONS)
             and '"Properties: "' not in search_source
             and "Official Wizards Supertype taxonomy is unavailable" in search_source
             and "Scryfall Card Type taxonomy is unavailable" in search_source
@@ -208,22 +211,15 @@ def main():
             and 'self.catalog("supertypes")' not in (
                 ROOT / "mtgdb/database/taxonomy.py").read_text(encoding="utf-8")),
 
-        "Content Rules Text Subtype Format Rarity and Printings are ordered Advanced filters": (
-            "def _build_advanced_filters(" in search_source
-            and 'text="Advanced Filters ▾"' in search_source
-            and search_source.index("self._build_content_filter(self._advanced_filters_frame)")
-                < search_source.index("self._build_produces_filter(")
-                < search_source.index("self._build_rules_text_filter(")
-                < search_source.index('text="Subtype").grid(')
-                < search_source.index("self._build_format_rarity_filters(")
-                < search_source.index("self._build_printing_filter(self._advanced_filters_frame, row=6)")),
-        "Advanced labels match primary Search field typography": (
-            'text="Content").grid(' in search_source
-            and 'text="Rules text", **label_options).grid(' in search_source
-            and 'label_options = {}' in search_source
-            and 'text="Subtype").grid(' in search_source
-            and 'text="Format").grid(' in search_source
-            and 'text="Rarity").grid(' in search_source
+        "optional filters replace the fixed Advanced list": (
+            "def _build_advanced_filters(" not in search_source
+            and "Advanced Filters" not in search_source
+            and "def _build_optional_filter_zone(" in search_source
+            and {"content", "rules_text", "subtype", "format", "rarity"}
+            <= set(FILTER_BY_KEY)
+            and "printings" not in FILTER_BY_KEY),
+        "optional filter labels match primary Search field typography": (
+            'label = ttk.Label(frame, text=definition["label"])' in search_source
             and 'text="Printings").grid(' in printing_source
             and 'text="Content", style="Section.TLabel"' not in search_source
             and 'text="Subtype", style="Section.TLabel"' not in search_source
@@ -236,7 +232,6 @@ def main():
             and '("emblem", "Emblems")' in search_source
             and '("art", "Art Series")' in search_source
             and '"art": tk.BooleanVar(value=False)' in search_source
-            and 'text="Content").grid(\n            row=0, column=0, sticky="w", padx=(0, 8), pady=2)' in search_source
             and 'contentbox.grid(row=0, column=1, sticky="w", pady=2)' in search_source
             and 'command=self._on_content_filter_change, padx=1).grid(' in search_source
             and 'row=0, column=column, sticky="w", padx=0, pady=0' in search_source

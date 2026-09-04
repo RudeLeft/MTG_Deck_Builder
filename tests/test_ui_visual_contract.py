@@ -228,11 +228,14 @@ def main():
 
     deck_pack = gui_source.find('deck_actions.pack(side="right")')
     search_pack = gui_source.find('search_actions.pack(side="left")')
+    # Optional filters share one control column: each row grids its control at
+    # column 1 against a label column of the same fixed minimum width.
     advanced_format_rarity_alignment = all(fragment in sources["search.py"] for fragment in (
-        'self._build_format_rarity_filters(',
-        'self._advanced_filters_frame, format_row=4, rarity_row=5)',
-        'row=format_row, column=1, sticky="ew", pady=2',
-        'row=rarity_row, column=1, sticky="ew", pady=2',
+        'def _build_filter_format(',
+        'def _build_filter_rarity(',
+        'self._format_btn.grid(row=0, column=1, sticky="ew", pady=2)',
+        'self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=2)',
+        'frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)',
     ))
     button_family_pairs = (
         ("TButton", "Primary.TButton"),
@@ -347,8 +350,7 @@ def main():
             _card_type_grid_contract()),
         "Supertypes use one compact five-column row": (
             SearchUI.SUPERTYPE_COLUMNS == 5
-            and 'columns=SUPERTYPE_COLUMNS, empty_text=supertype_empty_text'
-            in sources["search.py"]),
+            and 'columns=SUPERTYPE_COLUMNS,' in sources["search.py"]),
         "redundant pane titles are removed while section labels remain": (
             all(title not in combined_source for title in (
                 'text="Card Search"', 'text="Current Deck"',
@@ -357,7 +359,7 @@ def main():
             and 'SIDEBOARD | Cards:' in combined_source
             and 'text="RESULTS | 0 Cards", style="Section.TLabel"' in combined_source),
         "primary Search rows share one vertical spacing token": (
-            sources["search.py"].count("pady=SEARCH_ROW_PADY") >= 10),
+            sources["search.py"].count("pady=SEARCH_ROW_PADY") >= 6),
         "Card Name uses full remaining row width": (
             'text="Card Name"' in sources["search.py"]
             and 'row=0, column=1, columnspan=3, sticky="ew"'

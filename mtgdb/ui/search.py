@@ -66,6 +66,48 @@ def _row_major_grid_required_width(widgets, columns):
 class SearchFeatureMixin:
     """Own the interactive Search feature while the root wires other features."""
 
+    def _initialize_search_filter_state(self):
+        """Create every filter's state before any of its widgets exist.
+
+        Optional filters are destroyed when removed, so their state cannot live
+        in the widget. Variables and selection sets are made once here and the
+        builders bind to them, which lets a row be removed and re-added without
+        losing what the user chose. Text-backed controls have no variable, so
+        they shadow their value through _capture_optional_filter_values.
+        """
+        self.card_type_vars = {}
+        self._card_type_catalog = []
+        self._card_type_chip_widgets = ()
+        self._card_type_chip_columns = CARD_TYPE_MIN_COLUMNS
+        self.q_card_type_mode = tk.StringVar(value="any")
+
+        self.property_vars = {}
+        self._property_catalog = []
+        self.q_supertype_mode = tk.StringVar(value="all")
+
+        self.color_vars = {}
+        self.q_color_mode = tk.StringVar(value="within")
+        self.produces_vars = {}
+        self.q_produces_mode = tk.StringVar(value="includes")
+
+        self._selected_keywords = set()
+        self._keyword_catalog = []
+        self.q_keyword_mode = tk.StringVar(value="any")
+        self._selected_subtypes = set()
+        self._subtype_catalog = []
+        self.q_subtype_mode = tk.StringVar(value="any")
+        self._selected_rarities = set()
+        self.q_format = tk.StringVar(value="")
+        self.q_rules_mode = tk.StringVar(value="all")
+        self._selected_traits = set()
+        self.content_vars = {
+            "card": tk.BooleanVar(value=True),
+            "token": tk.BooleanVar(value=False),
+            "emblem": tk.BooleanVar(value=False),
+            "art": tk.BooleanVar(value=False),
+        }
+        self._rules_text_shadow = []
+
     def _build_search_pane(self, parent):
         form = ttk.Frame(parent)
         form.pack(fill="x")
@@ -73,12 +115,15 @@ class SearchFeatureMixin:
         form.columnconfigure(1, weight=1, uniform="search_control")
         form.columnconfigure(2, minsize=76)
         form.columnconfigure(3, weight=1, uniform="search_control")
+        self._initialize_search_filter_state()
         self._build_name_filter(form)
         self._build_card_type_filters(form)
         self._build_color_filters(form)
-        self._build_numeric_filters(form)
-        self._build_taxonomy_filters(form)
-        self._build_advanced_filters(parent)
+        # Printings stays pinned: it carries the Paper/English scope every
+        # search depends on and it composes the shared PrintingFilter that Open
+        # Deck also builds, so its widget lifecycle is not ours to shorten.
+        self._build_printing_filter(form, row=6)
+        self._build_optional_filter_zone(parent)
         self._bind_search_outside_click_selection_cleanup()
         self._build_search_actions(parent)
         self._build_results_table(parent)
@@ -116,17 +161,35 @@ class SearchFeatureMixin:
             "<ButtonPress-1>", self._dismiss_name_autocomplete_on_outside_click,
             add="+")
 
+    SEARCH_BLUR_FIELDS = (
+        "q_cmc_min", "q_cmc_max", "q_power_min", "q_power_max",
+        "q_toughness_min", "q_toughness_max", "q_loyalty_min", "q_loyalty_max",
+        "q_defense_min", "q_defense_max", "q_released_min", "q_released_max",
+        "q_artist",
+    )
+
     def _bind_search_outside_click_selection_cleanup(self):
         """Clear Search text highlights when a click lands outside that editor."""
-        self._search_blur_clear_widgets = (
-            self.q_rules.entry,
-            self.q_cmc_min, self.q_cmc_max,
-            self.q_power_min, self.q_power_max,
-            self.q_toughness_min, self.q_toughness_max,
-        )
+        self._refresh_search_blur_widgets()
         self.bind_all(
             "<ButtonPress-1>", self._clear_search_selections_on_outside_click,
             add="+")
+
+    def _refresh_search_blur_widgets(self):
+        """Recollect the editors that blur on an outside click.
+
+        Optional filters come and go, so this is recomputed whenever a row is
+        added or removed rather than captured once at startup.
+        """
+        widgets = []
+        rules = getattr(self, "q_rules", None)
+        if rules is not None:
+            widgets.append(rules.entry)
+        for name in self.SEARCH_BLUR_FIELDS:
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widgets.append(widget)
+        self._search_blur_clear_widgets = tuple(widgets)
 
     def _clear_search_selections_on_outside_click(self, event):
         """Give Search editors the same outside-click blur behavior as Card Name."""
@@ -162,18 +225,13 @@ class SearchFeatureMixin:
             row=1, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
         typebox = ttk.Frame(form)
         typebox.grid(row=1, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
-        self.card_type_vars = {}
-        self._card_type_catalog = []
         self._card_type_chip_frame = ttk.Frame(typebox)
         self._card_type_chip_frame.pack(fill="x")
-        self._card_type_chip_widgets = ()
-        self._card_type_chip_columns = CARD_TYPE_MIN_COLUMNS
         self._card_type_chip_frame.bind(
             "<Configure>", self._layout_card_type_chips, add="+")
         mode = ttk.Frame(typebox)
         mode.pack(fill="x", pady=(2, 0))
         ttk.Label(mode, text="Selected types:", style="Muted.TLabel").pack(side="left")
-        self.q_card_type_mode = tk.StringVar(value="any")
         type_mode_help = {
             "any": "Any: the card must have at least one selected Card Type.",
             "all": ("All: the card must have every selected Card Type across "
@@ -186,15 +244,6 @@ class SearchFeatureMixin:
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, type_mode_help[value], wraplength=390)
 
-        ttk.Label(form, text="Supertypes").grid(
-            row=2, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self.property_vars = {}
-        self._property_catalog = []
-        self._property_chip_frame = ttk.Frame(form)
-        self._property_chip_frame.grid(
-            row=2, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
-        self.q_supertype_mode = tk.StringVar(value="all")
-
 
     def _build_color_filters(self, form):
         ttk.Label(form, text="Colors").grid(
@@ -203,7 +252,6 @@ class SearchFeatureMixin:
         colorwrap.grid(row=3, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         colorbox = ttk.Frame(colorwrap)
         colorbox.pack(fill="x")
-        self.color_vars = {}
         for c in (*COLORS, "C"):
             v = tk.BooleanVar(value=False)
             self.color_vars[c] = v
@@ -217,7 +265,6 @@ class SearchFeatureMixin:
         colormode = ttk.Frame(colorwrap)
         colormode.pack(fill="x", pady=(2, 0))
         ttk.Label(colormode, text="Color identity:", style="Muted.TLabel").pack(side="left")
-        self.q_color_mode = tk.StringVar(value="within")
         color_mode_help = {
             "within": "Within: the card's entire color identity must fit inside the selected colors.",
             "includes": "Contains: the card must contain every selected color but may contain others.",
@@ -240,13 +287,10 @@ class SearchFeatureMixin:
         the same comma-joined WUBRG(+C) encoding. Only the default mode differs
         -- "contains" answers the mana-base question people actually ask.
         """
-        ttk.Label(parent, text="Produces").grid(
-            row=row, column=0, sticky="nw", padx=(0, 8), pady=2)
         wrap = ttk.Frame(parent)
         wrap.grid(row=row, column=1, sticky="ew", pady=2)
         box = ttk.Frame(wrap)
         box.pack(fill="x")
-        self.produces_vars = {}
         for color in (*COLORS, "C"):
             variable = tk.BooleanVar(value=False)
             self.produces_vars[color] = variable
@@ -260,7 +304,6 @@ class SearchFeatureMixin:
         mode = ttk.Frame(wrap)
         mode.pack(fill="x", pady=(2, 0))
         ttk.Label(mode, text="Produces mana:", style="Muted.TLabel").pack(side="left")
-        self.q_produces_mode = tk.StringVar(value="includes")
         help_text = {
             "within": "Within: everything the card produces must fit inside the selected colors.",
             "includes": "Contains: the card must produce every selected color and may produce others.",
@@ -297,51 +340,7 @@ class SearchFeatureMixin:
         spin.bind("<Up>", key, add="+")
         spin.bind("<Down>", key, add="+")
 
-    def _build_numeric_filters(self, form):
-        ranges = ttk.Frame(form)
-        ranges.grid(row=4, column=0, columnspan=4, sticky="ew", pady=SEARCH_ROW_PADY)
-        ranges.columnconfigure(1, weight=1)
-        ranges.columnconfigure(3, weight=1)
-        ranges.columnconfigure(5, weight=1)
-        ttk.Label(ranges, text="Mana value").grid(row=0, column=0, sticky="w", padx=(0, 7))
-        cmcbar = ttk.Frame(ranges); cmcbar.grid(row=0, column=1, sticky="w", padx=(0, 14))
-        self.q_cmc_min = AppSpinbox(cmcbar, from_=0, to=30, width=5); self._bind_editable_focus_behavior(self.q_cmc_min); self.q_cmc_min.pack(side="left")
-        ttk.Label(cmcbar, text="to", style="Muted.TLabel").pack(side="left", padx=5)
-        self.q_cmc_max = AppSpinbox(cmcbar, from_=0, to=30, width=5); self._bind_editable_focus_behavior(self.q_cmc_max); self.q_cmc_max.pack(side="left")
-        ttk.Label(ranges, text="Power").grid(row=0, column=2, sticky="w", padx=(0, 7))
-        powerbar = ttk.Frame(ranges); powerbar.grid(row=0, column=3, sticky="w", padx=(0, 14))
-        self.q_power_min = AppSpinbox(powerbar, from_=-20, to=30, width=5); self._bind_editable_focus_behavior(self.q_power_min); self.q_power_min.pack(side="left")
-        ttk.Label(powerbar, text="to", style="Muted.TLabel").pack(side="left", padx=5)
-        self.q_power_max = AppSpinbox(powerbar, from_=-20, to=30, width=5); self._bind_editable_focus_behavior(self.q_power_max); self.q_power_max.pack(side="left")
-        ttk.Label(ranges, text="Toughness").grid(row=0, column=4, sticky="w", padx=(0, 7))
-        toughbar = ttk.Frame(ranges); toughbar.grid(row=0, column=5, sticky="w")
-        self.q_toughness_min = AppSpinbox(toughbar, from_=-20, to=30, width=5); self._bind_editable_focus_behavior(self.q_toughness_min); self.q_toughness_min.pack(side="left")
-        ttk.Label(toughbar, text="to", style="Muted.TLabel").pack(side="left", padx=5)
-        self.q_toughness_max = AppSpinbox(toughbar, from_=-20, to=30, width=5); self._bind_editable_focus_behavior(self.q_toughness_max); self.q_toughness_max.pack(side="left")
-        for spin in (self.q_cmc_min, self.q_cmc_max, self.q_power_min,
-                     self.q_power_max, self.q_toughness_min, self.q_toughness_max):
-            self._configure_zero_start_spinbox(spin)
-
-
-    def _build_taxonomy_filters(self, form):
-        ttk.Label(form, text="Mechanics").grid(
-            row=5, column=0, sticky="w", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._selected_keywords = set()
-        self._keyword_catalog = []
-        self.q_keyword_mode = tk.StringVar(value="any")
-        mechanicbox = ttk.Frame(form)
-        mechanicbox.grid(row=5, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
-        self._keyword_btn = AppButton(
-            mechanicbox, text="Any", role="picker",
-            command=self._choose_keywords)
-        self._keyword_btn.pack(side="left", fill="x", expand=True)
-
-
     def _build_rules_text_filter(self, form, *, row, advanced=False):
-        label_options = {}
-        ttk.Label(form, text="Rules text", **label_options).grid(
-            row=row, column=0, sticky="nw", padx=(0, 8),
-            pady=(2 if advanced else SEARCH_ROW_PADY))
         rules_box = ttk.Frame(form)
         rules_box.grid(
             row=row, column=1, sticky="ew",
@@ -368,98 +367,6 @@ class SearchFeatureMixin:
         self._add_tooltip(
             rules_any, "Any: at least one Rules Text chip must match the card.")
 
-
-    def _build_format_rarity_filters(self, parent, *, format_row, rarity_row):
-        ttk.Label(parent, text="Format").grid(
-            row=format_row, column=0, sticky="w", padx=(0, 8), pady=2)
-        self.q_format = tk.StringVar(value="")
-        self._format_btn = AppButton(
-            parent, text="Any", role="picker", command=self._choose_format)
-        self._format_btn.grid(
-            row=format_row, column=1, sticky="ew", pady=2)
-
-        ttk.Label(parent, text="Rarity").grid(
-            row=rarity_row, column=0, sticky="w", padx=(0, 8), pady=2)
-        self._selected_rarities = set()
-        self._rarity_btn = AppButton(
-            parent, text="Any", role="picker", command=self._choose_rarities)
-        self._rarity_btn.grid(
-            row=rarity_row, column=1, sticky="ew", pady=2)
-
-
-    def _build_content_filter(self, parent):
-        ttk.Label(parent, text="Content").grid(
-            row=0, column=0, sticky="w", padx=(0, 8), pady=2)
-        contentbox = ttk.Frame(parent)
-        contentbox.grid(row=0, column=1, sticky="w", pady=2)
-        self.content_vars = {
-            "card": tk.BooleanVar(value=True),
-            "token": tk.BooleanVar(value=False),
-            "emblem": tk.BooleanVar(value=False),
-            "art": tk.BooleanVar(value=False),
-        }
-        labels = (
-            ("card", "Cards"), ("token", "Tokens"),
-            ("emblem", "Emblems"), ("art", "Art Series"),
-        )
-        # Keep the choices compact in the shared Advanced control column so
-        # Cards aligns with Subtype/Format/Rarity/Printings instead of spreading
-        # the four choices across the Search width.
-        for index, (key, label) in enumerate(labels):
-            column = index * 2
-            self._filter_chip(
-                contentbox, label, self.content_vars[key],
-                command=self._on_content_filter_change, padx=1).grid(
-                    row=0, column=column, sticky="w", padx=0, pady=0)
-            if index < len(labels) - 1:
-                ttk.Label(
-                    contentbox, text="|", style="Muted.TLabel").grid(
-                        row=0, column=column + 1, sticky="ns", padx=(1, 1))
-
-
-    def _build_printing_filter(self, parent, *, row=0):
-        self._search_printings = SearchPrintingFilter(self, parent, row=row)
-
-
-    def _build_advanced_filters(self, parent):
-        ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(4, 4))
-        self._advanced_filters_visible = False
-        self._advanced_btn = AppButton(
-            parent, text="Advanced Filters ▾", role="picker",
-            command=self._toggle_advanced_filters)
-        self._advanced_btn.pack(fill="x")
-        self._advanced_filters_frame = ttk.Frame(parent)
-        self._advanced_filters_frame.columnconfigure(1, weight=1)
-
-        self._build_content_filter(self._advanced_filters_frame)
-        self._build_produces_filter(self._advanced_filters_frame, row=1)
-        self._build_rules_text_filter(
-            self._advanced_filters_frame, row=2, advanced=True)
-        ttk.Label(self._advanced_filters_frame, text="Subtype").grid(
-            row=3, column=0, sticky="w", padx=(0, 8), pady=2)
-        self._selected_subtypes = set()
-        self._subtype_catalog = []
-        self.q_subtype_mode = tk.StringVar(value="any")
-        subtypebox = ttk.Frame(self._advanced_filters_frame)
-        subtypebox.grid(row=3, column=1, sticky="ew", pady=2)
-        self._subtype_btn = AppButton(
-            subtypebox, text="Any", role="picker",
-            command=self._choose_subtypes)
-        self._subtype_btn.pack(fill="x", expand=True)
-
-        self._build_format_rarity_filters(
-            self._advanced_filters_frame, format_row=4, rarity_row=5)
-
-        # Keep Printings on the same outer label/control grid as Rules Text
-        # and Subtype. A nested two-column frame gives its label a different
-        # natural width and visibly pushes the picker to the right.
-        self._build_printing_filter(self._advanced_filters_frame, row=6)
-
-        self._build_optional_filter_zone(self._advanced_filters_frame, row=7)
-
-        # Each picker summarizes itself; there is no duplicate aggregate
-        # Active Filters line above the Search actions.
-        self._active_filter_label = None
 
     # ------------------------------------------------------------------
     # optional filter controls
@@ -565,6 +472,13 @@ class SearchFeatureMixin:
     def _reset_filter_mana_cost(self):
         self.cost_feature_vars = {}
 
+    def _rules_text_values(self):
+        """Rules-text chips from the widget, or its shadow while removed."""
+        rules = getattr(self, "q_rules", None)
+        if rules is None:
+            return list(getattr(self, "_rules_text_shadow", []) or [])
+        return list(rules.values())
+
     def _optional_numeric(self, widget):
         """Spinbox value as a number, or None when absent or blank."""
         if widget is None:
@@ -621,7 +535,7 @@ class SearchFeatureMixin:
     # optional filters, built on demand
     # ------------------------------------------------------------------
 
-    def _build_optional_filter_zone(self, parent, *, row):
+    def _build_optional_filter_zone(self, parent):
         """Host for filters that exist only while they are in use.
 
         The Search form and the Results table share one column with no sash
@@ -631,14 +545,12 @@ class SearchFeatureMixin:
         """
         self._optional_filter_rows = {}
         host = ttk.Frame(parent)
-        host.grid(row=row, column=0, columnspan=2, sticky="ew")
-        host.columnconfigure(0, weight=1)
+        host.pack(fill="x")
         self._optional_filter_host = host
 
         self._add_filter_btn = AppMenubutton(
             parent, text="+ Add filter", role="menu")
-        self._add_filter_btn.grid(
-            row=row + 1, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        self._add_filter_btn.pack(anchor="w", pady=(6, 2))
         self._add_filter_menu = self._dark_menu(self._add_filter_btn)
         self._add_filter_btn.configure(menu=self._add_filter_menu)
         self._add_tooltip(
@@ -699,6 +611,7 @@ class SearchFeatureMixin:
             wraplength=300)
 
         self._optional_filter_rows[key] = frame
+        self._refresh_search_blur_widgets()
         self._refresh_add_filter_menu()
         if notify:
             self._update_search_filter_summary()
@@ -712,6 +625,7 @@ class SearchFeatureMixin:
         if reset is not None:
             reset()
         frame.destroy()
+        self._refresh_search_blur_widgets()
         self._refresh_add_filter_menu()
         if notify:
             self._update_search_filter_summary()
@@ -723,14 +637,165 @@ class SearchFeatureMixin:
         for key in list(getattr(self, "_optional_filter_rows", {})):
             self._remove_optional_filter(key, notify=False)
 
-    def _toggle_advanced_filters(self):
-        self._advanced_filters_visible = not self._advanced_filters_visible
-        if self._advanced_filters_visible:
-            self._advanced_filters_frame.pack(fill="x", pady=(3, 0), after=self._advanced_btn)
-            self._advanced_btn.configure(text="Advanced Filters ▴")
-        else:
-            self._advanced_filters_frame.pack_forget()
-            self._advanced_btn.configure(text="Advanced Filters ▾")
+    def _build_filter_content(self, parent):
+        self._build_content_filter(parent)
+
+    def _reset_filter_content(self):
+        for key, variable in self.content_vars.items():
+            variable.set(key == "card")
+
+    def _build_filter_produces(self, parent):
+        self._build_produces_filter(parent, row=0)
+
+    def _reset_filter_produces(self):
+        for variable in self.produces_vars.values():
+            variable.set(False)
+        self.q_produces_mode.set("includes")
+
+    def _build_filter_rules_text(self, parent):
+        self._build_rules_text_filter(parent, row=0, advanced=True)
+        for value in getattr(self, "_rules_text_shadow", []) or []:
+            self.q_rules.add(value)
+        pending = getattr(self, "_rules_pending_shadow", "")
+        if pending:
+            self.q_rules.entry.insert(0, pending)
+            self._rules_pending_shadow = ""
+
+    def _reset_filter_rules_text(self):
+        rules = getattr(self, "q_rules", None)
+        if rules is not None:
+            self._rules_text_shadow = list(rules.values())
+        self.q_rules = None
+        self.q_rules_mode.set("all")
+
+    def _build_filter_format(self, parent):
+        self._format_btn = AppButton(
+            parent, text=self.q_format.get() or "Any", role="picker",
+            command=self._choose_format)
+        self._format_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_format(self):
+        self.q_format.set("")
+        self._format_btn = None
+
+    def _build_filter_rarity(self, parent):
+        self._rarity_btn = AppButton(
+            parent, text=self._picker_button_text(
+                self._selected_rarities, "Any", "rarities"),
+            role="picker", command=self._choose_rarities)
+        self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_rarity(self):
+        self._selected_rarities = set()
+        self._rarity_btn = None
+
+    def _render_supertype_chips(self):
+        """Draw supertype chips when the filter is present.
+
+        The trusted-catalog refresh runs whether or not the Supertypes filter
+        has been added, so it records the vocabulary and defers drawing to
+        whichever build owns the frame.
+        """
+        frame = getattr(self, "_property_chip_frame", None)
+        if frame is None or not frame.winfo_exists():
+            return
+        self._property_chip_widgets = self._render_trusted_chips(
+            frame, self._property_catalog, self.property_vars,
+            columns=SUPERTYPE_COLUMNS,
+            empty_text=getattr(self, "_supertype_empty_text", ""))
+
+    def _build_filter_supertypes(self, parent):
+        self._property_chip_frame = ttk.Frame(parent)
+        self._property_chip_frame.grid(row=0, column=1, sticky="ew", pady=2)
+        self._render_supertype_chips()
+
+    def _reset_filter_supertypes(self):
+        for variable in self.property_vars.values():
+            variable.set(False)
+        self.q_supertype_mode.set("all")
+        self._property_chip_frame = None
+
+    def _build_filter_mechanics(self, parent):
+        self._keyword_btn = AppButton(
+            parent, text=self._picker_button_text(
+                self._selected_keywords, "Any", "mechanics",
+                max_visible=10, single_line=True),
+            role="picker", command=self._choose_keywords)
+        self._keyword_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_mechanics(self):
+        self._selected_keywords = set()
+        self.q_keyword_mode.set("any")
+        self._keyword_btn = None
+
+    def _build_filter_subtype(self, parent):
+        self._subtype_btn = AppButton(
+            parent, text=self._picker_button_text(
+                self._selected_subtypes, "Any", "subtypes",
+                max_visible=10, single_line=True),
+            role="picker", command=self._choose_subtypes)
+        self._subtype_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_subtype(self):
+        self._selected_subtypes = set()
+        self.q_subtype_mode.set("any")
+        self._subtype_btn = None
+
+    def _build_filter_mana_value(self, parent):
+        pair = self._numeric_pair(parent, "q_cmc", width=5)
+        pair.grid(row=0, column=1, sticky="w", pady=2)
+
+    def _reset_filter_mana_value(self):
+        self.q_cmc_min = None
+        self.q_cmc_max = None
+
+    def _build_filter_stats(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        ttk.Label(box, text="Power", style="Muted.TLabel").pack(
+            side="left", padx=(0, 5))
+        self._numeric_pair(box, "q_power").pack(side="left")
+        ttk.Label(box, text="Toughness", style="Muted.TLabel").pack(
+            side="left", padx=(14, 5))
+        self._numeric_pair(box, "q_toughness").pack(side="left")
+
+    def _reset_filter_stats(self):
+        for name in ("q_power_min", "q_power_max",
+                     "q_toughness_min", "q_toughness_max"):
+            setattr(self, name, None)
+
+
+    def _build_content_filter(self, parent):
+        contentbox = ttk.Frame(parent)
+        contentbox.grid(row=0, column=1, sticky="w", pady=2)
+        self.content_vars = {
+            "card": tk.BooleanVar(value=True),
+            "token": tk.BooleanVar(value=False),
+            "emblem": tk.BooleanVar(value=False),
+            "art": tk.BooleanVar(value=False),
+        }
+        labels = (
+            ("card", "Cards"), ("token", "Tokens"),
+            ("emblem", "Emblems"), ("art", "Art Series"),
+        )
+        # Keep the choices compact in the shared Advanced control column so
+        # Cards aligns with Subtype/Format/Rarity/Printings instead of spreading
+        # the four choices across the Search width.
+        for index, (key, label) in enumerate(labels):
+            column = index * 2
+            self._filter_chip(
+                contentbox, label, self.content_vars[key],
+                command=self._on_content_filter_change, padx=1).grid(
+                    row=0, column=column, sticky="w", padx=0, pady=0)
+            if index < len(labels) - 1:
+                ttk.Label(
+                    contentbox, text="|", style="Muted.TLabel").grid(
+                        row=0, column=column + 1, sticky="ns", padx=(1, 1))
+
+
+    def _build_printing_filter(self, parent, *, row=0):
+        self._search_printings = SearchPrintingFilter(self, parent, row=row)
+
 
     def _selected_content_types(self):
         selected = {
@@ -926,34 +991,20 @@ class SearchFeatureMixin:
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name.set("")
-        self.q_rules.clear()
+        # Removing every optional row also runs each filter's own reset, so the
+        # state they own is cleared without naming it twice here.
+        self._clear_optional_filters()
+        self._rules_text_shadow = []
         self.q_rules_mode.set("all")
         self.q_card_type_mode.set("any")
-        self.q_supertype_mode.set("all")
-        self.q_subtype_mode.set("any")
-        self.q_keyword_mode.set("any")
         self.q_color_mode.set("within")
         self.q_produces_mode.set("includes")
-        self._clear_optional_filters()
         for variable in self.card_type_vars.values():
             variable.set(False)
-        for variable in self.property_vars.values():
-            variable.set(False)
-        self._selected_subtypes.clear()
-        self._selected_keywords.clear()
-        self._selected_rarities.clear()
-        self._subtype_btn.configure(text="Any")
-        self._keyword_btn.configure(text="Any")
-        self._rarity_btn.configure(text="Any")
-        for widget in (self.q_cmc_min, self.q_cmc_max, self.q_power_min,
-                       self.q_power_max, self.q_toughness_min, self.q_toughness_max):
-            widget.delete(0, "end")
         for variable in self.color_vars.values():
             variable.set(False)
         for variable in self.produces_vars.values():
             variable.set(False)
-        self.q_format.set("")
-        self._format_btn.configure(text="Any")
         for key, variable in self.content_vars.items():
             variable.set(key == "card")
         self.english_only.set(True)
@@ -1020,7 +1071,8 @@ class SearchFeatureMixin:
     def _choose_subtypes(self):
         def apply(chosen):
             self._selected_subtypes = set(chosen)
-            self._subtype_btn.configure(text=self._picker_button_text(
+            if self._subtype_btn is not None:
+                self._subtype_btn.configure(text=self._picker_button_text(
                 self._selected_subtypes, "Any", "subtypes",
             max_visible=10, single_line=True))
             self._update_search_filter_summary()
@@ -1034,7 +1086,8 @@ class SearchFeatureMixin:
     def _choose_keywords(self):
         def apply(chosen):
             self._selected_keywords = set(chosen)
-            self._keyword_btn.configure(text=self._picker_button_text(
+            if self._keyword_btn is not None:
+                self._keyword_btn.configure(text=self._picker_button_text(
                 self._selected_keywords, "Any", "mechanics", max_visible=10))
             self._update_search_filter_summary()
         self._open_search_multi_picker(
@@ -1082,7 +1135,8 @@ class SearchFeatureMixin:
         def apply(chosen):
             self._selected_rarities = set(chosen)
             labels = {r.capitalize() for r in chosen}
-            self._rarity_btn.configure(text=self._picker_button_text(
+            if self._rarity_btn is not None:
+                self._rarity_btn.configure(text=self._picker_button_text(
                 labels, "Any", "rarities"))
         self._open_search_multi_picker(
             "Choose Rarities", [(r, r.replace("_", " ").capitalize())
@@ -1229,9 +1283,8 @@ class SearchFeatureMixin:
                 supertype_empty_text += (
                     "\nLast error: "
                     + " ".join(str(supertype_status[1]).split())[:220])
-        self._property_chip_widgets = self._render_trusted_chips(
-            self._property_chip_frame, self._property_catalog, self.property_vars,
-            columns=SUPERTYPE_COLUMNS, empty_text=supertype_empty_text)
+        self._supertype_empty_text = supertype_empty_text
+        self._render_supertype_chips()
         for value, variable in self.property_vars.items():
             variable.set(value in pending["supertypes"])
 
@@ -1456,7 +1509,6 @@ class SearchFeatureMixin:
             "paper_only": bool(self._search_printings.paper_only.get()),
             "set_types": set_types,
             "set_codes": set_codes,
-            "advanced_visible": bool(self._advanced_filters_visible),
             "result_sort": [self._sort_col, bool(self._sort_desc)],
             "result_filters": self._table_filters.get("results", {}),
             "had_results": bool(self._result_store.logical_count),
@@ -1485,12 +1537,18 @@ class SearchFeatureMixin:
         self._search_name_batch_display = " | ".join(restored_names)
         self.q_name.set(self._search_name_batch_display if restored_names
                         else str(state.get("name") or ""))
-        self.q_rules.clear()
-        for phrase in state.get("rules", []):
-            self.q_rules.add(phrase)
-        pending = str(state.get("rules_pending") or "")
-        if pending:
-            self.q_rules.entry.insert(0, pending)
+        # The Rules text row may not exist yet -- optional rows are rebuilt
+        # further down -- so restore through the shadow the builder reads.
+        self._rules_text_shadow = [
+            str(phrase) for phrase in state.get("rules", []) if str(phrase)]
+        self._rules_pending_shadow = str(state.get("rules_pending") or "")
+        rules = getattr(self, "q_rules", None)
+        if rules is not None:
+            rules.clear()
+            for phrase in self._rules_text_shadow:
+                rules.add(phrase)
+            if self._rules_pending_shadow:
+                rules.entry.insert(0, self._rules_pending_shadow)
 
         saved_content = [
             "card" if str(value) == "deck" else str(value)
@@ -1566,9 +1624,6 @@ class SearchFeatureMixin:
             self._set_search_entry_text(widget, state.get(key))
         self.english_only.set(bool(state.get("english_only", True)))
 
-        wants_advanced = bool(state.get("advanced_visible", False))
-        if wants_advanced != self._advanced_filters_visible:
-            self._toggle_advanced_filters()
 
         sort = state.get("result_sort", [None, False])
         if isinstance(sort, list) and len(sort) >= 2:
@@ -1647,13 +1702,17 @@ class SearchFeatureMixin:
                 "The card database is empty.\n\nUse Database -> Update Database first.")
             return
         try:
+            # An absent optional filter means no restriction, so a missing
+            # spinbox reads as None rather than raising.
             numeric = {
-                "cmc_min": self._parse_search_number(self.q_cmc_min.get(), "Mana value minimum"),
-                "cmc_max": self._parse_search_number(self.q_cmc_max.get(), "Mana value maximum"),
-                "power_min": self._parse_search_number(self.q_power_min.get(), "Power minimum"),
-                "power_max": self._parse_search_number(self.q_power_max.get(), "Power maximum"),
-                "toughness_min": self._parse_search_number(self.q_toughness_min.get(), "Toughness minimum"),
-                "toughness_max": self._parse_search_number(self.q_toughness_max.get(), "Toughness maximum"),
+                "cmc_min": self._optional_numeric(getattr(self, "q_cmc_min", None)),
+                "cmc_max": self._optional_numeric(getattr(self, "q_cmc_max", None)),
+                "power_min": self._optional_numeric(getattr(self, "q_power_min", None)),
+                "power_max": self._optional_numeric(getattr(self, "q_power_max", None)),
+                "toughness_min": self._optional_numeric(
+                    getattr(self, "q_toughness_min", None)),
+                "toughness_max": self._optional_numeric(
+                    getattr(self, "q_toughness_max", None)),
             }
             self._validate_search_range("Mana value", numeric["cmc_min"], numeric["cmc_max"])
             self._validate_search_range("Power", numeric["power_min"], numeric["power_max"])
@@ -1667,7 +1726,7 @@ class SearchFeatureMixin:
         name_filter, exact_names = self._effective_name_filters()
         search_args = dict(
             name=name_filter, names=exact_names,
-            text=list(self.q_rules.values()), text_mode=self.q_rules_mode.get(),
+            text=self._rules_text_values(), text_mode=self.q_rules_mode.get(),
             card_types=[value for value, variable in self.card_type_vars.items() if variable.get()],
             card_type_mode=self.q_card_type_mode.get(),
             supertypes=[value for value, variable in self.property_vars.items() if variable.get()],
