@@ -30,8 +30,8 @@ from mtgdb.ui.comparison_controls import comparison_action_columns
 from mtgdb.ui.search_checklist import VirtualChecklistView
 from mtgdb.ui.styles import install_ui_styles
 from mtgdb.ui.tokens import (
-    COMPARISON_WINDOW_SIZE, MAIN_CENTER_COLUMN_WIDTH, MAIN_SIDE_MIN_WIDTH,
-    PANEL_PADDING, PALETTE,
+    COMPARISON_WINDOW_SIZE, FONT_BODY, MAIN_CENTER_COLUMN_WIDTH,
+    MAIN_SIDE_MIN_WIDTH, PANEL_PADDING, PALETTE,
 )
 
 
@@ -227,8 +227,17 @@ def _run_scale(root, percent, scaling):
             needed = max(comparison_action_widths)
         return needed <= width
 
+    # A table row must stay taller than the body font it renders. rowheight was
+    # a literal 28px while Tk scales the body font with the display, so at 150%
+    # the linespace equalled the whole row and Results clipped its own text.
+    row_linespace = int(
+        tkfont.Font(root=root, font=FONT_BODY).metrics("linespace"))
+    row_height = int(ttk.Style(root).lookup("Treeview", "rowheight"))
+    row_headroom = row_height - row_linespace
+
     checks = {
         "geometry root remains invisible": _root_is_invisible(root),
+        "table rows stay taller than the scaled body font": row_headroom >= 4,
         "standard family heights": standard_ok,
         "compact family heights": compact_ok,
         "deck controls are visibly larger than compact controls": deck_larger,
@@ -290,6 +299,7 @@ def _run_scale(root, percent, scaling):
             compare_primary.winfo_width(), compare_clear.winfo_width()),
         "form": form_heights,
         "content_row_width": content_row_width,
+        "treeview_row": (row_linespace, row_height, row_headroom),
         "text": [detail for passed, detail in text_results if not passed],
     }
     ok = True

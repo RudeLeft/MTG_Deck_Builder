@@ -1365,6 +1365,13 @@ every feature together and is exempt.
 - **SIZ-002 — MUST:** Let text buttons use content-derived width (explicit char
   width is a minimum), give form controls the shared vertical metric, and give
   fields the shared body font/border/focus/padding. _Verification:_ **AUTO**.
+- **SIZ-004 — MUST:** Derive the shared table row height from the body font
+  measured at the active Tk scaling, never a literal pixel value. Tk scales the
+  font with display scaling and a literal `rowheight` does not follow it, so a
+  fixed 28px row left the 150% body linespace exactly as tall as the row that
+  held it and Results/Mainboard/Sideboard clipped their own text. Keep at least
+  four pixels of headroom over the measured linespace.
+  _Verification:_ **WINDOWS**.
 - **SIZ-003 — MUST:** Display every complete button label without clipping at
   100%, 125%, and 150% — including `Compare`, `Add Mainboard`, and `Add Sideboard`.
   Intentional multiline labels MUST be validated by the widest rendered line,
@@ -1777,6 +1784,6 @@ the behavior it governs, update its test in the same change (CHG-007).
 | DATA-*, VER-009, VER-013 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |
 | PORT-001 through PORT-005, PORT-007 | `tests/test_portability_contract.py`, `tests/test_hardening_regressions.py` |
 | PORT-006, single-instance | `windows_tests/test_single_instance_windows.py`, `tests/test_portability_contract.py` |
-| SIZ-003, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py` |
+| SIZ-003, SIZ-004, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py` |
 | BLD-*, REL-* | `tests/test_project_guardrails.py`, `tests/test_hardening_regressions.py` |
 | BLD-004 packaged smoke | `windows_tests/smoke_packaged_windows.py` |

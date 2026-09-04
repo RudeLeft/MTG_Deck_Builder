@@ -4,7 +4,7 @@ All ttk dimensions, typography, and state colors are registered here so the
 feature UI only selects a semantic component role.
 """
 
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 from mtgdb.ui.tokens import (
     FONT_BODY,
@@ -73,6 +73,25 @@ def _map_button(style, name, *, primary=False):
                          ("active", p["border"])],
             relief=[("pressed", "sunken")],
         )
+
+
+TREEVIEW_ROW_PADDING = 6
+TREEVIEW_MIN_ROW_HEIGHT = 28
+
+
+def treeview_row_height(root):
+    """Row height that still fits the body font at the active Tk scaling.
+
+    A fixed 28px row was correct at 100% and wrong above it: Tk scales the
+    body font with display scaling but a literal rowheight does not follow, so
+    at 150% the text linespace equals the whole row and Results/Mainboard/
+    Sideboard clip their own contents.
+    """
+    try:
+        linespace = int(tkfont.Font(root=root, font=FONT_BODY).metrics("linespace"))
+    except Exception:
+        return TREEVIEW_MIN_ROW_HEIGHT
+    return max(TREEVIEW_MIN_ROW_HEIGHT, linespace + TREEVIEW_ROW_PADDING)
 
 
 def install_ui_styles(root):
@@ -285,7 +304,8 @@ def install_ui_styles(root):
     # the surface so Results/Mainboard/Sideboard do not get a light outer box.
     style.configure("Treeview", background=p["surface"],
                     fieldbackground=p["surface"], foreground=p["text"],
-                    rowheight=28, borderwidth=0, bordercolor=p["surface"],
+                    rowheight=treeview_row_height(root),
+                    borderwidth=0, bordercolor=p["surface"],
                     lightcolor=p["surface"], font=FONT_BODY)
     style.configure("Treeview.Heading", background=p["surface2"],
                     foreground=p["muted"], font=FONT_HELPER_BOLD,
