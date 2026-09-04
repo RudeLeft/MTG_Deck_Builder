@@ -502,12 +502,24 @@ class SearchFeatureMixin:
         if button is not None:
             button.configure(text=text)
 
-    def _rules_text_values(self):
-        """Rules-text chips from the widget, or its shadow while removed."""
+    def _rules_text_values(self, commit_pending=True):
+        """Rules-text chips, or nothing when the filter is not present.
+
+        A removed filter contributes nothing to the query (SRCH-034), so this
+        reports empty rather than falling back to the shadow. The shadow exists
+        only so a workspace restore can refill the row it is about to rebuild.
+        """
         rules = getattr(self, "q_rules", None)
         if rules is None:
-            return list(getattr(self, "_rules_text_shadow", []) or [])
-        return list(rules.values())
+            return []
+        return list(rules.values(commit_pending=commit_pending))
+
+    def _rules_pending_text(self):
+        """Uncommitted Rules text, or nothing when the filter is absent."""
+        rules = getattr(self, "q_rules", None)
+        if rules is None:
+            return ""
+        return rules.entry.get()
 
     def _optional_numeric(self, widget):
         """Spinbox value as a number, or None when absent or blank."""
@@ -689,12 +701,15 @@ class SearchFeatureMixin:
         pending = getattr(self, "_rules_pending_shadow", "")
         if pending:
             self.q_rules.entry.insert(0, pending)
-            self._rules_pending_shadow = ""
+        # The shadow is consumed by the rebuild it was recorded for.
+        self._rules_text_shadow = []
+        self._rules_pending_shadow = ""
 
     def _reset_filter_rules_text(self):
-        rules = getattr(self, "q_rules", None)
-        if rules is not None:
-            self._rules_text_shadow = list(rules.values())
+        # Removing a filter clears what it contributed, exactly like the
+        # spinbox rows whose widgets simply cease to exist.
+        self._rules_text_shadow = []
+        self._rules_pending_shadow = ""
         self.q_rules = None
         self.q_rules_mode.set("all")
 
@@ -1427,7 +1442,7 @@ class SearchFeatureMixin:
             parts.append(f"Artist: {artist}")
         if self._selected_keywords:
             parts.append("Mechanics: " + ", ".join(sorted(self._selected_keywords)))
-        rules = self.q_rules.values(commit_pending=False) if hasattr(self, "q_rules") else []
+        rules = self._rules_text_values(commit_pending=False)
         if rules:
             parts.append("Text: " + ", ".join(rules))
         if self.q_format.get():
@@ -1503,8 +1518,8 @@ class SearchFeatureMixin:
         return {
             "name": self.q_name.get().strip(),
             "exact_names": list(self._search_name_batch),
-            "rules": self.q_rules.values(commit_pending=False),
-            "rules_pending": self.q_rules.entry.get(),
+            "rules": self._rules_text_values(commit_pending=False),
+            "rules_pending": self._rules_pending_text(),
             "rules_mode": self.q_rules_mode.get(),
             "card_type_mode": self.q_card_type_mode.get(),
             "supertype_mode": self.q_supertype_mode.get(),
@@ -1549,6 +1564,10 @@ class SearchFeatureMixin:
 
     @staticmethod
     def _set_search_entry_text(widget, value):
+        # The numeric rows are optional, so a restore may name a widget that
+        # does not currently exist; the row rebuild refills it instead.
+        if widget is None:
+            return
         try:
             widget.delete(0, "end")
             if value not in (None, ""):

@@ -327,7 +327,36 @@ def main():
                      "_keyword_btn", "_traits_btn", "_property_chip_frame")
     )
 
+    # SRCH-034. Every reader must survive a filter that has not been built.
+    # Two shipped crashes came from this: the catalog refresh, and workspace
+    # autosave, both of which run without knowing which rows exist. hasattr is
+    # not a guard here -- the handles exist as None from the start.
+    no_hasattr_guards_on_optional_handles = not any(
+        f'hasattr(self, "{name}")' in search_source
+        for name in ("q_rules", "q_artist", "q_cmc_min", "_rarity_btn",
+                     "_subtype_btn", "_keyword_btn", "_format_btn"))
+    workspace_capture_reads_through_helpers = (
+        '"rules": self._rules_text_values(commit_pending=False),' in search_source
+        and '"rules_pending": self._rules_pending_text(),' in search_source
+        and "self.q_rules.values(" not in _method_body(
+            search_source, "_capture_search_workspace_state"))
+    removal_clears_the_query_contribution = (
+        "return []" in _method_body(search_source, "_rules_text_values")
+        and "self._rules_text_shadow = []" in _method_body(
+            search_source, "_reset_filter_rules_text"))
+    entry_restore_tolerates_absence = (
+        "if widget is None:" in _method_body(
+            search_source, "_set_search_entry_text"))
+
     checks = {
+        "no reader guards an optional handle with hasattr": (
+            no_hasattr_guards_on_optional_handles),
+        "workspace capture survives unbuilt filter rows": (
+            workspace_capture_reads_through_helpers),
+        "removing a filter clears what it contributed": (
+            removal_clears_the_query_contribution),
+        "restoring text tolerates a row that is not built": (
+            entry_restore_tolerates_absence),
         "the catalog refresh never touches an unbuilt picker": (
             catalog_refresh_touches_no_missing_widget),
         "optional widget handles exist as None before any row is built": (
