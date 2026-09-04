@@ -100,7 +100,38 @@ def main():
     window_source = (ROOT / "mtgdb/ui/window.py").read_text(encoding="utf-8")
     app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
 
+    # The dark title bar is a Windows-only native call. Inverting the platform
+    # guard would both skip the styling on Windows and attempt ctypes calls on
+    # platforms that have no dwmapi, so pin both directions.
+    import sys as _sys
+    from unittest import mock as _mock
+    import mtgdb.ui.window as _window
+
+    class _HwndProbe:
+        def __init__(self):
+            self.id_reads = 0
+
+        def winfo_id(self):
+            self.id_reads += 1
+            raise RuntimeError("stop before any native call")
+
+    def _attempts_native_styling(platform):
+        probe = _HwndProbe()
+        with _mock.patch.object(_sys, "platform", platform):
+            try:
+                _window.WindowServicesMixin._set_dark_titlebar_for(
+                    object(), probe, frame_changed=False)
+            except Exception:
+                pass
+        return probe.id_reads > 0
+
+    platform_guard_ok = (
+        _attempts_native_styling("win32")
+        and not _attempts_native_styling("linux")
+        and not _attempts_native_styling("darwin"))
+
     checks = {
+        "dark title bar styling is attempted only on Windows": platform_guard_ok,
         "window mixin has no undefined module-level names": not free_globals,
         "bundled window icon asset resolves from source": (
             os.path.exists(_asset_path(APP_ICON_FILE))),

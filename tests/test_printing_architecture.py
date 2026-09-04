@@ -179,7 +179,54 @@ def main():
         "_print_failed", "_shutdown_printing",
     }
 
+    # The terminal event decides which completion path runs. Confusing "done"
+    # with "error" either reports a failure as success or discards a finished
+    # PDF, so pin the whole dispatch rather than any single branch.
+    from types import SimpleNamespace as _NS
+    from mtgdb.ui.printing import PrintingMixin as _PrintingMixin
+
+    class _PrintDispatchProbe:
+        def __init__(self, kind):
+            self._print_poll_after = "pending"
+            self.calls = []
+            self._terminal = _NS(kind=kind, payload=f"{kind}-payload")
+
+            class _Controller:
+                running = False
+
+                def poll(inner):
+                    return _NS(progress=None, terminal=self._terminal)
+
+            self.print_controller = _Controller()
+
+        def _print_done(self, payload):
+            self.calls.append(("done", payload))
+
+        def _print_failed(self, payload):
+            self.calls.append(("failed", payload))
+
+        def _close_print_popup(self):
+            self.calls.append(("closed", None))
+
+        def after(self, *_args):
+            self.calls.append(("rescheduled", None))
+            return "after-id"
+
+    def _dispatch(kind):
+        probe = _PrintDispatchProbe(kind)
+        _PrintingMixin._poll_print_events(probe)
+        return probe.calls
+
+    print_terminal_dispatch = (
+        _dispatch("done") == [("done", "done-payload")]
+        and _dispatch("error") == [("failed", "error-payload")]
+        # Anything else (for example a cancellation) closes without claiming
+        # either success or failure.
+        and _dispatch("cancelled") == [("closed", None)])
+
     checks = {
+        "print terminal events route to the matching completion path": (
+            print_terminal_dispatch),
         **functional,
         "controller allows one worker and coalesces typed progress": (
             started.status == "started" and busy.status == "busy"

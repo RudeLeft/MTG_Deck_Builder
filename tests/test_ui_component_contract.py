@@ -121,7 +121,51 @@ def main():
             re.search(r'"bg": PALETTE\["(\w+)"\]', _radio_source).group(1)],
     }
 
+    # The highlighted-suggestion commit indexes _suggest_hits immediately after
+    # its bounds test, so a relaxed guard is an IndexError, not a soft failure.
+    from mtgdb.ui.autocomplete import AutocompleteEntry as _Autocomplete
+
+    class _SuggestProbe:
+        """Carries only the state commit_highlighted_suggestion touches."""
+
+        def __init__(self, hits, index):
+            self._suggest_hits = list(hits)
+            self._suggest_index = index
+            self.text = "typed"
+            self.hidden = 0
+
+        def delete(self, *_args):
+            self.text = ""
+
+        def insert(self, _index, value):
+            self.text = value
+
+        def icursor(self, *_args):
+            return None
+
+        def _hide_suggestions(self):
+            self.hidden += 1
+
+    def _commit(hits, index):
+        probe = _SuggestProbe(hits, index)
+        accepted = _Autocomplete.commit_highlighted_suggestion(probe)
+        return accepted, probe.text
+
+    _hits = ["Alpha", "Beta"]
+    _suggestion_bounds_ok = (
+        # In range: commits and hides the popup.
+        _commit(_hits, 0) == (True, "Alpha")
+        and _commit(_hits, 1) == (True, "Beta")
+        # One past the end must be refused, not indexed.
+        and _commit(_hits, 2) == (False, "typed")
+        and _commit(_hits, 99) == (False, "typed")
+        # Nothing highlighted, and an empty suggestion list.
+        and _commit(_hits, -1) == (False, "typed")
+        and _commit([], 0) == (False, "typed"))
+
     checks = {
+        "highlighted-suggestion commit refuses out-of-range indexes": (
+            _suggestion_bounds_ok),
         "all ttk button roles resolve to a registered style": (
             set(C._BUTTON_STYLES) == {
                 "standard", "primary", "compact", "compact_primary",

@@ -163,7 +163,48 @@ def main():
     blocked_owner = _PendingSearchOwner(catalog_loading=True)
     blocked = SearchFeatureMixin._resume_pending_search_request(blocked_owner)
 
+    # A multi-name batch ("Search for these cards") pins the Name filter to a
+    # generated display string. Editing that box must drop the batch, or the
+    # visible Name text and the actual search scope silently disagree.
+    from mtgdb.ui.search import SearchFeatureMixin as _SearchMixin
+
+    class _NameEntry:
+        def __init__(self, text):
+            self.text = text
+
+        def get(self):
+            return self.text
+
+    class _NameBatchProbe:
+        def __init__(self, batch, display, typed):
+            self._search_name_batch = tuple(batch)
+            self._search_name_batch_display = display
+            self.q_name = _NameEntry(typed)
+            self.summaries = 0
+
+        def _update_search_filter_summary(self):
+            self.summaries += 1
+
+    def _edit(batch, display, typed):
+        probe = _NameBatchProbe(batch, display, typed)
+        _SearchMixin._on_name_filter_edited(probe)
+        return probe._search_name_batch, probe._search_name_batch_display
+
+    _batch = ("Forest", "Island")
+    _display = "2 cards"
+    _name_batch_ok = (
+        # Untouched text keeps the batch active.
+        _edit(_batch, _display, _display) == (_batch, _display)
+        # Surrounding whitespace is still the same intent.
+        and _edit(_batch, _display, f"  {_display}  ") == (_batch, _display)
+        # Any real edit drops the batch so scope matches what is shown.
+        and _edit(_batch, _display, "Forest") == ((), "")
+        and _edit(_batch, _display, "") == ((), "")
+        # With no batch active there is nothing to clear.
+        and _edit((), "", "Forest") == ((), ""))
+
     checks = {
+        "editing the Name field drops a stale exact-name batch": _name_batch_ok,
         "criteria signatures normalize equivalent snapshots": (
             criteria.signature() == same.signature()),
         "repository projection is intentionally narrow": (

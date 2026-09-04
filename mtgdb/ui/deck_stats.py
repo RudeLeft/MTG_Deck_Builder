@@ -16,6 +16,11 @@ from mtgdb.ui.tokens import (
 )
 
 CMC_LABELS = ["0", "1", "2", "3", "4", "5", "6", "7+"]
+def deck_board_label(board):
+    """Return the display name for a deck board identifier."""
+    return "Mainboard" if board == "main" else "Sideboard"
+
+
 class DeckStatsMixin:
     """Render deck-domain calculations without owning their formulas."""
 
@@ -201,6 +206,21 @@ class DeckStatsMixin:
         self._last_curve = [0] * 8
         self._curve_breakdown = None
 
+    def _analysis_snapshot(self):
+        """Return deck analysis, recomputing whenever the deck has changed.
+
+        The deck's generation counter increments on every mutation, so a cached
+        snapshot is reusable only while the generation still matches. Inverting
+        this test silently serves stale mana and draw-odds figures after an edit,
+        which reads as the panel simply not updating.
+        """
+        snapshot = getattr(self, "_deck_analysis_snapshot", None)
+        if snapshot is None or snapshot.generation != getattr(
+                self.deck, "generation", 0):
+            snapshot = analyze_deck(self.deck)
+            self._deck_analysis_snapshot = snapshot
+        return snapshot
+
     def _refresh_stats(self):
         snapshot = analyze_deck(self.deck)
         self._deck_analysis_snapshot = snapshot
@@ -332,10 +352,7 @@ class DeckStatsMixin:
     def _render_mana_check(self):
         for widget in self.manacheck_frame.winfo_children():
             widget.destroy()
-        snapshot = getattr(self, "_deck_analysis_snapshot", None)
-        if snapshot is None or snapshot.generation != getattr(self.deck, "generation", 0):
-            snapshot = analyze_deck(self.deck)
-            self._deck_analysis_snapshot = snapshot
+        snapshot = self._analysis_snapshot()
         pips = snapshot.color_pips
         sources, n_sources = snapshot.color_sources, snapshot.mana_source_cards
         shown = [c for c in ("W", "U", "B", "R", "G")
@@ -382,10 +399,7 @@ class DeckStatsMixin:
                 row=r, column=1, sticky="e", padx=(14, 0))
 
     def _render_draw_odds(self):
-        snapshot = getattr(self, "_deck_analysis_snapshot", None)
-        if snapshot is None or snapshot.generation != getattr(self.deck, "generation", 0):
-            snapshot = analyze_deck(self.deck)
-            self._deck_analysis_snapshot = snapshot
+        snapshot = self._analysis_snapshot()
         n, lands, avg, p24 = snapshot.opening_land_stats
         if n == 0:
             self.lands_odds_lbl.configure(text="Mainboard empty")
@@ -420,7 +434,7 @@ class DeckStatsMixin:
 
         name = card.get("name") or "(unnamed card)"
         self.odds_selected_name.configure(
-            text=f"{name}  ({'Mainboard' if board == 'main' else 'Sideboard'})")
+            text=f"{name}  ({deck_board_label(board)})")
 
         odds = card_draw_odds(self.deck, name)
         copies = odds["copies"]

@@ -259,7 +259,33 @@ def main():
         finally:
             _sweep_service.shutdown()
 
+    # card_detail enables its Flip action on len(card_viewable_faces(card)) > 1.
+    # That test is only meaningful because this helper never reports exactly one
+    # viewable face: a card either has several separately imaged faces or none.
+    # Pin the invariant here so the caller's threshold cannot quietly become
+    # equivalent to "any face at all".
+    def _faces(count, imaged=True):
+        return json.dumps([
+            {"name": f"Face {i}",
+             "image_uris": {"normal": f"https://example.invalid/{i}.jpg"}
+             if imaged else {}}
+            for i in range(count)])
+
+    viewable_face_counts = {
+        len(card_viewable_faces({"card_faces": _faces(n)})) for n in range(0, 5)
+    } | {
+        len(card_viewable_faces({})),
+        len(card_viewable_faces({"card_faces": _faces(2, imaged=False)})),
+        # Split/adventure style: faces exist but share the one card image.
+        len(card_viewable_faces({"card_faces": json.dumps(
+            [{"name": "Fire"}, {"name": "Ice"}])})),
+    }
+
     checks = {
+        "viewable faces are never reported as exactly one": (
+            1 not in viewable_face_counts
+            and 0 in viewable_face_counts
+            and max(viewable_face_counts) >= 2),
         "abandoned partials are swept from nested caches too": (
             recursive_partial_sweep),
         "image service uses fixed daemon concurrency": (

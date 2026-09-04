@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from mtgdb.deck.model import Deck
 from mtgdb.ui.deck import DeckEditorMixin, deck_action_layout_mode
-from mtgdb.ui.deck_stats import DeckStatsMixin
+from mtgdb.ui.deck_stats import DeckStatsMixin, deck_board_label
 
 
 EDITOR_METHODS = {
@@ -217,7 +217,89 @@ def main():
     wide_needed = sum(dpi_widths) + 12
     two_needed = max(dpi_widths[0] + dpi_widths[1] + 4,
                      dpi_widths[2] + dpi_widths[3] + 4)
+    # Stats snapshot freshness. The mana and draw-odds panels share one cached
+    # analysis; if the generation test is inverted they serve stale figures after
+    # every edit, which looks like the panel simply failing to update.
+    class _SnapshotHarness(DeckStatsMixin):
+        def __init__(self, deck):
+            self.deck = deck
+
+    _snapshot_deck = Deck("Snapshot", "modern")
+    _snapshot_card = {
+        "id": "snap-1", "name": "Snapshot Card", "type_line": "Creature",
+        "mana_cost": "{G}", "cmc": 1, "color_identity": ["G"],
+    }
+    _snapshot_deck.add(_snapshot_card, "main", 1)
+    _snapshot = _SnapshotHarness(_snapshot_deck)
+
+    _first = _snapshot._analysis_snapshot()
+    _cached = _snapshot._analysis_snapshot()
+    _reused_while_unchanged = _cached is _first
+    _snapshot_deck.add(_snapshot_card, "main", 3)          # generation advances
+    _after_edit = _snapshot._analysis_snapshot()
+    _recomputed_after_edit = (
+        _after_edit is not _first
+        and _after_edit.generation == _snapshot_deck.generation
+        and _after_edit.stats["main_total"] == 4)
+    _stable_again = _snapshot._analysis_snapshot() is _after_edit
+
+    # Save As must fold the live name/format editors into the deck only when the
+    # tab being saved is the one those editors belong to. Saving a background tab
+    # after syncing would stamp the active tab's name onto a different deck.
+    from unittest import mock as _mock
+    import mtgdb.ui.deck_files as _deck_files
+
+    class _SaveSession:
+        def __init__(self, name):
+            self.deck = Deck(name, "modern")
+            self.path = None
+            self.dirty = True
+
+    class _SaveSessions:
+        def __init__(self, count, active):
+            self._sessions = [_SaveSession(f"Deck {i}") for i in range(count)]
+            self.active_index = active
+
+        def is_valid_index(self, index):
+            return isinstance(index, int) and 0 <= index < len(self._sessions)
+
+        def __getitem__(self, index):
+            return self._sessions[index]
+
+    class _SaveProbe(_deck_files.DeckFileWorkflowMixin):
+        def __init__(self, count, active):
+            self.deck_sessions = _SaveSessions(count, active)
+            self.syncs = 0
+
+        def _sync_deck_meta(self):
+            self.syncs += 1
+
+    def _save_syncs(target_index, active_index):
+        probe = _SaveProbe(3, active_index)
+        # An empty path aborts before any file work; the sync decision has
+        # already been made by then.
+        with _mock.patch.object(
+                _deck_files.filedialog, "asksaveasfilename", return_value=""):
+            result = probe._save_session_as(target_index)
+        return probe.syncs, result
+
+    save_sync_scoping = (
+        _save_syncs(1, 1) == (1, False)      # saving the active tab syncs once
+        and _save_syncs(0, 1) == (0, False)  # a background tab must not sync
+        and _save_syncs(2, 1) == (0, False)
+        and _save_syncs(9, 1) == (0, False))  # invalid index does nothing
+
     checks = {
+        "Save As syncs the live editors only for the active tab": (
+            save_sync_scoping),
+        "deck stats reuse one analysis snapshot until the deck changes": (
+            _reused_while_unchanged and _stable_again),
+        "deck stats recompute analysis after every deck mutation": (
+            _recomputed_after_edit),
+        "deck board identifiers map to their display names": (
+            deck_board_label("main") == "Mainboard"
+            and deck_board_label("side") == "Sideboard"
+            and deck_board_label("") == "Sideboard"),
         "DeckBuilderApp composes deck UI and file-workflow mixins": (
             {"DeckEditorMixin", "DeckStatsMixin", "DeckFileWorkflowMixin"}
             <= gui_bases),
