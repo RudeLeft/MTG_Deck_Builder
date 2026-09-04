@@ -1,7 +1,9 @@
 """Deck-editor and deck-statistics UI ownership and behavior contracts."""
 
 import ast
+import atexit
 from pathlib import Path
+import shutil
 import sys
 
 
@@ -338,6 +340,109 @@ def main():
         and _save_syncs(2, 1) == (0, False)
         and _save_syncs(9, 1) == (0, False))  # invalid index does nothing
 
+    # DUI-019 end to end. The Windows save dialog pre-validates read-only
+    # files and unwritable folders, so a failed save cannot be staged by hand
+    # through the real dialog. Stub only the two dialogs and let the genuine
+    # close -> confirm -> save -> deck-file worker -> OS error path run, so the
+    # wiring between _close_deck_session and _await_deck_file_job is covered
+    # rather than just the helper in isolation.
+    import tempfile as _tempfile
+
+    from mtgdb.deck.sessions import DeckSession, DeckSessionManager
+    from mtgdb.ui import deck as deck_module
+    from mtgdb.ui import deck_files as df_module
+    from mtgdb.ui.deck import DeckEditorMixin as _Editor
+    from mtgdb.ui.deck_files import DeckFileWorkflowMixin as _Files
+
+    class _CloseHarness(_Files, _Editor):
+        def __init__(self, sessions):
+            self.deck_sessions = DeckSessionManager(sessions, active_index=0)
+            self.renders = 0
+            self.deferred = 0
+
+        def _capture_active_session_state(self):
+            pass
+
+        def _load_active_session_state(self):
+            pass
+
+        def _sync_deck_meta(self):
+            pass
+
+        def _render_deck_tabs(self):
+            self.renders += 1
+
+        def _status(self, _message):
+            pass
+
+        def after(self, _delay, _callback):
+            # Tk defers rather than runs. Present so that dropping wait=True
+            # fails on the surviving session rather than on a missing
+            # attribute -- the mutant has to be caught by the assertion.
+            self.deferred += 1
+            return "after#1"
+
+    class _Dialogs:
+        def __init__(self, path):
+            self.path = path
+            self.errors = []
+
+        def asksaveasfilename(self, **_kwargs):
+            return self.path
+
+        def askyesnocancel(self, *_args, **_kwargs):
+            return True          # the user chooses Save
+
+        def showerror(self, title, message):
+            self.errors.append((title, message))
+
+    def _close_dirty_session_saving_to(path):
+        """Close a dirty session that saves to `path`; report what survived."""
+        deck = Deck()
+        deck.add(card, "main", 2)
+        session = DeckSession(deck=deck, path=None, dirty=True)
+        harness = _CloseHarness([session])
+        dialogs = _Dialogs(path)
+        saved_dialog = df_module.filedialog
+        saved_error = df_module.messagebox
+        saved_confirm = deck_module.messagebox
+        try:
+            df_module.filedialog = dialogs
+            df_module.messagebox = dialogs
+            deck_module.messagebox = dialogs
+            closed = harness._close_deck_session(0)
+        finally:
+            df_module.filedialog = saved_dialog
+            df_module.messagebox = saved_error
+            deck_module.messagebox = saved_confirm
+        return closed, harness, dialogs
+
+    # VER-011 registered cleanup rather than a context manager: without the
+    # fix the save runs on a worker thread that outlives this block, and a
+    # TemporaryDirectory exit would race it and mask the assertion below.
+    _close_dir = _tempfile.mkdtemp(prefix="mtgdb-close-")
+    atexit.register(shutil.rmtree, _close_dir, True)
+    # A file standing where the deck's parent directory must be: portable, and
+    # it fails inside save_deck_text rather than in the dialog.
+    blocker = Path(_close_dir) / "blocker.txt"
+    blocker.write_text("not a directory", encoding="utf-8")
+    failed_closed, failed_harness, failed_dialogs = (
+        _close_dirty_session_saving_to(str(blocker / "deck.txt")))
+    good_closed, good_harness, _good_dialogs = (
+        _close_dirty_session_saving_to(
+            str(Path(_close_dir) / "good deck.txt")))
+    good_file_written = (Path(_close_dir) / "good deck.txt").is_file()
+    surviving = failed_harness.deck_sessions[0]
+    deck_survived_failed_save = (
+        failed_closed is False
+        and len(failed_harness.deck_sessions) == 1
+        and surviving.dirty is True
+        and surviving.deck.total("main") == 2
+        and len(failed_dialogs.errors) == 1
+        and failed_dialogs.errors[0][0] == "Save failed")
+    session_closes_after_a_real_write = (
+        good_closed is True and good_file_written)
+
     # DUI-019. Closing a dirty session destroys it the moment
     # _confirm_close_session returns True, so that value must mean "written",
     # not "submitted". Exercise the waiting path against a failed write.
@@ -381,6 +486,10 @@ def main():
     deck_file_source = sources["mtgdb/ui/deck_files.py"]
 
     checks = {
+        "a failed save keeps the dirty session and its cards": (
+            deck_survived_failed_save),
+        "a completed save closes the session and writes the file": (
+            session_closes_after_a_real_write),
         "no UI method reports submitted background work as finished": (
             _submitters_claiming_success(ROOT / "mtgdb" / "ui") == []),
         "failed save is reported as not written and keeps the session": (
