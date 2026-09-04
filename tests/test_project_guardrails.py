@@ -169,6 +169,50 @@ def _internal_import_allowed(module, imported):
     return False
 
 
+SEARCH_UI_MODULES = (
+    "mtgdb/ui/search.py", "mtgdb/ui/search_printings.py",
+    "mtgdb/ui/search_checklist.py", "mtgdb/ui/results.py",
+    "mtgdb/ui/table_filters.py", "mtgdb/ui/tables.py",
+)
+
+
+def _search_ui_carddb_importers(sources):
+    """Return search-UI modules that import CardDB instead of the repository.
+
+    The import matrix lets `mtgdb/ui/**` import any owning mtgdb API, but the
+    search-UI row overrides that: these modules MUST reach card data through
+    `search/repository.py` rather than `mtgdb.database.db` directly. Checked
+    on the AST so every import form counts, including
+    `from mtgdb.database import db`.
+
+    A name listed here that no longer exists is reported too, so a renamed
+    module cannot silently drop out of the row it is meant to be covered by.
+    """
+    offenders = []
+    for name in SEARCH_UI_MODULES:
+        source = sources.get(name)
+        if source is None:
+            offenders.append(f"{name} (listed in the matrix row but missing)")
+            continue
+        for node in ast.walk(ast.parse(source)):
+            imported = None
+            if isinstance(node, ast.Import):
+                if any(alias.name == "mtgdb.database.db"
+                       for alias in node.names):
+                    imported = name
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module == "mtgdb.database.db":
+                    imported = name
+                elif (module == "mtgdb.database"
+                      and any(alias.name == "db" for alias in node.names)):
+                    imported = name
+            if imported is not None:
+                offenders.append(imported)
+                break
+    return offenders
+
+
 def _unmanaged_temp_directories():
     """Return test files whose tempfile.mkdtemp() has no registered cleanup.
 
@@ -465,6 +509,8 @@ def main():
                 "mtgdb/search/models.py", "mtgdb/search/repository.py",
                 "mtgdb/search/controller.py", "mtgdb/search/results.py",
                 "mtgdb/search/catalogs.py")),
+        "search UI reaches card data only through the search repository": (
+            _search_ui_carddb_importers(production_sources) == []),
         "search UI is SQLite-free": all(
             "sqlite3" not in architecture_imports[name]
             for name in (
