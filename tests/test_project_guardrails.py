@@ -169,6 +169,64 @@ def _internal_import_allowed(module, imported):
     return False
 
 
+UI_CLUSTER_EXEMPT = {"mtgdb/ui/app.py", "mtgdb/ui/__init__.py"}
+
+
+def _ui_clusters(agent_text):
+    """Parse the UI feature-cluster table so the contract stays authoritative.
+
+    Returns {module path: allowed logic prefixes}. Reading the table instead of
+    restating it here means a cluster edit cannot leave the gate enforcing a
+    stale map.
+    """
+    section = re.search(
+        r"### UI feature clusters\n(.*?)(?=\n- \*\*LAYER-001)",
+        agent_text, re.S)
+    if section is None:
+        return {}
+    clusters = {}
+    for line in section.group(1).splitlines():
+        if not line.startswith("|") or line.startswith("| ---"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 3 or cells[0] in ("Cluster",):
+            continue
+        modules = re.findall(r"`([^`]+\.py)`", cells[1])
+        prefixes = tuple(re.findall(r"`([^`]+)`", cells[2]))
+        for module in modules:
+            clusters[f"mtgdb/ui/{module}"] = prefixes
+    return clusters
+
+
+def _ui_cluster_violations(agent_text, ui_directory):
+    """LAYER-006 offenders, plus any UI module the table forgot to place."""
+    clusters = _ui_clusters(agent_text)
+    if not clusters:
+        return ["the UI feature-cluster table is missing or unparsable"]
+    offenders = []
+    for path in sorted(ui_directory.glob("*.py")):
+        name = f"mtgdb/ui/{path.name}"
+        if name in UI_CLUSTER_EXEMPT:
+            continue
+        if name not in clusters:
+            offenders.append(f"{name} (not placed in any cluster)")
+            continue
+        allowed = clusters[name] + ("mtgdb.core.",)
+        imported = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+        for module in sorted(imported):
+            if not module.startswith("mtgdb.") or module.startswith("mtgdb.ui"):
+                continue
+            if not any(module == prefix.rstrip(".") or module.startswith(prefix)
+                       for prefix in allowed):
+                offenders.append(f"{name} -> {module}")
+    return offenders
+
+
 SEARCH_UI_MODULES = (
     "mtgdb/ui/search.py", "mtgdb/ui/search_printings.py",
     "mtgdb/ui/search_checklist.py", "mtgdb/ui/results.py",
@@ -509,6 +567,8 @@ def main():
                 "mtgdb/search/models.py", "mtgdb/search/repository.py",
                 "mtgdb/search/controller.py", "mtgdb/search/results.py",
                 "mtgdb/search/catalogs.py")),
+        "every UI module stays inside its feature cluster": (
+            _ui_cluster_violations(agent_text, ROOT / "mtgdb" / "ui") == []),
         "search UI reaches card data only through the search repository": (
             _search_ui_carddb_importers(production_sources) == []),
         "search UI is SQLite-free": all(

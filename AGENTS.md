@@ -342,6 +342,26 @@ rows override broader rows.
 | `mtgdb/workspace/repository.py` | stdlib; `mtgdb.core.background_jobs`; `mtgdb.deck.{model,sessions}` | `tkinter`; `sqlite3`; `mtgdb.ui.*`; `mtgdb.database.*` |
 | `mtgdb/preferences/repository.py` | stdlib | `tkinter`; `sqlite3`; `mtgdb.ui.*` |
 
+### UI feature clusters
+
+The `mtgdb/ui/**` row above permits any owning `mtgdb` API, which leaves the
+largest layer without internal dependency direction. Each `mtgdb/ui/` module
+therefore belongs to exactly one cluster below and reaches Tk-free logic only
+through that cluster's packages, plus `mtgdb.core.*`. Sibling `mtgdb.ui.*`
+imports stay unrestricted. `mtgdb/ui/app.py` is the composition root that wires
+every feature together and is exempt.
+
+| Cluster | UI modules | MAY import |
+| --- | --- | --- |
+| Search | `search.py`, `search_printings.py`, `search_checklist.py`, `set_filters.py`, `table_filters.py`, `results.py`, `tables.py`, `autocomplete.py` | `mtgdb.search.`, `mtgdb.database.constants`, `mtgdb.preferences.` |
+| Deck | `deck.py`, `deck_files.py`, `deck_stats.py` | `mtgdb.deck.` |
+| Comparison | `comparison.py`, `comparison_controls.py` | `mtgdb.comparison.`, `mtgdb.images.` |
+| Card detail | `card_detail.py` | `mtgdb.images.`, `mtgdb.deck.legality`, `mtgdb.database.constants` |
+| Printing | `printing.py` | `mtgdb.printing.` |
+| Database sync | `database_sync.py` | `mtgdb.database.` |
+| Workspace | `workspace.py` | `mtgdb.workspace.`, `mtgdb.deck.` |
+| Shared presentation | `tokens.py`, `components.py`, `styles.py`, `assets.py`, `window.py`, `mana.py` | — |
+
 - **LAYER-001 — MUST:** Import `tkinter` (or build a Tk widget/image) only from
   modules under `mtgdb/ui/`. No module outside `mtgdb/ui/` imports `tkinter`.
   _Verification:_ **AUTO**.
@@ -353,6 +373,13 @@ rows override broader rows.
   added import. _Verification:_ **AUTO**.
 - **LAYER-005 — MUST NOT:** Import a feature package from `mtgdb/core/**`; core
   is the shared base and depends on nothing above it. _Verification:_ **AUTO**.
+- **LAYER-006 — MUST:** Assign every `mtgdb/ui/` module to exactly one row of
+  the UI feature-cluster table, and import Tk-free logic only from that row's
+  packages plus `mtgdb.core.*`. A cluster reaching into another feature's logic
+  package — a mana-symbol module importing the PDF renderer — is a boundary
+  break even where the broad `mtgdb/ui/**` row would permit it. Sibling
+  `mtgdb.ui.*` imports remain unrestricted, and `mtgdb/ui/app.py` is exempt as
+  the composition root. _Verification:_ **AUTO**.
 
 ## Naming and placement
 
