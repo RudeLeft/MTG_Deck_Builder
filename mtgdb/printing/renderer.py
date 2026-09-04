@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
@@ -73,9 +74,15 @@ def render_print_template(placements, output_path, deck_name="MTG Deck",
         raise ValueError("The deck is empty.")
 
     output_path = os.fspath(output_path)
-    os.makedirs(
-        os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
-    temporary_path = output_path + ".part"
+    directory = os.path.dirname(os.path.abspath(output_path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    # PORT-007: a unique temporary name, so two renders to the same destination
+    # cannot write through one another, and an fsync below so the rename cannot
+    # publish a PDF whose bytes have not reached disk.
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(output_path)}.", suffix=".part",
+        dir=directory)
+    os.close(descriptor)
     pdf = canvas.Canvas(temporary_path, pagesize=letter, pageCompression=1)
     pdf.setTitle(f"{deck_name or 'MTG Deck'} - Print Template")
     pdf.setAuthor("MTG Deck Builder")
@@ -105,6 +112,12 @@ def render_print_template(placements, output_path, deck_name="MTG Deck",
         if cancel_cb:
             cancel_cb()
         pdf.save()
+        with open(temporary_path, "r+b") as handle:
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
         os.replace(temporary_path, output_path)
     finally:
         try:

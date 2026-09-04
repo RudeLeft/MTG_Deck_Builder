@@ -77,7 +77,8 @@ def main():
         name: (ROOT / name).read_text(encoding="utf-8")
         for name in ("mtgdb/preferences/repository.py",
                      "mtgdb/workspace/repository.py",
-                     "mtgdb/deck/io.py")
+                     "mtgdb/deck/io.py",
+                     "mtgdb/printing/renderer.py")
     }
     durable_write_pattern = all(
         "tempfile.mkstemp(" in source

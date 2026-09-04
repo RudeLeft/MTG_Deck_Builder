@@ -21,6 +21,63 @@ from mtgdb.ui.tables import (
 
 
 
+class _DragTree:
+    """Minimal Treeview stand-in for exercising header drag-and-drop."""
+
+    def configure(self, **_kwargs):
+        return None
+
+
+class _ColumnReorderHarness(TableInfrastructureMixin):
+    """Drive _column_drag_release without Tk, preferences, or a real table."""
+
+    def __init__(self, columns, view="results"):
+        self._visible_columns = {view: list(columns)}
+        self._column_drag = None
+        self.saves = 0
+
+    def _clear_column_drop_marker(self):
+        return None
+
+    def _apply_table_columns(self, view, tv=None):
+        return None
+
+    def _save_ui_preferences(self):
+        self.saves += 1
+
+
+def _expected_reorder(columns, source, drop_index):
+    """Independent oracle: the drop index is a slot in the ORIGINAL order.
+
+    Written out rather than derived from the code under test, so a defect in
+    that code cannot move both sides together (VER-010).
+    """
+    marker = object()
+    work = list(columns)
+    work.insert(drop_index, marker)
+    work.remove(source)
+    return [source if value is marker else value for value in work]
+
+
+def _column_reorder_matches_oracle():
+    """Every drag slot, including past the last column, must land correctly."""
+    for columns in (["name", "type", "set", "rarity"], ["name", "type"],
+                    ["name", "type", "set", "rarity", "cmc", "artist"]):
+        for source in columns:
+            for drop_index in range(len(columns) + 1):
+                harness = _ColumnReorderHarness(columns)
+                tree = _DragTree()
+                harness._column_drag = {
+                    "tv": tree, "view": "results", "column": source,
+                    "start_x": 0, "moved": True, "drop_index": drop_index,
+                }
+                harness._column_drag_release(None, tree, "results")
+                got = harness._visible_columns["results"]
+                if got != _expected_reorder(columns, source, drop_index):
+                    return False
+    return True
+
+
 class _Var:
     def __init__(self, value=False):
         self.value = bool(value)
@@ -192,6 +249,8 @@ def main():
         work_area=(-1920, 0, 1920, 1040), margin=8)
 
     checks = {
+        "column drag reorder lands on the dropped slot, including the last": (
+            _column_reorder_matches_oracle()),
         "table schema has one production owner": (
             schema_owners == ["mtgdb/ui/tables.py", "mtgdb/ui/tables.py"]),
         "all configurable table views use one schema": (

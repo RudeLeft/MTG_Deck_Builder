@@ -1527,7 +1527,8 @@ rows override broader rows.
   filename lets two writers interleave into one path, and omitting `fsync` lets
   the rename become visible before the bytes it points at, publishing an empty
   file that a tolerant reader silently treats as "no saved settings". Governs
-  `workspace/repository.py`, `preferences/repository.py`, and `deck/io.py`.
+  `workspace/repository.py`, `preferences/repository.py`, `deck/io.py`, and
+  `printing/renderer.py`.
   _Verification:_ **AUTO**.
 - **PORT-006 — MUST:** Preserve the Windows named-mutex single-instance guard.
   `acquire_single_instance` MUST be detection-only: it reports whether this

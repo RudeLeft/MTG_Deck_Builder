@@ -431,9 +431,15 @@ class TableInfrastructureMixin:
             return "break"
         original_index = ordinary.index(source)
         ordinary.remove(source)
-        index = max(0, min(state["drop_index"], len(ordinary)))
+        # The drop index addresses a slot in the list BEFORE the drag column was
+        # removed, so translate it first and clamp afterwards. Clamping first
+        # collapsed the past-the-last-column slot onto the final index and then
+        # decremented it again, which made dragging a column to the last
+        # position land it second to last instead.
+        index = state["drop_index"]
         if index > original_index:
             index -= 1
+        index = max(0, min(index, len(ordinary)))
         ordinary.insert(index, source)
         self._visible_columns[view] = (
             (["cost"] if "cost" in visible else []) + ordinary)
