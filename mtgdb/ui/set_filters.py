@@ -439,6 +439,11 @@ class PrintingFilter:
             except tk.TclError:
                 pass
         self._render_individual_set_checks()
+        # Clearing sets is a filter change like any other. Without this the
+        # picker button refreshes but the owner's active-filter summary keeps
+        # listing the sets that were just cleared, so the two disagree until
+        # some unrelated change happens to refresh it.
+        self._notify_change()
 
     def _render_individual_set_checks(self):
         checklist = getattr(self, "_set_checklist", None)

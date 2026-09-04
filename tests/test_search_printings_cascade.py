@@ -195,7 +195,49 @@ def main():
     subtype_ten_visible = len(subtype_ten.split(" · ")) == 10
     subtype_remainder = subtype_eleven.endswith("+1")
 
+    # Every bulk action in the Printings popup is a filter change and must reach
+    # the owner, or the picker button and the active-filter summary disagree.
+    from mtgdb.ui.set_filters import PrintingFilter as _PrintingFilter
+    from mtgdb.ui.set_filters import _LightBoolVar as _Light
+
+    class _NotifyProbe(_PrintingFilter):
+        """Drive the bulk set actions without Tk variables or a popup."""
+
+        def __init__(self):
+            self.notifications = 0
+            self._change_callback = self._record
+            self.paper_only = _Light(True)
+            self.set_type_vars = {"core": _Light(True)}
+            self._set_vars = {"m21": _Light(True), "dom": _Light(True)}
+            self._eligible_sets = [("m21", "Core 2021"), ("dom", "Dominaria")]
+            self._present_set_types = {"core"}
+            self._set_checklist = None
+            self._set_checklist_catalog = ()
+            self._status_label = None
+            self._set_search_var = None
+            self._visible_set_codes = ["m21", "dom"]
+
+        def _record(self):
+            self.notifications += 1
+
+    def _notified(action):
+        probe = _NotifyProbe()
+        action(probe)
+        return probe.notifications > 0, probe
+
+    _cleared, _clear_probe = _notified(lambda probe: probe._clear_sets())
+    _selected, _ = _notified(lambda probe: probe._set_visible_sets(True))
+    _deselected, _ = _notified(lambda probe: probe._set_visible_sets(False))
+
+    bulk_set_actions_notify = (
+        _cleared and _selected and _deselected
+        # Clearing must actually clear, not merely notify.
+        and not any(v.get() for v in _clear_probe._set_vars.values())
+        and _clear_probe.selected_set_codes() == set())
+
     checks = {
+        "bulk Exact Set actions reach the owner's filter summary": (
+            bulk_set_actions_notify),
         "initial Exact Sets include every paper set": initial_all_paper,
         "catalog refresh keeps the same Printings popup": popup_survives_initial_refresh,
         "Expansion Set Type narrows Exact Sets": expansion_only,
