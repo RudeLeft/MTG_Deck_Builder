@@ -561,7 +561,21 @@ every feature together and is exempt.
   builder helper and an exact match MUST sort the requested set; building the
   needle in `COLORS` order makes every multi-colour `Exactly` search return
   nothing. Colourless is an empty colour identity but an explicit `C` member of
-  produced mana. _Verification:_ **AUTO**.
+  produced mana, so the Produces filter offers `C` as a real choice while the
+  Colors filter MUST release it as soon as a colour is selected — a card
+  cannot be colourless and a colour, and silently dropping the `C` from the
+  query made White plus Colorless return exactly the mono-white result.
+  _Verification:_ **AUTO**.
+- **SRCH-039 — MUST:** Let the Colors filter choose which colour column it
+  reads: colour identity, or the colours the card itself is. The two disagree
+  often enough to be separate questions — a colourless card can have a
+  coloured identity, and W+U exactly returns 1,582 printings by identity
+  against 1,062 by card colours. The mode row above the pips MUST name the
+  column currently selected, so `Color identity:` never sits above a search of
+  the other one. A criterion the query layer supports MUST NOT sit without a
+  control: colour scope and Artist both kept working SQL, a criterion and a
+  passing gate after their controls were gone, which is a feature no user can
+  run, proved by a test. _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.
@@ -571,7 +585,12 @@ every feature together and is exempt.
   _Verification:_ **AUTO**.
 - **SRCH-012 — MUST:** Capture and restore Search-owned workspace state in
   `ui/search.py`; `ui/workspace.py` coordinates persistence without knowledge of
-  individual Search widget/catalog/set-variable names. _Verification:_ **AUTO**.
+  individual Search widget/catalog/set-variable names. The saved scope MUST
+  include the Paper/Arena/MTGO selection itself and not only the paper flag
+  derived from it, or an Arena session reopens on paper. State owned by an
+  optional row MUST be restored after the rows are rebuilt: the row's widgets
+  are created by that rebuild, so anything applied before it is discarded
+  along with the variables that held it. _Verification:_ **AUTO**.
 - **SRCH-013 — MUST:** Keep the complete logical Results set in
   `search/results.py` and only its fixed-slot viewport adaptation in `ui/results.py`;
   preserve selection by exact Scryfall printing ID outside Tk, never by physical
@@ -585,7 +604,11 @@ every feature together and is exempt.
   `SearchCriteria`, reject non-numeric or non-finite values and
   minimum-greater-than-maximum ranges with a clear UI error, reject non-finite
   numeric values again at the query-builder boundary, and never raise those
-  validation errors through a Tk callback. _Verification:_ **AUTO**.
+  validation errors through a Tk callback. Every pair of bounds is validated,
+  including the optional ones: Loyalty, Defense and Released went unchecked
+  for a while, so a backwards range ran and returned nothing, which a user
+  cannot tell apart from a search that genuinely matches no card.
+  _Verification:_ **AUTO**.
 - **SRCH-016 — MUST:** Treat Scryfall legality statuses `legal` and `restricted`
   as playable for format Search, retain the restricted distinction in card-detail
   presentation, and reject unknown content-filter vocabulary instead of silently
@@ -1606,7 +1629,11 @@ every feature together and is exempt.
   Art Series from Scryfall-backed row/layout semantics. Content is chosen through
   Card traits rather than its own filter row: Cards are always searched and the
   other kinds are opt-in traits that select a content kind instead of adding a
-  query clause. Art Series MUST use the
+  query clause. Because they widen what the search covers, changing one MUST
+  rebuild the trusted vocabulary for the new scope — the results were correct
+  while Subtype, Card type and Set went on describing cards only — and they
+  MUST be grouped apart from the traits the Any/All/None row governs, which
+  cannot apply to a choice of scope. Art Series MUST use the
   internal `art` content key and the user-facing label **Art Series**, MUST be
   default-off, and MUST become Search-visible only when explicitly selected. An
   explicit Art Series Content request MUST override the legacy hidden art exclusion

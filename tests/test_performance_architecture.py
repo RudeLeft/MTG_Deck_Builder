@@ -482,10 +482,15 @@ def main():
             and "prepare_vocabulary" in sources["mtgdb/search/results.py"]
             and "_build_async_result_values_filter" in sources["mtgdb/ui/table_filters.py"]),
         "internal performance diagnostics expose logical rows caches and workers": (
+            # These aggregate per-instance state that no lower object holds.
             "def result_performance_info(" in sources["mtgdb/ui/results.py"]
-            and "def search_catalog_performance_info(" in sources["mtgdb/ui/search.py"]
             and "def workspace_performance_info(" in sources["mtgdb/ui/workspace.py"]
-            and "def cache_info(" in sources["mtgdb/images/service.py"]),
+            # The owners report their own bounded caches. Asserting a UI method
+            # that only forwarded to one of them kept a method alive that
+            # nothing called and proved nothing about the cache behind it.
+            and "def cache_info(" in sources["mtgdb/images/service.py"]
+            and "def cache_info(" in sources["mtgdb/search/catalogs.py"]
+            and "search_catalog_performance_info" not in sources["mtgdb/ui/search.py"]),
         "no one-Treeview-row-per-logical-result reconciler remains": (
             "_ResultTableReconciler" not in sources["mtgdb/ui/results.py"]
             and "RESULT_LIVE_ROW_LIMIT = 128" in sources["mtgdb/ui/results.py"]

@@ -63,9 +63,25 @@ class SearchPrintingFilter(PrintingFilter):
             variable.set(False)
         self.refresh_catalog()
 
-    def restore_selection(self, set_types, set_codes=None, *, paper_only=True):
-        """Stage saved selections until trusted asynchronous vocabulary arrives."""
-        self.paper_only.set(bool(paper_only))
+    def restore_selection(self, set_types, set_codes=None, *, paper_only=True,
+                          games=None):
+        """Stage saved selections until trusted asynchronous vocabulary arrives.
+
+        Search resolves its vocabulary asynchronously, so this stages rather
+        than queries -- but the platform checkboxes are plain UI state and are
+        applied immediately, because the scope request below is keyed by them.
+        """
+        if games is not None:
+            wanted = {str(value) for value in games}
+            for key, variable in self.game_vars.items():
+                variable.set(key in wanted)
+            self._sync_paper_only_from_games()
+        else:
+            self.paper_only.set(bool(paper_only))
+            # A workspace saved before platforms were recorded only knows the
+            # paper flag; widen to every platform when it was off.
+            for key, variable in self.game_vars.items():
+                variable.set(key == "paper" or not paper_only)
         self._pending_restore_types = {
             str(value) for value in (set_types or ()) if str(value)
         }

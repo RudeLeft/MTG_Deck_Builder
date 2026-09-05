@@ -109,6 +109,9 @@ class SearchFeatureMixin:
 
         self.color_vars = {}
         self.q_color_mode = tk.StringVar(value="within")
+        self.q_color_scope = tk.StringVar(value="identity")
+        self._color_mode_label = None
+        self._colorless_check = None
         self.produces_vars = {}
         self.q_produces_mode = tk.StringVar(value="includes")
 
@@ -299,13 +302,51 @@ class SearchFeatureMixin:
             kw = {"text": " " + MANA_NAMES[c], "variable": v,
                   "style": "Color.TCheckbutton",
                   "command": self._update_search_filter_summary}
+            if c != "C":
+                # Colorless is not a colour a card can also be, so ticking a
+                # colour releases it. Silently dropping it from the query made
+                # White plus Colorless return exactly the mono-white result.
+                kw["command"] = self._sync_colorless_availability
             if self.pips.get(c):
                 kw["image"] = self.pips[c]
                 kw["compound"] = "left"
-            ttk.Checkbutton(colorbox, **kw).pack(side="left", padx=(0, 8))
+            check = ttk.Checkbutton(colorbox, **kw)
+            check.pack(side="left", padx=(0, 8))
+            if c == "C":
+                self._colorless_check = check
+                self._add_tooltip(
+                    check,
+                    "Colorless: cards with no colors at all. A card cannot be "
+                    "colorless and also a color, so this clears itself when "
+                    "you pick one. To find what makes colorless mana, use the "
+                    "Produces filter instead.",
+                    wraplength=380)
+        scope = ttk.Frame(colorwrap)
+        scope.pack(fill="x", pady=(2, 0))
+        ttk.Label(scope, text="Look at:", style="Muted.TLabel").pack(side="left")
+        scope_help = {
+            "identity": (
+                "Color identity: every color the card brings to a deck, from "
+                "its cost, its rules text and both faces. This is the one "
+                "Commander uses."),
+            "colors": (
+                "Card colors: the colors the card itself is, from its cost "
+                "and any color indicator. Devoid cards and lands are "
+                "colorless here even when their identity is not."),
+        }
+        for label, value in (("Color identity", "identity"),
+                             ("Card colors", "colors")):
+            radio = ttk.Radiobutton(
+                scope, text=label, variable=self.q_color_scope, value=value,
+                style="FormChoice.TRadiobutton",
+                command=self._on_color_scope_changed)
+            radio.pack(side="left", padx=(3, 0))
+            self._add_tooltip(radio, scope_help[value], wraplength=390)
         colormode = ttk.Frame(colorwrap)
         colormode.pack(fill="x", pady=(2, 0))
-        ttk.Label(colormode, text="Color identity:", style="Muted.TLabel").pack(side="left")
+        self._color_mode_label = ttk.Label(
+            colormode, text="Color identity:", style="Muted.TLabel")
+        self._color_mode_label.pack(side="left")
         color_mode_help = {
             "within": "Within: the card's entire color identity must fit inside the selected colors.",
             "includes": "Contains: the card must contain every selected color but may contain others.",
@@ -319,7 +360,41 @@ class SearchFeatureMixin:
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, color_mode_help[value], wraplength=390)
+        self._sync_colorless_availability()
 
+
+    COLOR_SCOPE_LABELS = {
+        "identity": "Color identity:", "colors": "Card colors:"}
+
+    def _on_color_scope_changed(self):
+        """Keep the mode row naming whichever column is being compared."""
+        label = getattr(self, "_color_mode_label", None)
+        if label is not None:
+            label.configure(text=self.COLOR_SCOPE_LABELS.get(
+                self.q_color_scope.get(), "Color identity:"))
+        self._update_search_filter_summary()
+
+    def _sync_colorless_availability(self):
+        """Release the Colorless pip while any colour is selected.
+
+        Colorless is the absence of colour in both columns this filter can
+        read, so it cannot be combined with one. The query layer has always
+        ignored it in that case; leaving the box ticked was what made the
+        result look wrong.
+        """
+        colored = any(
+            variable.get() for key, variable in self.color_vars.items()
+            if key in COLORS)
+        colorless = self.color_vars.get("C")
+        if colored and colorless is not None and colorless.get():
+            colorless.set(False)
+        check = getattr(self, "_colorless_check", None)
+        if check is not None:
+            try:
+                check.state(["disabled"] if colored else ["!disabled"])
+            except tk.TclError:
+                pass
+        self._update_search_filter_summary()
 
     def _build_produces_filter(self, parent, row):
         """Mana a card can actually produce, distinct from its colour identity.
@@ -445,28 +520,43 @@ class SearchFeatureMixin:
 
     def _choose_traits(self):
         """Pick boolean card properties through the shared checklist dialog."""
-        by_label = {label: key for key, label in TRAIT_CHOICES}
 
         def apply(chosen):
+            previous_content = self._content_types_from_traits()
             self._selected_traits = {
-                by_label[label] for label in chosen if label in by_label}
+                str(key) for key in chosen if key in TRAIT_LABELS}
             if self._traits_btn is not None:
                 self._traits_btn.configure(text=self._picker_button_text(
                     {TRAIT_LABELS[key]
                      for key in self._selected_traits},
                     "Any", "traits", max_visible=10, single_line=True))
+            # Tokens, Emblems and Art Series widen which objects the search
+            # covers, so the vocabulary every other picker offers has to be
+            # rebuilt for the new scope. Without this the Subtype, Card type
+            # and Set lists kept describing cards only.
+            if self._content_types_from_traits() != previous_content:
+                self._on_content_filter_change()
+                return
             self._update_search_filter_summary()
 
         selected = {
-            TRAIT_LABELS[key]
-            for key in getattr(self, "_selected_traits", set()) or ()
+            key for key in getattr(self, "_selected_traits", set()) or ()
             if key in TRAIT_LABELS}
         self._open_search_multi_picker(
-            "Card Traits", [label for _key, label in TRAIT_CHOICES],
+            "Card Traits",
+            # The first three choose what the search covers rather than adding
+            # a condition, so the Any/All/None row below cannot apply to them.
+            # Grouping them says so, in the same "group - value" form the
+            # Mechanics and Subtype pickers already use.
+            [(key, ("Scope · " if key in CONTENT_TRAIT_KEYS else "Trait · ") + label)
+             for key, label in TRAIT_CHOICES],
             selected, apply,
             mode_var=self.q_trait_mode,
             mode_label="Selected traits:",
-            help_text="Choose one or several card traits.")
+            help_text=(
+                "Choose one or several card traits. Scope choices add whole "
+                "kinds of object to the search and ignore the Any/All/None "
+                "row; every Trait below them is a condition it governs."))
 
     def _build_filter_loyalty(self, parent):
         self._numeric_pair(parent, "q_loyalty").grid(
@@ -831,14 +921,13 @@ class SearchFeatureMixin:
         self._property_chip_frame = ttk.Frame(box)
         self._property_chip_frame.pack(fill="x")
         self._render_supertype_chips()
-        self._supertype_mode_frame = self._build_mode_row(
+        self._build_mode_row(
             box, "Selected supertypes:", self.q_supertype_mode, "supertypes")
 
     def _reset_filter_supertypes(self):
         for variable in self.property_vars.values():
             variable.set(False)
         self.q_supertype_mode.set("any")
-        self._supertype_mode_frame = None
         self._property_chip_frame = None
 
     def _build_filter_mechanics(self, parent):
@@ -1108,6 +1197,7 @@ class SearchFeatureMixin:
         self.q_rules_mode.set("all")
         self.q_card_type_mode.set("any")
         self.q_color_mode.set("within")
+        self.q_color_scope.set("identity")
         self.q_produces_mode.set("includes")
         self.q_trait_mode.set("any")
         for variable in self.card_type_vars.values():
@@ -1503,10 +1593,6 @@ class SearchFeatureMixin:
         self._do_search()
         return True
 
-    def search_catalog_performance_info(self):
-        return self.search_catalog_controller.cache_info()
-
-
     def _update_search_filter_summary(self):
         label = getattr(self, "_active_filter_label", None)
         if label is None:
@@ -1528,7 +1614,11 @@ class SearchFeatureMixin:
             parts.append("Supertypes: " + "/".join(properties))
         colors = [value for value, variable in self.color_vars.items() if variable.get()]
         if colors:
-            parts.append(f"Colors ({self.q_color_mode.get()}): " + "".join(colors))
+            scope = ("identity" if self.q_color_scope.get() == "identity"
+                     else "card colors")
+            parts.append(
+                f"Colors ({scope}, {self.q_color_mode.get()}): "
+                + "".join(colors))
         produces = [value for value, variable in self.produces_vars.items()
                     if variable.get()]
         if produces:
@@ -1635,6 +1725,7 @@ class SearchFeatureMixin:
             "subtype_mode": self.q_subtype_mode.get(),
             "keyword_mode": self.q_keyword_mode.get(),
             "color_mode": self.q_color_mode.get(),
+            "color_scope": self.q_color_scope.get(),
             "produces_mode": self.q_produces_mode.get(),
             "trait_mode": self.q_trait_mode.get(),
             "format_status": self.q_format_status.get(),
@@ -1659,6 +1750,9 @@ class SearchFeatureMixin:
             "format": format_value,
             "english_only": bool(self.english_only.get()),
             "content": sorted(self._selected_content_types()),
+            # Paper/Arena/MTGO is the scope the paper flag is derived from, so
+            # saving only the flag reopened an Arena session on paper.
+            "games": list(self._search_printings.selected_games()),
             "paper_only": bool(self._search_printings.paper_only.get()),
             "set_types": set_types,
             "set_codes": set_codes,
@@ -1734,10 +1828,13 @@ class SearchFeatureMixin:
             "keywords": {str(value) for value in state.get("keywords", [])},
             "subtypes": {str(value) for value in state.get("subtypes", [])},
         }
+        saved_games = state.get("games")
         self._search_printings.restore_selection(
             state.get("set_types", []),
             state.get("set_codes", []),
-            paper_only=bool(state.get("paper_only", True)))
+            paper_only=bool(state.get("paper_only", True)),
+            games=(list(saved_games) if isinstance(saved_games, (list, tuple))
+                   else None))
 
         safe_modes = (
             (self.q_rules_mode, state.get("rules_mode"),
@@ -1751,6 +1848,8 @@ class SearchFeatureMixin:
             (self.q_keyword_mode, state.get("keyword_mode"),
              {"all", "any", "none"}, "any"),
             (self.q_color_mode, state.get("color_mode"), {"within", "includes", "exact"}, "within"),
+            (self.q_color_scope, state.get("color_scope"),
+             {"identity", "colors"}, "identity"),
             (self.q_produces_mode, state.get("produces_mode"),
              {"within", "includes", "exact"}, "includes"),
             (self.q_trait_mode, state.get("trait_mode"),
@@ -1764,10 +1863,6 @@ class SearchFeatureMixin:
         wanted_colors = {str(value) for value in state.get("colors", [])}
         for key, variable in self.color_vars.items():
             variable.set(key in wanted_colors)
-
-        wanted_produces = {str(value) for value in state.get("produces", [])}
-        for key, variable in self.produces_vars.items():
-            variable.set(key in wanted_produces)
 
         # Rebuild the optional rows before restoring their values, so a
         # restored session shows the same panel it was saved with.
@@ -1783,6 +1878,12 @@ class SearchFeatureMixin:
                 {TRAIT_LABELS[key] for key in self._selected_traits},
                 "Any", "traits", max_visible=10, single_line=True))
         self._restore_optional_filter_values(state.get("optional_values", {}))
+        # Produces is restored here rather than with Colors: its checkboxes
+        # belong to an optional row, so anything set before the rows are
+        # rebuilt is discarded along with the widgets that held it.
+        wanted_produces = {str(value) for value in state.get("produces", [])}
+        for key, variable in self.produces_vars.items():
+            variable.set(key in wanted_produces)
 
         for widget, key in (
             (self.q_cmc_min, "cmc_min"), (self.q_cmc_max, "cmc_max"),
@@ -1883,9 +1984,23 @@ class SearchFeatureMixin:
                 "toughness_max": self._optional_numeric(
                     getattr(self, "q_toughness_max", None)),
             }
+            optional_ranges = {
+                "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
+                "Defense": ("q_defense_min", "q_defense_max"),
+                "Released": ("q_released_min", "q_released_max"),
+            }
+            for label, (low, high) in optional_ranges.items():
+                numeric[low] = self._optional_numeric(getattr(self, low, None))
+                numeric[high] = self._optional_numeric(getattr(self, high, None))
+            # Every pair of bounds is checked. Leaving these three out meant a
+            # backwards range ran and returned nothing, with no way to tell
+            # that apart from a search that genuinely matches no card -- and
+            # Released is two dropdowns, so reversing it takes one click.
             self._validate_search_range("Mana value", numeric["cmc_min"], numeric["cmc_max"])
             self._validate_search_range("Power", numeric["power_min"], numeric["power_max"])
             self._validate_search_range("Toughness", numeric["toughness_min"], numeric["toughness_max"])
+            for label, (low, high) in optional_ranges.items():
+                self._validate_search_range(label, numeric[low], numeric[high])
         except ValueError as exc:
             self.results_count_lbl.configure(text="RESULTS | Invalid search filter")
             self._status(str(exc))
@@ -1904,17 +2019,16 @@ class SearchFeatureMixin:
             keywords=sorted(self._selected_keywords), keyword_mode=self.q_keyword_mode.get(),
             colors=[value for value, variable in self.color_vars.items() if variable.get()],
             color_mode=self.q_color_mode.get(),
+            color_scope=self.q_color_scope.get(),
             produces=[value for value, variable in self.produces_vars.items()
                       if variable.get()],
             produces_mode=self.q_produces_mode.get(),
             traits=self._selected_trait_keys(),
             trait_mode=self.q_trait_mode.get(),
-            loyalty_min=self._optional_numeric(getattr(self, "q_loyalty_min", None)),
-            loyalty_max=self._optional_numeric(getattr(self, "q_loyalty_max", None)),
-            defense_min=self._optional_numeric(getattr(self, "q_defense_min", None)),
-            defense_max=self._optional_numeric(getattr(self, "q_defense_max", None)),
-            released_from=self._optional_numeric(getattr(self, "q_released_min", None)),
-            released_to=self._optional_numeric(getattr(self, "q_released_max", None)),
+            loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
+            defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
+            released_from=numeric["q_released_min"],
+            released_to=numeric["q_released_max"],
             cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
             power_min=numeric["power_min"], power_max=numeric["power_max"],
             toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],

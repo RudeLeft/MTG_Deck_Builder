@@ -52,7 +52,6 @@ class SearchCriteria:
     defense_max: float | None = None
     released_from: float | None = None
     released_to: float | None = None
-    artist: str = ""
     games: tuple[str, ...] = ()
     rarities: tuple[str, ...] = ()
     fmt: str = ""

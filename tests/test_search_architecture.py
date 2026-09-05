@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from dataclasses import fields
 import time
 from pathlib import Path
 
@@ -176,8 +177,12 @@ def main():
             and "Midyear Hawk" in _opt(released_to=2026)
             and _opt(released_from=2027) == set()
             and _opt(released_to=2025) == set())
-        artist_matches_any_part = (
-            _opt(artist="nonexistent artist") == set())
+        # An identity cannot be both white and colourless, so the query has
+        # always ignored the C. Ticking it alongside a colour therefore looked
+        # like a filter that did nothing.
+        colorless_adds_nothing_beside_a_colour = (
+            _opt(colors=["W", "C"], color_mode="exact")
+            == _opt(colors=["W"], color_mode="exact"))
         colour_scope_selects_the_column = (
             # Ghostfire Bird is colourless by card colours and red by identity,
             # so each scope must reach it through a different query.
@@ -309,6 +314,8 @@ def main():
     table_filter_source = (ROOT / "mtgdb/ui/table_filters.py").read_text(encoding="utf-8")
     results_source = (ROOT / "mtgdb/ui/results.py").read_text(encoding="utf-8")
     search_source = (ROOT / "mtgdb/ui/search.py").read_text(encoding="utf-8")
+    search_query_source = (
+        ROOT / "mtgdb/database/search_queries.py").read_text(encoding="utf-8")
     printings_source = (
         (ROOT / "mtgdb/ui/search_printings.py").read_text(encoding="utf-8")
         + (ROOT / "mtgdb/ui/set_filters.py").read_text(encoding="utf-8"))
@@ -405,7 +412,7 @@ def main():
     # not a guard here -- the handles exist as None from the start.
     no_hasattr_guards_on_optional_handles = not any(
         f'hasattr(self, "{name}")' in search_source
-        for name in ("q_rules", "q_artist", "q_cmc_min", "_rarity_btn",
+        for name in ("q_rules", "q_cmc_min", "_rarity_btn",
                      "_subtype_btn", "_keyword_btn", "_format_btn"))
     workspace_capture_reads_through_helpers = (
         '"rules": self._rules_text_values(commit_pending=False),' in search_source
@@ -588,7 +595,83 @@ def main():
             traits_narrow_the_query
             and unknown_trait_is_ignored_not_widening),
         "release bounds are inclusive years": release_bounds_are_inclusive,
-        "artist matches part of the credited name": artist_matches_any_part,
+        "including tokens rebuilds the vocabulary it widens": (
+            # The results were always right; the pickers kept describing cards
+            # only, because the callback that rescopes them had no caller.
+            "self._on_content_filter_change()" in _method_body(
+                search_source, "_choose_traits")
+            and "self._content_types_from_traits()" in _method_body(
+                search_source, "_choose_traits")),
+        "scope traits are grouped away from the traits the mode row governs": (
+            # Include Tokens cannot be negated by None: it chooses what the
+            # search covers rather than adding a condition.
+            '"Scope · "' in _method_body(search_source, "_choose_traits")
+            and '"Trait · "' in _method_body(search_source, "_choose_traits")),
+        "Produces is restored after its row exists": (
+            # Its checkboxes belong to an optional row, so a restore that runs
+            # before the rebuild is discarded with the widgets that held it.
+            _method_body(
+                search_source, "_restore_search_workspace_state").index(
+                    "wanted_produces")
+            > _method_body(
+                search_source, "_restore_search_workspace_state").index(
+                    "_restore_optional_filter_values(")),
+        "the platform selection is saved and restored": (
+            '"games": list(self._search_printings.selected_games()),'
+            in _method_body(search_source, "_capture_search_workspace_state")
+            and "games=(list(saved_games)" in _method_body(
+                search_source, "_restore_search_workspace_state")
+            # The Search subclass overrides restore_selection and used to drop
+            # the games argument its own base class accepts.
+            and "games=None):" in _method_body(
+                printings_source, "restore_selection")
+            and "self.game_vars.items()" in _method_body(
+                printings_source, "restore_selection")),
+        "every range of bounds is validated, not only the first three": (
+            all(f'"{label}"' in _method_body(search_source, "_do_search")
+                for label in ("Mana value", "Power", "Toughness",
+                              "Loyalty", "Defense", "Released"))
+            and _method_body(search_source, "_do_search").count(
+                "self._validate_search_range(") >= 4),
+        "Colors can look at either colour column": (
+            colour_scope_selects_the_column
+            and "self.q_color_scope = tk.StringVar(value=\"identity\")"
+            in search_source
+            and "color_scope=self.q_color_scope.get()," in _method_body(
+                search_source, "_do_search")
+            and '"color_scope": self.q_color_scope.get(),' in _method_body(
+                search_source, "_capture_search_workspace_state")
+            # The mode row names the column it compares, so "Color identity:"
+            # cannot sit above a search of the card's own colours.
+            and "COLOR_SCOPE_LABELS" in search_source),
+        "colorless releases itself instead of being dropped in silence": (
+            # W plus Colorless returned exactly the mono-white result: an
+            # identity cannot be both, so the query ignored the C.
+            colorless_adds_nothing_beside_a_colour
+            and "def _sync_colorless_availability(" in search_source
+            # Both the per-click wiring and the initial sync: a restored
+            # workspace can arrive with colours already ticked, and the box
+            # has to come up released.
+            and _method_body(
+                search_source, "_build_color_filters").count(
+                    "_sync_colorless_availability") >= 2),
+        "the search API has one spelling per criterion": (
+            # keyword/creature_type/characteristics/rarity/set_code were a
+            # second way to say things SearchCriteria already says, with no
+            # caller anywhere; characteristics silently aliased supertypes.
+            not any(
+                f"{name}=" in _method_body(search_query_source, "search")
+                for name in ("keyword", "creature_type", "characteristics",
+                             "characteristic_mode", "rarity", "set_code",
+                             "exclude_art", "show_tokens", "limit"))),
+        "no criterion outlives the control that reaches it": (
+            # Artist kept a working query path, a criterion and a passing gate
+            # after its row was removed -- a feature no user could run, proved
+            # by a test. A criterion with no control is either wired up or
+            # taken out.
+            "artist" not in {field.name for field in fields(SearchCriteria)}
+            and "add_artist_filter" not in search_query_source
+            and "artist" not in SearchCriteria().query_arguments()),
         "colour scope chooses colors or color_identity": (
             colour_scope_selects_the_column),
         "Produces is captured, cleared, and restored with the other criteria": (

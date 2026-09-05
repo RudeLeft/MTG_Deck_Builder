@@ -28,10 +28,9 @@ class SearchQueryBuilder:
                 f"(layout IS NULL OR layout NOT IN ({placeholders}))")
             self.params.extend(excluded)
 
-    def add_content_filter(self, content_types, show_tokens):
+    def add_content_filter(self, content_types):
         if content_types is None:
-            content_types = (
-                {"card", "token", "emblem"} if show_tokens else {"card"})
+            content_types = {"card", "token", "emblem"}
         else:
             content_types = {str(value).casefold() for value in content_types}
         if not content_types:
@@ -362,12 +361,6 @@ class SearchQueryBuilder:
                 f"AND released_at {operator} ?")
             self.params.append(boundary)
 
-    def add_artist_filter(self, artist):
-        value = str(artist or "").strip()
-        if value:
-            self.clauses.append("artist LIKE ? ESCAPE '\\'")
-            self.params.append(f"%{_escape_like(value)}%")
-
     def add_rarity_and_format(self, rarities, fmt, fmt_status="playable"):
         rarity_values = sorted({
             str(value).strip() for value in (rarities or []) if str(value).strip()
@@ -402,7 +395,7 @@ class SearchQueryBuilder:
             self.params.append(fmt_value)
             self.params.extend(statuses)
 
-    def add_printing_filters(self, set_types, set_codes, set_code, lang, paper_only=False):
+    def add_printing_filters(self, set_types, set_codes, lang, paper_only=False):
         if set_types is not None:
             chosen_types = sorted({str(value) for value in set_types if value})
             if not chosen_types:
@@ -418,9 +411,6 @@ class SearchQueryBuilder:
             placeholders = ",".join("?" * len(self.chosen_sets))
             self.clauses.append(f"set_code IN ({placeholders})")
             self.params.extend(self.chosen_sets)
-        elif set_code:
-            self.clauses.append("set_code = ?")
-            self.params.append(set_code)
         if lang:
             self.clauses.append("lang = ?")
             self.params.append(lang)
@@ -428,12 +418,11 @@ class SearchQueryBuilder:
             self.clauses.append("paper = 1")
         return True
 
-    def build(self, *, set_code, set_codes, columns, limit):
+    def build(self, *, set_codes, columns):
         where = (" WHERE " + " AND ".join(self.clauses)) if self.clauses else ""
         one_selected_set = (
-            bool(set_code) or
-            (set_codes is not None and self.chosen_sets is not None
-             and len(self.chosen_sets) == 1)
+            set_codes is not None and self.chosen_sets is not None
+            and len(self.chosen_sets) == 1
         )
         order = ("CAST(collector_number AS INTEGER), collector_number"
                  if one_selected_set else "name COLLATE NOCASE")
@@ -446,48 +435,36 @@ class SearchQueryBuilder:
                 raise ValueError("Invalid card-search projection")
             projection = ", ".join(chosen_columns)
         sql = f"SELECT {projection} FROM cards{where} ORDER BY {order}"
-        params = list(self.params)
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(int(limit))
-        return sql, params
+        return sql, list(self.params)
 
 
 class CardSearchQueryMixin:
     """Provide the stable ``CardDB.search`` API over ``SearchQueryBuilder``."""
 
-    def search(self, name="", names=None, text="", text_mode="all", keyword="", type_line="",
-               creature_type="", card_types=None, card_type_mode="any",
-               supertypes=None, supertype_mode="all", characteristics=None,
-               characteristic_mode="all", subtypes=None,
+    def search(self, name="", names=None, text="", text_mode="all",
+               type_line="", card_types=None, card_type_mode="any",
+               supertypes=None, supertype_mode="all", subtypes=None,
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
                color_mode="within", color_scope="identity",
                produces=None, produces_mode="includes",
                traits=None, trait_mode="any", loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
-               released_to=None, artist="", games=None,
+               released_to=None, games=None,
                cmc_min=None, cmc_max=None, power_min=None,
-               power_max=None, toughness_min=None, toughness_max=None, rarity="",
-               rarities=None, fmt="", fmt_status="playable", set_code="",
+               power_max=None, toughness_min=None, toughness_max=None,
+               rarities=None, fmt="", fmt_status="playable",
                set_codes=None, set_types=None,
-               lang="", paper_only=False, limit=None, exclude_art=True, show_tokens=True,
+               lang="", paper_only=False,
                content_types=None, connection=None, columns=None):
         """Search the local DB and return card dictionaries.
 
-        The signature remains backward-compatible for non-GUI callers while the
-        builder owns clause construction and parameter ordering.
+        One parameter per criterion, matching ``SearchCriteria``. The singular
+        aliases this signature used to carry for "non-GUI callers" -- keyword,
+        creature_type, characteristics, rarity, set_code -- had no caller in
+        the project; ``characteristics`` was a second spelling of
+        ``supertypes`` with a mode of its own, which is exactly the kind of
+        silent alternative path a search API should not have.
         """
-        if keyword and not keywords:
-            keywords = [keyword]
-        if creature_type and not subtypes:
-            subtypes = [creature_type]
-        if rarity and not rarities:
-            rarities = [rarity]
-
-        if supertypes is None and characteristics is not None:
-            supertypes = characteristics
-            supertype_mode = characteristic_mode
-
         builder = SearchQueryBuilder()
         # Explicit Content selection is authoritative. Art Series remains excluded
         # for legacy/default callers, but a caller that deliberately requests the
@@ -496,8 +473,8 @@ class CardSearchQueryMixin:
             {str(value).casefold() for value in content_types if str(value)}
             if content_types is not None else None
         )
-        builder.add_art_filter(exclude_art and not (explicit_content and "art" in explicit_content))
-        if not builder.add_content_filter(content_types, show_tokens):
+        builder.add_art_filter(not (explicit_content and "art" in explicit_content))
+        if not builder.add_content_filter(content_types):
             return []
         builder.add_name_and_rules(name, names, text, text_mode)
         builder.add_type_filters(
@@ -510,15 +487,13 @@ class CardSearchQueryMixin:
             loyalty_min, loyalty_max, defense_min, defense_max)
         builder.add_release_filters(released_from, released_to)
         builder.add_games_filter(games)
-        builder.add_artist_filter(artist)
         builder.add_numeric_filters(
             cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
         builder.add_rarity_and_format(rarities, fmt, fmt_status)
         if not builder.add_printing_filters(
-                set_types, set_codes, set_code, lang, paper_only=paper_only):
+                set_types, set_codes, lang, paper_only=paper_only):
             return []
-        sql, params = builder.build(
-            set_code=set_code, set_codes=set_codes, columns=columns, limit=limit)
+        sql, params = builder.build(set_codes=set_codes, columns=columns)
         if connection is None:
             with self._lock:
                 rows = self.conn.execute(sql, params).fetchall()
