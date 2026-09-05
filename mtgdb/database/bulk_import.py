@@ -87,6 +87,9 @@ def _extract_row(card):
         card.get("lang"),
         card.get("released_at"),
         1 if "paper" in (card.get("games") or []) else 0,
+        # Sorted for the same reason the colour columns are: exact
+        # comparisons must not depend on upstream ordering.
+        ",".join(sorted(card.get("games") or [])),
         1 if card.get("promo") else 0,
         json.dumps(card.get("promo_types") or []),
         json.dumps(card.get("frame_effects") or []),
@@ -118,13 +121,13 @@ INSERT OR REPLACE INTO cards (
     id, oracle_id, name, mana_cost, cmc, type_line, raw_type_line,
     oracle_text, oracle_text_search,
     colors, color_identity, power, toughness, loyalty, defense, rarity,
-    set_code, set_name, set_type, collector_number, lang, released_at, paper,
+    set_code, set_name, set_type, collector_number, lang, released_at, paper, games,
     promo, promo_types, frame_effects, frame, border_color, finishes, artist,
     reserved, full_art, game_changer, color_indicator, security_stamp,
     universes_beyond, produced_mana,
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
     related_parts, card_faces, layout
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 

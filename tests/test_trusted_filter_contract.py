@@ -215,8 +215,10 @@ def main():
             "def _build_advanced_filters(" not in search_source
             and "Advanced Filters" not in search_source
             and "def _build_optional_filter_zone(" in search_source
-            and {"content", "rules_text", "subtype", "format", "rarity"}
+            and {"rules_text", "subtype", "format", "rarity"}
             <= set(FILTER_BY_KEY)
+            # Content is expressed as Card traits now, not its own filter.
+            and "content" not in FILTER_BY_KEY
             and "printings" not in FILTER_BY_KEY),
         "optional filter labels match primary Search field typography": (
             'label = ttk.Label(frame, text=definition["label"])' in search_source
@@ -226,18 +228,14 @@ def main():
             and 'text="Format", style="Section.TLabel"' not in search_source
             and 'text="Rarity", style="Section.TLabel"' not in search_source
             and 'text="Printings", style="Section.TLabel"' not in printing_source),
-        "Content UI exposes one compact aligned Cards Tokens Emblems Art Series row": (
-            '("card", "Cards")' in search_source
-            and '("token", "Tokens")' in search_source
-            and '("emblem", "Emblems")' in search_source
-            and '("art", "Art Series")' in search_source
-            and '"art": tk.BooleanVar(value=False)' in search_source
-            and 'contentbox.grid(row=0, column=1, sticky="w", pady=2)' in search_source
-            and 'command=self._on_content_filter_change, padx=1).grid(' in search_source
-            and 'row=0, column=column, sticky="w", padx=0, pady=0' in search_source
-            and 'contentbox, text="|", style="Muted.TLabel"' in search_source
-            and 'contentbox.columnconfigure(column, weight=1)' not in search_source
-            and 'variable.set(key == "card")' in search_source
+        "content kinds are chosen through Card traits": (
+            '"include_tokens": "token"' in search_source
+            and '"include_emblems": "emblem"' in search_source
+            and '"include_art_series": "art"' in search_source
+            and '("include_art_series", "Include Art Series")' in search_source
+            # Cards are always searched; the other kinds are opt-in traits, so
+            # Art Series stays out until explicitly asked for (DATA-008).
+            and 'kinds = {"card"}' in search_source
             and "Supplemental" not in search_source),
         "Printings default to Paper only and Any set": (
             'text="Paper only · Any set type · Any set"' in printing_source

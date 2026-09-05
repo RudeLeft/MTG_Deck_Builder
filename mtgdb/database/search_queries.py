@@ -310,6 +310,24 @@ class SearchQueryBuilder:
             if clause:
                 self.clauses.append(f"({clause})")
 
+    GAME_PLATFORMS = ("paper", "mtgo", "arena")
+
+    def add_games_filter(self, games):
+        """Restrict to printings available on the selected platforms.
+
+        A printing matches when it is available on any selected platform, so
+        choosing Paper and Arena widens rather than narrows. Selecting none
+        means no restriction, which is what an untouched control should do.
+        """
+        selected = [
+            value for value in self.GAME_PLATFORMS
+            if value in {str(item).casefold() for item in (games or ())}]
+        if not selected or len(selected) == len(self.GAME_PLATFORMS):
+            return
+        self.clauses.append("(" + " OR ".join(
+            "games LIKE ?" for _ in selected) + ")")
+        self.params.extend(f"%{value}%" for value in selected)
+
     def add_release_filters(self, released_from, released_to):
         """Bound the printing release date. Stored as an ISO yyyy-mm-dd string."""
         for value, operator, label in (
@@ -421,7 +439,7 @@ class CardSearchQueryMixin:
                produces=None, produces_mode="includes",
                traits=None, loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
-               released_to=None, artist="",
+               released_to=None, artist="", games=None,
                cmc_min=None, cmc_max=None, power_min=None,
                power_max=None, toughness_min=None, toughness_max=None, rarity="",
                rarities=None, fmt="", set_code="", set_codes=None, set_types=None,
@@ -464,6 +482,7 @@ class CardSearchQueryMixin:
         builder.add_stat_filters(
             loyalty_min, loyalty_max, defense_min, defense_max)
         builder.add_release_filters(released_from, released_to)
+        builder.add_games_filter(games)
         builder.add_artist_filter(artist)
         builder.add_numeric_filters(
             cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)

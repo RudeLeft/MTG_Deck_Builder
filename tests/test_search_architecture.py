@@ -17,7 +17,9 @@ from mtgdb.database.search_queries import SearchQueryBuilder
 from mtgdb.search.repository import SEARCH_RESULT_COLUMNS, SearchRepository
 from mtgdb.search.results import SearchResultStore
 from mtgdb.ui.results import SearchResultsMixin
-from mtgdb.ui.search import TRAIT_CHOICES, SearchFeatureMixin
+from mtgdb.ui.search import (
+    CONTENT_TRAIT_KEYS, TRAIT_CHOICES, SearchFeatureMixin,
+)
 from mtgdb.ui.search_filters import (
     CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTERS,
     filter_catalog, is_removable, ordered_active_filters,
@@ -179,6 +181,16 @@ def main():
                 colors=["R"], color_mode="includes", color_scope="colors"))
         unknown_trait_is_ignored_not_widening = (
             _opt(traits=["not_a_real_trait"]) == _opt())
+
+        # DATA-010: a printing may exist on several platforms at once, which
+        # the old paper boolean could not express.
+        games_select_platforms = (
+            _opt(games=["paper"]) >= {"First Bird"}
+            and _opt(games=["arena"]) == set()
+            and _opt(games=["paper", "arena"]) >= {"First Bird"}
+            # Selecting every platform, or none, is no restriction.
+            and _opt(games=["paper", "mtgo", "arena"]) == _opt()
+            and _opt(games=[]) == _opt())
 
         def _produces(values, mode):
             return {row["name"] for row in db.search(
@@ -349,6 +361,11 @@ def main():
             search_source, "_set_search_entry_text"))
 
     checks = {
+        "printing type selects platforms rather than a paper flag": (
+            games_select_platforms),
+        "content kinds come from traits and add no clause": (
+            set(CONTENT_TRAIT_KEYS) & set(SearchQueryBuilder.TRAIT_CLAUSES)
+            == set()),
         "no reader guards an optional handle with hasattr": (
             no_hasattr_guards_on_optional_handles),
         "workspace capture survives unbuilt filter rows": (
@@ -393,10 +410,13 @@ def main():
             # Loyalty and Defense are separate because no card has both;
             # the tooltip has to say so or the split looks arbitrary.
             and "no card has both" in tooltips["defense"]),
-        "every card trait has a query clause": (
+        "every card trait has a query clause or selects content": (
+            # Content traits choose which objects the search covers instead of
+            # adding a clause, so they are satisfied by content_types.
             trait_keys <= (
                 set(SearchQueryBuilder.TRAIT_CLAUSES)
-                | {"multi_faced", "single_faced"})),
+                | {"multi_faced", "single_faced"}
+                | set(CONTENT_TRAIT_KEYS))),
         "card traits narrow the query and unknown keys are ignored": (
             traits_narrow_the_query
             and unknown_trait_is_ignored_not_widening),

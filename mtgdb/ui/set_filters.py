@@ -36,6 +36,13 @@ def set_type_label(value):
     return str(value or "").replace("_", " ").title()
 
 
+GAME_PLATFORM_LABELS = (
+    ("paper", "Paper (Physical Release)"),
+    ("arena", "Arena (Digital Release)"),
+    ("mtgo", "MTGO (Digital Release)"),
+)
+
+
 class PrintingFilter:
     """Reusable Paper/Set Type/Exact Set picker backed by observed Scryfall data.
 
@@ -65,6 +72,11 @@ class PrintingFilter:
             if intro_text is None else intro_text)
 
         self.paper_only = tk.BooleanVar(master=owner, value=True)
+        # Paper is the default scope, matching the boolean this replaces.
+        self.game_vars = {
+            key: tk.BooleanVar(master=owner, value=(key == "paper"))
+            for key, _label in GAME_PLATFORM_LABELS
+        }
         self.set_type_vars = {}
         self._present_set_types = set()
         self._set_vars = {}
@@ -343,9 +355,20 @@ class PrintingFilter:
                 bg=p["surface2"], fg=p["muted"], font=FONT_HELPER,
                 justify="left", wraplength=720).pack(anchor="w", pady=(2, 9))
 
-        ClassicCheckbutton(
-            outer, text="Paper only", variable=self.paper_only, role="option",
-            command=self._on_scope_change).pack(anchor="w", pady=(0, 8))
+        # PRINTING TYPE replaces the single Paper-only checkbox: a printing can
+        # exist on paper, on Arena, on MTGO, or several at once, and the old
+        # boolean could only express "paper" or "everything".
+        game_head = tk.Frame(outer, bg=p["surface2"])
+        game_head.pack(fill="x")
+        tk.Label(game_head, text="PRINTING TYPE", bg=p["surface2"],
+                 fg=p["accent"], font=FONT_HELPER_BOLD).pack(side="left")
+        game_row = tk.Frame(outer, bg=p["surface2"])
+        game_row.pack(fill="x", pady=(4, 9))
+        for key, label in GAME_PLATFORM_LABELS:
+            ClassicCheckbutton(
+                game_row, text=label, variable=self.game_vars[key],
+                role="option",
+                command=self._on_scope_change).pack(side="left", padx=(0, 18))
 
         type_head = tk.Frame(outer, bg=p["surface2"])
         type_head.pack(fill="x")
@@ -407,7 +430,23 @@ class PrintingFilter:
             footer, text=self._done_text, role="primary",
             command=lambda: self._finish_popup(True)).pack(side="right")
 
+    def selected_games(self):
+        """Platforms currently ticked, in a stable order."""
+        return tuple(
+            key for key, _label in GAME_PLATFORM_LABELS
+            if bool(self.game_vars[key].get()))
+
+    def _sync_paper_only_from_games(self):
+        """Keep the taxonomy scope in step with the platform checkboxes.
+
+        Vocabulary scoping throughout the database layer takes a paper_only
+        boolean. Paper alone means the paper scope; anything else has to widen
+        it, or the pickers would offer no digital sets to choose.
+        """
+        self.paper_only.set(self.selected_games() == ("paper",))
+
     def _on_scope_change(self):
+        self._sync_paper_only_from_games()
         self.refresh_catalog()
         callback = self._scope_change_callback
         if callback is not None:
@@ -529,9 +568,18 @@ class PrintingFilter:
         self._render_individual_set_checks()
         self._update_summary()
 
-    def restore_selection(self, set_types, set_codes=None, *, paper_only=True):
+    def restore_selection(self, set_types, set_codes=None, *, paper_only=True,
+                          games=None):
         """Restore only values that exist in the current authoritative scope."""
-        self.paper_only.set(bool(paper_only))
+        if games is not None:
+            wanted = {str(value) for value in games}
+            for key, variable in self.game_vars.items():
+                variable.set(key in wanted)
+            self._sync_paper_only_from_games()
+        else:
+            self.paper_only.set(bool(paper_only))
+            for key, variable in self.game_vars.items():
+                variable.set(key == "paper" or not paper_only)
         self.refresh_catalog()
         wanted_types = {str(value) for value in (set_types or []) if str(value)}
         for set_type, variable in self.set_type_vars.items():

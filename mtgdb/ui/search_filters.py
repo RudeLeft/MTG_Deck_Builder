@@ -117,15 +117,6 @@ FILTER_DEFINITIONS = (
             "the negative form to exclude instead of include."),
     },
     {
-        "key": "content",
-        "category": "Card",
-        "label": "Content",
-        "tooltip": (
-            "Which kinds of object the search may return. Cards is the "
-            "default; Tokens, Emblems and Art Series are separate printed "
-            "objects that are excluded unless you ask for them."),
-    },
-    {
         "key": "format",
         "category": "Printing",
         "label": "Format",

@@ -5,7 +5,7 @@ import sqlite3
 
 
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS cards (
     lang              TEXT,   -- language code, e.g. "en"
     released_at       TEXT,   -- printing release date (YYYY-MM-DD)
     paper             INTEGER NOT NULL DEFAULT 0, -- 1 when Scryfall games includes "paper"
+    games             TEXT,   -- comma-joined Scryfall games: paper, mtgo, arena
     promo             INTEGER NOT NULL DEFAULT 0, -- Scryfall promo flag
     promo_types       TEXT,   -- json array
     frame_effects     TEXT,   -- json array (showcase, extendedart, etc.)

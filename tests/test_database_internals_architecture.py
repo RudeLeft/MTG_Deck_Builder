@@ -157,7 +157,7 @@ def main():
         "search projection rejects columns outside the allow-list": (
             projection_guarded),
         "schema version and columns survive extraction": (
-            schema_version == str(_SCHEMA_VERSION) == "10"
+            schema_version == str(_SCHEMA_VERSION) == "11"
             and table_columns == _CARD_COLUMN_NAMES),
         "connection policies and registered type functions survive": (
             str(journal_mode).casefold() == "wal"

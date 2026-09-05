@@ -38,7 +38,17 @@ OPTIONAL_FILTER_LABEL_WIDTH = 76
 # Magic's first set through a little beyond the current printing horizon.
 RELEASE_YEAR_FIRST = 1993
 RELEASE_YEAR_LAST = datetime.date.today().year + 2
+# Content kinds live here now: they are yes/no facts about what an object is,
+# and a separate Content row for four checkboxes was a filter of its own.
+CONTENT_TRAIT_KEYS = {
+    "include_tokens": "token",
+    "include_emblems": "emblem",
+    "include_art_series": "art",
+}
 TRAIT_CHOICES = (
+    ("include_tokens", "Include Tokens"),
+    ("include_emblems", "Include Emblems"),
+    ("include_art_series", "Include Art Series"),
     ("not_universes_beyond", "Not Universes Beyond"),
     ("universes_beyond", "Universes Beyond"),
     ("reserved", "Reserved List"),
@@ -104,12 +114,6 @@ class SearchFeatureMixin:
         self.q_format = tk.StringVar(value="")
         self.q_rules_mode = tk.StringVar(value="all")
         self._selected_traits = set()
-        self.content_vars = {
-            "card": tk.BooleanVar(value=True),
-            "token": tk.BooleanVar(value=False),
-            "emblem": tk.BooleanVar(value=False),
-            "art": tk.BooleanVar(value=False),
-        }
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
         # Widget handles for optional rows. They must exist as None from the
@@ -579,8 +583,14 @@ class SearchFeatureMixin:
                 continue
 
     def _selected_trait_keys(self):
+        """Card traits that contribute a clause, excluding content kinds.
+
+        Tokens, Emblems and Art Series choose which objects the search covers
+        through content_types; treating them as clauses as well would filter
+        the very rows they just admitted.
+        """
         keys = set(getattr(self, "_selected_traits", set()) or ())
-        return tuple(sorted(keys))
+        return tuple(sorted(keys - set(CONTENT_TRAIT_KEYS)))
 
     # ------------------------------------------------------------------
     # optional filters, built on demand
@@ -687,13 +697,6 @@ class SearchFeatureMixin:
     def _clear_optional_filters(self):
         for key in list(getattr(self, "_optional_filter_rows", {})):
             self._remove_optional_filter(key, notify=False)
-
-    def _build_filter_content(self, parent):
-        self._build_content_filter(parent)
-
-    def _reset_filter_content(self):
-        for key, variable in self.content_vars.items():
-            variable.set(key == "card")
 
     def _build_filter_produces(self, parent):
         self._build_produces_filter(parent, row=0)
@@ -819,44 +822,26 @@ class SearchFeatureMixin:
             setattr(self, name, None)
 
 
-    def _build_content_filter(self, parent):
-        contentbox = ttk.Frame(parent)
-        contentbox.grid(row=0, column=1, sticky="w", pady=2)
-        self.content_vars = {
-            "card": tk.BooleanVar(value=True),
-            "token": tk.BooleanVar(value=False),
-            "emblem": tk.BooleanVar(value=False),
-            "art": tk.BooleanVar(value=False),
-        }
-        labels = (
-            ("card", "Cards"), ("token", "Tokens"),
-            ("emblem", "Emblems"), ("art", "Art Series"),
-        )
-        # Keep the choices compact in the shared Advanced control column so
-        # Cards aligns with Subtype/Format/Rarity/Printings instead of spreading
-        # the four choices across the Search width.
-        for index, (key, label) in enumerate(labels):
-            column = index * 2
-            self._filter_chip(
-                contentbox, label, self.content_vars[key],
-                command=self._on_content_filter_change, padx=1).grid(
-                    row=0, column=column, sticky="w", padx=0, pady=0)
-            if index < len(labels) - 1:
-                ttk.Label(
-                    contentbox, text="|", style="Muted.TLabel").grid(
-                        row=0, column=column + 1, sticky="ns", padx=(1, 1))
-
-
     def _build_printing_filter(self, parent, *, row=0):
         self._search_printings = SearchPrintingFilter(self, parent, row=row)
 
 
+    def _content_types_from_traits(self):
+        """Content kinds requested through Card traits.
+
+        Cards are always searched; Tokens, Emblems and Art Series are separate
+        printed objects that stay out until asked for, which is what DATA-008
+        requires of Art Series in particular.
+        """
+        selected = set(getattr(self, "_selected_traits", set()) or ())
+        kinds = {"card"}
+        for key, kind in CONTENT_TRAIT_KEYS.items():
+            if key in selected:
+                kinds.add(kind)
+        return kinds
+
     def _selected_content_types(self):
-        selected = {
-            key for key, variable in getattr(self, "content_vars", {}).items()
-            if bool(variable.get())
-        }
-        return selected or {"card"}
+        return self._content_types_from_traits()
 
     def _render_trusted_chips(
             self, frame, values, variables, *, columns=3, empty_text=None):
@@ -1059,8 +1044,6 @@ class SearchFeatureMixin:
             variable.set(False)
         for variable in self.produces_vars.values():
             variable.set(False)
-        for key, variable in self.content_vars.items():
-            variable.set(key == "card")
         self.english_only.set(True)
         self._pending_catalog_filter_state = {
             "card_types": set(), "supertypes": set(), "format": "",
@@ -1085,8 +1068,7 @@ class SearchFeatureMixin:
         return True
 
     def _on_content_filter_change(self):
-        if not any(variable.get() for variable in self.content_vars.values()):
-            self.content_vars["card"].set(True)
+        """Content changed through Card traits; rebuild the scoped vocabulary."""
         self._refresh_search_catalogs()
         self._update_search_filter_summary()
 
@@ -1469,7 +1451,8 @@ class SearchFeatureMixin:
                 "emblem": "Emblems", "art": "Art Series",
             }
             parts.append("Content: " + ", ".join(
-                pretty[key] for key in self.content_vars if key in content))
+                pretty[key] for key in ("card", "token", "emblem", "art")
+                if key in content))
         if self._selected_subtypes:
             parts.append("Subtype: " + ", ".join(sorted(self._selected_subtypes)))
         try:
@@ -1605,11 +1588,18 @@ class SearchFeatureMixin:
             "card" if str(value) == "deck" else str(value)
             for value in state.get("content", ["card"])
         ]
+        # Content is expressed as Card traits now, so a saved content list is
+        # restored by selecting the traits that produce it.
         content = {
-            value for value in saved_content if value in self.content_vars
+            value for value in saved_content
+            if value in ("card", "token", "emblem", "art")
         } or {"card"}
-        for key, variable in self.content_vars.items():
-            variable.set(key in content)
+        traits = set(getattr(self, "_selected_traits", set()) or ())
+        for trait_key, kind in CONTENT_TRAIT_KEYS.items():
+            traits.discard(trait_key)
+            if kind in content:
+                traits.add(trait_key)
+        self._selected_traits = traits
 
         self._pending_catalog_filter_state = {
             "card_types": {str(value) for value in state.get("card_types", [])},
@@ -1802,6 +1792,7 @@ class SearchFeatureMixin:
             set_types=sorted(self._search_printings.selected_set_types()) or None,
             lang=("en" if self.english_only.get() else ""),
             paper_only=bool(self._search_printings.paper_only.get()),
+            games=self._search_printings.selected_games(),
             content_types=sorted(self._selected_content_types()),
         )
         criteria = SearchCriteria.from_mapping(search_args)

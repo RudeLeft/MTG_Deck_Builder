@@ -52,6 +52,7 @@ class SearchCriteria:
     released_from: float | None = None
     released_to: float | None = None
     artist: str = ""
+    games: tuple[str, ...] = ()
     rarities: tuple[str, ...] = ()
     fmt: str = ""
     set_codes: tuple[str, ...] | None = None
@@ -66,7 +67,7 @@ class SearchCriteria:
         data = dict(values)
         tuple_fields = {
             "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-            "colors", "produces", "traits", "rarities",
+            "colors", "produces", "traits", "rarities", "games",
             "content_types",
         }
         optional_tuple_fields = {"set_codes", "set_types"}
@@ -87,7 +88,7 @@ class SearchCriteria:
         values = {field.name: getattr(self, field.name) for field in fields(self)}
         for name in (
                 "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-                "colors", "produces", "traits", "rarities",
+                "colors", "produces", "traits", "rarities", "games",
                 "content_types"):
             values[name] = list(values[name])
         for name in ("set_codes", "set_types"):

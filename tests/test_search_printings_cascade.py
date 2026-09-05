@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from mtgdb.ui.search import SearchFeatureMixin
 from mtgdb.ui.search_printings import SearchPrintingFilter
+from mtgdb.ui.set_filters import GAME_PLATFORM_LABELS
 
 
 class _Repo:
@@ -88,6 +89,10 @@ def _fixture():
     printing._english_variable = None
     printing._english_change_callback = None
     printing.paper_only = tk.BooleanVar(master=owner, value=True)
+    printing.game_vars = {
+        key: tk.BooleanVar(master=owner, value=(key == "paper"))
+        for key, _label in GAME_PLATFORM_LABELS
+    }
     printing.set_type_vars = {}
     printing._present_set_types = set()
     printing._set_vars = {}
@@ -152,7 +157,9 @@ def main():
 
     # Paper-only changes refresh in place and can expose digital sets without
     # destroying/reopening the Printings window.
-    printing.paper_only.set(False)
+    # paper_only is derived from the PRINTING TYPE checkboxes now, so widening
+    # the scope means ticking a digital platform rather than clearing a flag.
+    printing.game_vars["arena"].set(True)
     printing._on_scope_change()
     digital_appears = printing.eligible_set_codes == {"exp", "exp2", "cmd", "dig"}
     popup_survives_scope_change = printing._popup is popup and popup.destroyed == 0
@@ -160,7 +167,8 @@ def main():
 
     # Content scope is authoritative for Printings. Art Series alone exposes
     # only Art Series set vocabulary; combining it with Cards exposes the union.
-    printing.paper_only.set(True)
+    printing.game_vars["arena"].set(False)
+    printing._sync_paper_only_from_games()
     owner._content = {"art"}
     printing.refresh_catalog()
     art_only_scope = (

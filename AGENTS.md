@@ -716,7 +716,7 @@ every feature together and is exempt.
 - **DBI-008 — MUST NOT:** Put schema, connection construction, bulk extraction,
   canonical search construction, or taxonomy discovery directly in the façade.
   _Verification:_ **AUTO**.
-- **DBI-009 — MUST:** Preserve schema version 10, the card-column contract,
+- **DBI-009 — MUST:** Preserve schema version 11, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
   functions. Every connection opened in `database/schema.py` MUST set an
   explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;
@@ -1570,7 +1570,10 @@ every feature together and is exempt.
   at least one currently scoped local row; missing/failed catalogs yield no
   invented fallback vocabulary. _Verification:_ **AUTO**.
 - **DATA-008 — MUST:** Derive Search Content only as Cards, Tokens, Emblems, and
-  Art Series from Scryfall-backed row/layout semantics. Art Series MUST use the
+  Art Series from Scryfall-backed row/layout semantics. Content is chosen through
+  Card traits rather than its own filter row: Cards are always searched and the
+  other kinds are opt-in traits that select a content kind instead of adding a
+  query clause. Art Series MUST use the
   internal `art` content key and the user-facing label **Art Series**, MUST be
   default-off, and MUST become Search-visible only when explicitly selected. An
   explicit Art Series Content request MUST override the legacy hidden art exclusion
@@ -1600,10 +1603,15 @@ every feature together and is exempt.
   Deck MUST consume the same `PrintingFilter` implementation so future Paper/Set
   Type/Exact Set behavior changes cannot drift between those workflows.
   _Verification:_ **AUTO**.
-- **DATA-010 — MUST:** Treat `paper` as an explicit printing scope sourced from
-  Scryfall `games`; default interactive Search to Paper-only with no Set Type or
-  Exact Set restriction. Unchecking Paper-only MAY expose locally observed digital
-  printings and their trusted vocabulary. _Verification:_ **AUTO**.
+- **DATA-010 — MUST:** Store the complete Scryfall `games` list and offer Paper,
+  Arena, and MTGO as a `PRINTING TYPE` section of the shared Printings picker,
+  laid out horizontally on one row. A printing matches when it is available on
+  any selected platform; selecting none or all is no restriction. Default
+  interactive Search to Paper with no Set Type or Exact Set restriction. The
+  `paper_only` taxonomy scope is derived from that selection rather than set
+  directly, so vocabulary scoping stays in step with the visible controls; a
+  single boolean could only say "paper" or "everything" and could never name
+  Arena or MTGO. _Verification:_ **AUTO**.
 - **DATA-006 — MUST:** Preserve both B.F.M. physical printings and their
   reconstructed type data. _Verification:_ **AUTO**.
 - **DATA-007 — MUST:** Use exact JSON membership (not substring) where stored
