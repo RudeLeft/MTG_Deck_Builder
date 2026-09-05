@@ -187,6 +187,12 @@ class DeckBuilderApp(
         """Attach a dark tooltip and release it when its owning control dies."""
         tip = ToolTip(widget, text, delay=delay, wraplength=wraplength)
         self._tooltips.append(tip)
+        # Marked so a caller adding tooltips in bulk can tell which controls
+        # already explain themselves; two tooltips on one widget both fire.
+        try:
+            widget._mtg_tooltip = tip
+        except AttributeError:
+            pass
 
         def release(event, *, control=widget, tooltip=tip):
             if event.widget is not control:

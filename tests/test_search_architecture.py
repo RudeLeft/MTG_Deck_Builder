@@ -654,6 +654,37 @@ def main():
             in _method_body(search_source, "_capture_search_workspace_state")
             and 'state.get("advanced_expanded", False)' in _method_body(
                 search_source, "_restore_search_workspace_state")),
+        "the control a user operates explains itself, not only its label": (
+            # People hover the picker or the box they are about to use, not
+            # the word beside it, so a tooltip only on the label is one most
+            # of them never see.
+            "def _tooltip_row_controls(" in search_source
+            and "self._tooltip_row_controls(frame, entry[\"tooltip\"])"
+            in _method_body(search_source, "_build_advanced_filter_rows")
+            and "self._tooltip_row_controls(frame, filter_tooltip(key))"
+            in _method_body(search_source, "_reset_advanced_filter_values")
+            # Two tooltips on one widget both fire, so bulk tagging has to
+            # know which controls already carry their own wording.
+            and 'getattr(widget, "_mtg_tooltip", None) is not None'
+            in _method_body(search_source, "_tooltip_row_controls")
+            and "widget._mtg_tooltip = tip" in (
+                ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")),
+        "the Printings popup explains the scope it sets": (
+            # It decides what every other filter has to offer, and had no
+            # explanation of any kind on any control.
+            all(name in printings_source for name in (
+                "PLATFORM_HELP", "PLATFORM_SECTION_HELP", "SET_TYPE_HELP",
+                "EXACT_SET_HELP", "ENGLISH_HELP", "SET_TYPE_DESCRIPTIONS"))
+            # Set-type names come from the publisher: Arsenal, Box and
+            # Memorabilia are not categories anyone would guess.
+            and all(key in printings_source for key in (
+                '"memorabilia":', '"masterpiece":', '"draft_innovation":'))),
+        "range boxes and pip counts say how they combine": (
+            "RANGE_BOUNDS_HELP" in search_source
+            and "PIP_SELECTION_HELP" in search_source
+            and "Both numbers are included" in search_source
+            # Colored pips is the one colour control that means and, not or.
+            and "rather than or" in search_source),
         "tooltips say what is matched, not what the control is": (
             # Each of these names the boundary its filter is confused with:
             # Produces against colour, Mechanics against rules text, Rarity

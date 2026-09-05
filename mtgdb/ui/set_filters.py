@@ -42,6 +42,67 @@ GAME_PLATFORM_LABELS = (
     ("mtgo", "MTGO (Digital Release)"),
 )
 
+# This popup decides what every other filter has to offer, so it is the one
+# place where saying nothing costs the most: a user who narrows here and then
+# cannot find a set has no way to connect the two.
+PLATFORM_HELP = {
+    "paper": (
+        "Cards with a physical printing. This is the default, and it is what "
+        "you want unless you are building for a digital client."),
+    "arena": (
+        "Cards playable on MTG Arena, including Alchemy cards that exist "
+        "nowhere else. Arena has far fewer sets than paper, so choosing it "
+        "shortens the Set Type and Set lists below."),
+    "mtgo": (
+        "Cards playable on Magic Online. It carries most older paper sets and "
+        "a few that never had a physical release."),
+}
+PLATFORM_SECTION_HELP = (
+    "Where a printing exists. A card matches if it is available on any "
+    "platform you tick, and ticking none or all is no restriction. This also "
+    "decides which sets and set types the rest of this window offers, so "
+    "narrowing here narrows those too.")
+# Set-type names come from the publisher and several of them say nothing to
+# a reader: Arsenal, Box and Memorabilia are not categories anyone would
+# guess. These describe what is in each; a type this build has not seen still
+# appears, explained by the section text instead.
+SET_TYPE_DESCRIPTIONS = {
+    "alchemy": "Digital-only cards and rebalanced versions made for Arena.",
+    "archenemy": "Oversized scheme cards for the Archenemy multiplayer format.",
+    "arsenal": "Boxed collections of oversized or supplementary cards.",
+    "box": "Cards sold as a complete boxed product rather than in boosters.",
+    "commander": "Preconstructed Commander decks and the cards printed in them.",
+    "core": "Core sets: the periodic reprint sets built around the basics.",
+    "draft_innovation": "Sets built around an unusual draft format, such as Conspiracy.",
+    "duel_deck": "Two-deck head-to-head products.",
+    "expansion": "Ordinary Standard-legal expansions. This is the bulk of Magic.",
+    "from_the_vault": "Small premium reprint collections.",
+    "funny": "Un-sets and other joke cards, most of which are not tournament legal.",
+    "masterpiece": "Rare premium inserts found inside other sets.",
+    "masters": "Reprint-only sets aimed at draft and at reprinting expensive cards.",
+    "memorabilia": "Objects that are not really cards: art series, oversized prints, awards.",
+    "minigame": "Cards for the small games printed on the backs of some products.",
+    "planechase": "Oversized plane cards for the Planechase format.",
+    "premium_deck": "Premium all-foil preconstructed decks.",
+    "promo": "Promotional printings: prereleases, store promos, buy-a-box cards.",
+    "spellbook": "Themed card collections built around one card or mechanic.",
+    "starter": "Beginner products and starter decks.",
+    "token": "Token and emblem sheets rather than cards.",
+    "treasure_chest": "Magic Online reward products.",
+    "vanguard": "Oversized avatar cards for the Vanguard format.",
+}
+SET_TYPE_HELP = (
+    "Groups of sets as the publisher classifies them: expansion, core, "
+    "masters, commander, promo and so on. Leave it empty to search every kind "
+    "of set. Choosing types here shortens the Exact Set list below.")
+EXACT_SET_HELP = (
+    "Individual sets by name. Leave it empty for every set allowed by the "
+    "choices above; a set only appears here if it has cards in the current "
+    "platform and set-type scope.")
+ENGLISH_HELP = (
+    "Searches English printings only. Turning it off adds every other "
+    "language, which mostly means the same cards several times over.")
+
 
 class PrintingFilter:
     """Reusable Paper/Set Type/Exact Set picker backed by observed Scryfall data.
@@ -348,10 +409,12 @@ class PrintingFilter:
         tk.Label(popup_head, text=self._header_text, bg=p["surface2"],
                  fg=p["accent"], font=FONT_DIALOG_TITLE).pack(side="left")
         if self._english_variable is not None:
-            ClassicCheckbutton(
+            english = ClassicCheckbutton(
                 popup_head, text="English only", variable=self._english_variable,
                 role="option", command=(self._english_change_callback or self._notify_change)
-            ).pack(side="right")
+            )
+            english.pack(side="right")
+            self._tooltip(english, ENGLISH_HELP)
         if self._intro_text:
             tk.Label(
                 outer, text=self._intro_text,
@@ -363,20 +426,27 @@ class PrintingFilter:
         # boolean could only express "paper" or "everything".
         game_head = tk.Frame(outer, bg=p["surface2"])
         game_head.pack(fill="x")
-        tk.Label(game_head, text="PRINTING TYPE", bg=p["surface2"],
-                 fg=p["accent"], font=FONT_HELPER_BOLD).pack(side="left")
+        platform_label = tk.Label(
+            game_head, text="PRINTING TYPE", bg=p["surface2"],
+            fg=p["accent"], font=FONT_HELPER_BOLD)
+        platform_label.pack(side="left")
+        self._tooltip(platform_label, PLATFORM_SECTION_HELP)
         game_row = tk.Frame(outer, bg=p["surface2"])
         game_row.pack(fill="x", pady=(4, 9))
         for key, label in GAME_PLATFORM_LABELS:
-            ClassicCheckbutton(
+            platform = ClassicCheckbutton(
                 game_row, text=label, variable=self.game_vars[key],
-                role="option",
-                command=self._on_scope_change).pack(side="left", padx=(0, 18))
+                role="option", command=self._on_scope_change)
+            platform.pack(side="left", padx=(0, 18))
+            self._tooltip(platform, PLATFORM_HELP.get(key, PLATFORM_SECTION_HELP))
 
         type_head = tk.Frame(outer, bg=p["surface2"])
         type_head.pack(fill="x")
-        tk.Label(type_head, text="SET TYPE (OPTIONAL)", bg=p["surface2"],
-                 fg=p["accent"], font=FONT_HELPER_BOLD).pack(side="left")
+        type_label = tk.Label(
+            type_head, text="SET TYPE (OPTIONAL)", bg=p["surface2"],
+            fg=p["accent"], font=FONT_HELPER_BOLD)
+        type_label.pack(side="left")
+        self._tooltip(type_label, SET_TYPE_HELP)
 
         type_actions = tk.Frame(outer, bg=p["surface2"])
         type_actions.pack(fill="x", pady=(5, 4))
@@ -392,8 +462,11 @@ class PrintingFilter:
         tk.Frame(outer, bg=p["border"], height=1).pack(fill="x", pady=(8, 8))
         set_head = tk.Frame(outer, bg=p["surface2"])
         set_head.pack(fill="x")
-        tk.Label(set_head, text="EXACT SET (OPTIONAL)", bg=p["surface2"],
-                 fg=p["accent"], font=FONT_HELPER_BOLD).pack(side="left")
+        set_label = tk.Label(
+            set_head, text="EXACT SET (OPTIONAL)", bg=p["surface2"],
+            fg=p["accent"], font=FONT_HELPER_BOLD)
+        set_label.pack(side="left")
+        self._tooltip(set_label, EXACT_SET_HELP)
 
         findrow = tk.Frame(outer, bg=p["surface2"])
         findrow.pack(fill="x", pady=(5, 5))
@@ -402,6 +475,10 @@ class PrintingFilter:
         self._set_search_var = tk.StringVar(master=self.owner)
         entry = ClassicEntry(findrow, textvariable=self._set_search_var)
         entry.pack(side="left", fill="x", expand=True)
+        self._tooltip(
+            entry,
+            "Narrows the list below by set name or code. It only filters what "
+            "is shown; it does not select anything on its own.")
         self.owner._bind_editable_focus_behavior(entry)
         self.owner._trace_write_debounced(
             self._set_search_var, self._render_individual_set_checks,
@@ -432,6 +509,12 @@ class PrintingFilter:
         ClassicButton(
             footer, text=self._done_text, role="primary",
             command=lambda: self._finish_popup(True)).pack(side="right")
+
+    def _tooltip(self, widget, text):
+        """Attach an owner tooltip when the owner provides them."""
+        add = getattr(self.owner, "_add_tooltip", None)
+        if callable(add):
+            add(widget, text, wraplength=380)
 
     def selected_games(self):
         """Platforms currently ticked, in a stable order."""
@@ -676,11 +759,18 @@ class SetFilterSupportMixin:
             self, parent, present, variables, on_change, *, columns=4):
         """Render only set types observed in the current local Scryfall data."""
         values = sorted({str(value) for value in present if str(value)}, key=str.casefold)
+        add_tooltip = getattr(self, "_add_tooltip", None)
         for index, set_type in enumerate(values):
-            ClassicCheckbutton(
+            check = ClassicCheckbutton(
                 parent, text=set_type_label(set_type), variable=variables[set_type],
-                role="option", command=on_change).grid(
-                    row=index // columns, column=index % columns, sticky="w",
-                    padx=(0, 12), pady=1)
+                role="option", command=on_change)
+            check.grid(
+                row=index // columns, column=index % columns, sticky="w",
+                padx=(0, 12), pady=1)
+            if callable(add_tooltip):
+                add_tooltip(
+                    check,
+                    SET_TYPE_DESCRIPTIONS.get(set_type.casefold(), SET_TYPE_HELP),
+                    wraplength=360)
         for column in range(columns):
             parent.columnconfigure(column, weight=1)

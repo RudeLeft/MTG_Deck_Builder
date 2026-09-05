@@ -205,6 +205,7 @@ class SearchFeatureMixin:
         self.q_name.set("")
         self.q_name.grid(
             row=0, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
+        self._add_standard_filter_tooltip(self.q_name, "name")
         self.q_name.bind("<Return>", lambda e, c=self.q_name: self._autocomplete_return(c))
         self.q_name.bind("<<ComboboxSelected>>", self._on_name_autocomplete_selected)
         self.q_name.bind("<KeyRelease>", self._on_name_filter_edited, add="+")
@@ -322,6 +323,8 @@ class SearchFeatureMixin:
                 kw["compound"] = "left"
             check = ttk.Checkbutton(colorbox, **kw)
             check.pack(side="left", padx=(0, 8))
+            if c != "C":
+                self._add_standard_filter_tooltip(check, "colors")
             if c == "C":
                 self._colorless_check = check
                 self._add_tooltip(
@@ -427,7 +430,10 @@ class SearchFeatureMixin:
             if self.pips.get(color):
                 kw["image"] = self.pips[color]
                 kw["compound"] = "left"
-            ttk.Checkbutton(box, **kw).pack(side="left", padx=(0, 8))
+            produced = ttk.Checkbutton(box, **kw)
+            produced.pack(side="left", padx=(0, 8))
+            self._add_tooltip(
+                produced, filter_tooltip("produces"), wraplength=380)
         mode = ttk.Frame(wrap)
         mode.pack(fill="x", pady=(2, 0))
         ttk.Label(mode, text="Produces mana:", style="Muted.TLabel").pack(side="left")
@@ -499,6 +505,11 @@ class SearchFeatureMixin:
     # advanced filter controls
     # ------------------------------------------------------------------
 
+    RANGE_BOUNDS_HELP = (
+        "Both numbers are included, so 2 to 4 finds 2, 3 and 4. Leave a box "
+        "empty for no limit on that side, and fill only one to search from or "
+        "up to a single value.")
+
     def _numeric_pair(self, parent, attribute_prefix, width=5):
         """Two spinboxes as one unplaced frame; the caller positions it.
 
@@ -514,6 +525,7 @@ class SearchFeatureMixin:
         for widget in (low, high):
             widget.delete(0, "end")
             self._configure_zero_start_spinbox(widget)
+            self._add_tooltip(widget, self.RANGE_BOUNDS_HELP, wraplength=340)
         setattr(self, f"{attribute_prefix}_min", low)
         setattr(self, f"{attribute_prefix}_max", high)
         return box
@@ -635,6 +647,13 @@ class SearchFeatureMixin:
                 "Choose one or several printed shapes. The count beside each "
                 "one is how many printings currently have it."))
 
+    PIP_SELECTION_HELP = (
+        "Every color you tick must appear at least this many times in the "
+        "same cost, so green and white at two finds {G}{G}{W}{W} and not a "
+        "card that is only heavily green. This is the one color control that "
+        "combines with and rather than or."
+    )
+
     def _build_filter_mana_pips(self, parent):
         box = ttk.Frame(parent)
         box.grid(row=0, column=1, sticky="ew", pady=2)
@@ -649,12 +668,15 @@ class SearchFeatureMixin:
             if self.pips.get(color):
                 kw["image"] = self.pips[color]
                 kw["compound"] = "left"
-            ttk.Checkbutton(pips, **kw).pack(side="left", padx=(0, 8))
+            check = ttk.Checkbutton(pips, **kw)
+            check.pack(side="left", padx=(0, 8))
+            self._add_tooltip(check, self.PIP_SELECTION_HELP, wraplength=380)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(2, 0))
         ttk.Label(row, text="At least:", style="Muted.TLabel").pack(side="left")
         self.q_pip_min = AppSpinbox(row, from_=1, to=9, width=3)
         self.q_pip_min.pack(side="left", padx=(5, 0))
+        self._add_tooltip(self.q_pip_min, self.PIP_SELECTION_HELP, wraplength=380)
         self.q_pip_min.delete(0, "end")
         self.q_pip_min.insert(0, "1")
         ttk.Label(
@@ -816,6 +838,28 @@ class SearchFeatureMixin:
     # advanced filters, built once and revealed together
     # ------------------------------------------------------------------
 
+    # The widgets a filter row is operated through. Chips and mode radios
+    # are left out: they carry their own wording, and a row of fifteen chips
+    # repeating one paragraph is noise rather than help.
+    CONTROL_TOOLTIP_CLASSES = (
+        "TButton", "TSpinbox", "TCombobox", "TEntry", "Entry", "Spinbox")
+
+    def _tooltip_row_controls(self, frame, text):
+        """Give a row's controls the same explanation as its label.
+
+        A user hovers the control they are about to use, not the word beside
+        it, so a tooltip only on the label is one most people never see.
+        """
+        pending = list(frame.winfo_children())
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if widget.winfo_class() not in self.CONTROL_TOOLTIP_CLASSES:
+                continue
+            if getattr(widget, "_mtg_tooltip", None) is not None:
+                continue
+            self._add_tooltip(widget, text, wraplength=380)
+
     def _add_standard_filter_tooltip(self, widget, key):
         """Explain a standard filter exactly like an advanced one."""
         text = filter_tooltip(key)
@@ -877,6 +921,7 @@ class SearchFeatureMixin:
                 label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
                 self._add_tooltip(label, entry["tooltip"], wraplength=380)
                 builder(frame)
+                self._tooltip_row_controls(frame, entry["tooltip"])
                 self._advanced_filter_rows[key] = frame
         self._refresh_search_blur_widgets()
 
@@ -927,6 +972,7 @@ class SearchFeatureMixin:
             builder = getattr(self, f"_build_filter_{key}", None)
             if builder is not None:
                 builder(frame)
+                self._tooltip_row_controls(frame, filter_tooltip(key))
         self._refresh_search_blur_widgets()
 
     def _build_filter_produces(self, parent):
@@ -1103,6 +1149,7 @@ class SearchFeatureMixin:
                     pady=SEARCH_ROW_PADY)
         holder.columnconfigure(1, weight=1)
         self._build_filter_stats(holder)
+        self._tooltip_row_controls(holder, filter_tooltip("stats"))
 
     def _build_printing_filter(self, parent, *, row=0):
         self._search_printings = SearchPrintingFilter(self, parent, row=row)
@@ -1215,9 +1262,22 @@ class SearchFeatureMixin:
             search_actions, text="Search", role="primary", width=6,
             command=self._do_search)
         self._search_btn.pack(side="left")
-        AppButton(
+        clear_btn = AppButton(
             search_actions, text="Clear", role="standard", width=5,
-            command=self._clear_search).pack(side="left", padx=(4, 0))
+            command=self._clear_search)
+        clear_btn.pack(side="left", padx=(4, 0))
+        self._add_tooltip(
+            clear_btn,
+            "Empties every filter, standard and advanced, and returns the "
+            "results to the top. The filters themselves stay where they are, "
+            "and the deck you are building is untouched.",
+            wraplength=340)
+        self._add_tooltip(
+            self._search_btn,
+            "Runs the search with every filter currently set. The active ones "
+            "are summarized on their own controls, so a filter you forgot is "
+            "the one whose button does not read Any.",
+            wraplength=340)
 
 
     def _build_results_table(self, parent):

@@ -33,6 +33,8 @@ class SearchPrintingFilter(PrintingFilter):
             parent, text="Paper only · Any set type · Any set", role="picker",
             command=self.toggle_popup)
         self.button.grid(row=row, column=1, sticky="ew", pady=2)
+        # The button is what a user clicks; the label beside it is not.
+        owner._add_standard_filter_tooltip(self.button, "printings")
 
     def refresh_catalog(self):
         """Request current printing vocabulary without querying on the Tk thread."""

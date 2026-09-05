@@ -563,7 +563,15 @@ every feature together and is exempt.
   Colors grew a second row, Rules text grew a third mode and Card traits
   gained the only route to tokens, and each left its tooltip describing the
   version before. Spelling follows the labels on the controls, which are
-  American.
+  American. A filter's tooltip MUST reach the controls it is operated through
+  and not only its label: people hover the picker or the box they are about to
+  use, and a tooltip only on the label is one most of them never see. Two
+  tooltips on one widget both fire, so bulk tagging MUST skip controls that
+  already carry their own wording. The Printings popup MUST explain the scope
+  it sets — platform, set type, exact set, language — because it decides what
+  every other filter has to offer, and publisher set-type names such as
+  Arsenal, Box and Memorabilia name nothing a reader can guess. A set type
+  this build has not seen MUST still appear, explained by its section.
   Every filter's wording, pinned or optional, lives in
   `ui/search_filters.py`. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
