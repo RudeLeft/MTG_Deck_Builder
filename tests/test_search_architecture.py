@@ -658,14 +658,25 @@ def main():
             # Each of these names the boundary its filter is confused with:
             # Produces against colour, Mechanics against rules text, Rarity
             # against the card rather than the printing.
-            "not the same as its colour" in tooltips["produces"]
+            "not the same as its color" in tooltips["produces"]
             and "rules text" in tooltips["mechanics"]
             and "rules text" in tooltips["rules_text"]
             and "planeswalker" in tooltips["loyalty"]
             and "printing" in tooltips["rarity"]
             # Loyalty and Defense are separate because no card has both;
             # the tooltip has to say so or the split looks arbitrary.
-            and "no card has both" in tooltips["defense"]),
+            and "no card has both" in tooltips["defense"]
+            # A tooltip that describes a control has to describe the one that
+            # is there: Colors grew a second row, Rules text grew a third
+            # mode, and Card traits carries the only route to tokens.
+            and "Look at" in filter_tooltip("colors")
+            and "none of them" in tooltips["rules_text"]
+            and "tokens" in tooltips["traits"]
+            # The labels on the controls are American; the tooltips beside
+            # them cannot be British.
+            and not any(
+                "colour" in filter_tooltip(key).casefold()
+                for key in STANDARD_FILTERS + advanced_filter_keys())),
         "every card trait has a query clause or selects content": (
             # Content traits choose which objects the search covers instead of
             # adding a clause, so they are satisfied by content_types.

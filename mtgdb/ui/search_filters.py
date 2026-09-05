@@ -22,7 +22,7 @@ from __future__ import annotations
 CATEGORY_ORDER = ("Mana", "Card", "Printing")
 
 # Always on the Search form, in this order. These are the filters a search
-# starts from: what the card is called, what it is, what colour it is, how big
+# starts from: what the card is called, what it is, what color it is, how big
 # it is, and which printings are in scope.
 STANDARD_FILTERS = ("name", "card_type", "colors", "stats", "printings")
 
@@ -36,7 +36,7 @@ FILTER_DEFINITIONS = (
         "category": "Mana",
         "label": "Mana value",
         "tooltip": (
-            "The total cost of a card, counting coloured and generic mana "
+            "The total cost of a card, counting colored and generic mana "
             "together: {2}{G} is 3. Leave a box empty for no limit on that "
             "side."),
     },
@@ -45,18 +45,19 @@ FILTER_DEFINITIONS = (
         "category": "Mana",
         "label": "Produces",
         "tooltip": (
-            "The mana a card can make, which is not the same as its colour. "
-            "Birds of Paradise is green but makes all five colours, and "
-            "Command Tower is colourless but makes any of them."),
+            "The mana a card can make, which is not the same as its color. "
+            "Birds of Paradise is green but makes all five colors, and "
+            "Command Tower is colorless but makes any of them."),
     },
     {
         "key": "stats",
         "category": "Card",
         "label": "Power / Toughness",
         "tooltip": (
-            "Printed power and toughness, compared as numbers. Cards with "
-            "variable stats such as */* have no number to compare, so they "
-            "are left out."),
+            "Printed power and toughness, compared as numbers, so only "
+            "creatures and other cards that have them can match. A card whose "
+            "stats vary, such as */*, has no number to compare and is left "
+            "out. Leave a box empty for no limit on that side."),
     },
     {
         "key": "loyalty",
@@ -108,9 +109,11 @@ FILTER_DEFINITIONS = (
         "category": "Card",
         "label": "Rules text",
         "tooltip": (
-            "Words in a card's rules text, across every face. Each entry has "
-            "to appear, with other words allowed in between; put quotes "
-            "around an entry to require that exact phrase."),
+            "Words in a card's rules text, across every face. Words inside "
+            "one entry may have other words between them; put quotes around "
+            "an entry to require that exact phrase. The row below decides "
+            "whether every entry must appear, any one of them, or none of "
+            "them."),
     },
     {
         "key": "card_shape",
@@ -150,7 +153,9 @@ FILTER_DEFINITIONS = (
             "Yes-or-no facts that no other filter covers: Universes Beyond, "
             "Reserved List, Commander game changers, two-faced cards, hybrid "
             "and Phyrexian costs, and creatures with more power than "
-            "toughness."),
+            "toughness. The Scope choices at the top of the list are the only "
+            "way to search tokens, emblems and Art Series cards, which are "
+            "left out of every search until you ask for them."),
     },
     {
         "key": "format",
@@ -159,7 +164,8 @@ FILTER_DEFINITIONS = (
         "tooltip": (
             "Cards with the legality you choose in the format you choose: "
             "playable, banned or restricted. Playable covers both legal and "
-            "restricted cards."),
+            "restricted cards. Only formats that have cards in the chosen "
+            "state are offered, so Restricted lists very few."),
     },
     {
         "key": "rarity",
@@ -191,9 +197,11 @@ STANDARD_FILTER_TOOLTIPS = {
         "Lightning Bolt. Searching from a deck selection looks for those "
         "exact names instead."),
     "colors": (
-        "The colours of a card, taken from its mana cost, its rules text and "
-        "both of its faces. The row underneath decides whether those colours "
-        "must match exactly, be included, or simply not be exceeded."),
+        "The colors a card is. Look at chooses which meaning: color identity "
+        "counts everything the card brings to a deck, including its rules "
+        "text and both faces, while Card colors counts only what the card "
+        "itself is. The row below that decides whether the colors must match "
+        "exactly, be included, or simply not be exceeded."),
     "card_type": (
         "The main type on the type line, such as Creature, Instant or Land. "
         "A card with two of them, like an Artifact Creature, matches either "

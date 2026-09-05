@@ -559,6 +559,11 @@ every feature together and is exempt.
   made the explained filters look like the exceptional ones. A tooltip MUST
   NOT name a data source: "Scryfall", "the database" or "the local snapshot"
   spend the reader's attention on something that cannot change their search.
+  A tooltip that describes a control MUST describe the control that is there:
+  Colors grew a second row, Rules text grew a third mode and Card traits
+  gained the only route to tokens, and each left its tooltip describing the
+  version before. Spelling follows the labels on the controls, which are
+  American.
   Every filter's wording, pinned or optional, lives in
   `ui/search_filters.py`. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
