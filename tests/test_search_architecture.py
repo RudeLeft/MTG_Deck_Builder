@@ -404,6 +404,13 @@ def main():
             search_source, "_set_search_entry_text"))
 
     checks = {
+        "Supertypes has a visible mode row and defaults to Any": (
+            # It defaulted to All with no control to change it, so selecting
+            # two supertypes silently reduced the search to the 17 cards that
+            # carry both -- with no way for the user to correct it.
+            'self.q_supertype_mode = tk.StringVar(value="any")' in search_source
+            and "self._build_mode_row(" in _method_body(
+                search_source, "_build_filter_supertypes")),
         "every mode row offers None, inline rows included": (
             # Card Type builds its mode radios inline rather than through the
             # shared dialog, so it silently kept only Any and All when the

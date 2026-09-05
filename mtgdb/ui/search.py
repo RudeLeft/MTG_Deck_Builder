@@ -102,7 +102,10 @@ class SearchFeatureMixin:
 
         self.property_vars = {}
         self._property_catalog = []
-        self.q_supertype_mode = tk.StringVar(value="all")
+        # Any, like every other multi-select. Only 17 cards in the whole
+        # paper pool carry two supertypes, so an "all" default silently
+        # emptied any two-value selection.
+        self.q_supertype_mode = tk.StringVar(value="any")
 
         self.color_vars = {}
         self.q_color_mode = tk.StringVar(value="within")
@@ -761,6 +764,25 @@ class SearchFeatureMixin:
         self._selected_rarities = set()
         self._rarity_btn = None
 
+    def _build_mode_row(self, parent, label, variable, noun):
+        """One Any/All/None row, worded for the values it governs."""
+        mode = ttk.Frame(parent)
+        mode.pack(fill="x", pady=(2, 0))
+        ttk.Label(mode, text=label, style="Muted.TLabel").pack(side="left")
+        meanings = {
+            "any": f"Any: the card only needs one of the selected {noun}.",
+            "all": f"All: the card must have every selected {noun}.",
+            "none": f"None: exclude every card having any selected {noun}.",
+        }
+        for text, value in (("Any", "any"), ("All", "all"), ("None", "none")):
+            radio = ttk.Radiobutton(
+                mode, text=text, variable=variable, value=value,
+                style="FormChoice.TRadiobutton",
+                command=self._update_search_filter_summary)
+            radio.pack(side="left", padx=(3, 0))
+            self._add_tooltip(radio, meanings[value], wraplength=390)
+        return mode
+
     def _render_supertype_chips(self):
         """Draw supertype chips when the filter is present.
 
@@ -777,14 +799,19 @@ class SearchFeatureMixin:
             empty_text=getattr(self, "_supertype_empty_text", ""))
 
     def _build_filter_supertypes(self, parent):
-        self._property_chip_frame = ttk.Frame(parent)
-        self._property_chip_frame.grid(row=0, column=1, sticky="ew", pady=2)
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="ew", pady=2)
+        self._property_chip_frame = ttk.Frame(box)
+        self._property_chip_frame.pack(fill="x")
         self._render_supertype_chips()
+        self._supertype_mode_frame = self._build_mode_row(
+            box, "Selected supertypes:", self.q_supertype_mode, "supertypes")
 
     def _reset_filter_supertypes(self):
         for variable in self.property_vars.values():
             variable.set(False)
-        self.q_supertype_mode.set("all")
+        self.q_supertype_mode.set("any")
+        self._supertype_mode_frame = None
         self._property_chip_frame = None
 
     def _build_filter_mechanics(self, parent):
@@ -1649,7 +1676,7 @@ class SearchFeatureMixin:
             (self.q_card_type_mode, state.get("card_type_mode"),
              {"all", "any", "none"}, "any"),
             (self.q_supertype_mode, state.get("supertype_mode", state.get("characteristic_mode")),
-             {"all", "any", "none"}, "all"),
+             {"all", "any", "none"}, "any"),
             (self.q_subtype_mode, state.get("subtype_mode"),
              {"all", "any", "none"}, "any"),
             (self.q_keyword_mode, state.get("keyword_mode"),
