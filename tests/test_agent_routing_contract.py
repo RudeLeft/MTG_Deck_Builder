@@ -53,7 +53,7 @@ SOURCE_MARKERS = {
     "mtgdb/ui/tables.py": ("TABLE_COLUMNS =", "class TableInfrastructureMixin"),
     "mtgdb/ui/card_detail.py": ("class CardDetailMixin", "def _show_card("),
     "mtgdb/ui/search.py": ("class SearchFeatureMixin", "def _do_search(", "def _capture_search_workspace_state("),
-    "mtgdb/ui/search_filters.py": ("FILTER_DEFINITIONS =", "def filter_catalog("),
+    "mtgdb/ui/search_filters.py": ("FILTER_DEFINITIONS =", "def advanced_filters("),
     "mtgdb/ui/search_printings.py": ("class SearchPrintingFilter", "def _update_summary("),
     "mtgdb/ui/search_checklist.py": ("class SearchChecklistDialog", "def open_search_checklist("),
     "mtgdb/ui/set_filters.py": ("def set_type_label(", "class PrintingFilter", "class SetFilterSupportMixin"),

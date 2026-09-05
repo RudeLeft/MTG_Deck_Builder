@@ -17,7 +17,8 @@ from mtgdb.ui.components import (
 )
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.search_filters import (
-    FILTER_BY_KEY, PINNED_FILTER_TOOLTIPS, filter_catalog, ordered_active_filters,
+    FILTER_BY_KEY, PINNED_FILTER_TOOLTIPS, STANDARD_FILTERS,
+    advanced_filter_keys, advanced_filters,
 )
 from mtgdb.ui.search_printings import SearchPrintingFilter
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
@@ -168,14 +169,15 @@ class SearchFeatureMixin:
         form.columnconfigure(2, minsize=76)
         form.columnconfigure(3, weight=1, uniform="search_control")
         self._initialize_search_filter_state()
+        # The standard set, in the order a search is usually built: what the
+        # card is called, what it is, what colour it is, how big it is, and
+        # which printings are in scope.
         self._build_name_filter(form)
         self._build_card_type_filters(form)
         self._build_color_filters(form)
-        # Printings stays pinned: it carries the Paper/English scope every
-        # search depends on and it composes the shared PrintingFilter that Open
-        # Deck also builds, so its widget lifecycle is not ours to shorten.
+        self._build_standard_stats_filter(form, row=4)
         self._build_printing_filter(form, row=6)
-        self._build_optional_filter_zone(parent)
+        self._build_advanced_filter_zone(parent)
         self._bind_search_outside_click_selection_cleanup()
         self._build_search_actions(parent)
         self._build_results_table(parent)
@@ -820,126 +822,99 @@ class SearchFeatureMixin:
         if text:
             self._add_tooltip(widget, text, wraplength=380)
 
-    def _build_optional_filter_zone(self, parent):
-        """Host for filters that exist only while they are in use.
+    def _build_advanced_filter_zone(self, parent):
+        """One button that reveals every remaining filter, grouped by category.
 
-        The Search form and the Results table share one column with no sash
-        between them, so a permanently-rendered filter takes its height out of
-        Results for every user. Optional filters are built when added and
-        destroyed when removed, so an unused one costs nothing.
+        The previous design built each filter on demand from an Add filter
+        menu. It cost nothing unused, but a real search became several menu
+        trips before it could be run, and the filters a user reached for most
+        had to be re-added every session. Everything here is built once and
+        kept; the panel starts collapsed, so an unused Advanced section still
+        costs the Results table nothing but a single row.
         """
-        self._optional_filter_rows = {}
-        host = ttk.Frame(parent)
-        host.pack(fill="x")
-        self._optional_filter_host = host
+        self._advanced_filter_rows = {}
+        self._advanced_expanded = False
 
-        self._add_filter_btn = AppMenubutton(
-            parent, text="+ Add filter", role="menu")
-        self._add_filter_btn.pack(anchor="w", pady=(6, 2))
-        self._add_filter_menu = self._dark_menu(self._add_filter_btn)
-        self._add_filter_btn.configure(menu=self._add_filter_menu)
+        header = ttk.Frame(parent)
+        header.pack(fill="x", pady=(6, 0))
+        self._advanced_btn = AppButton(
+            header, text=self.ADVANCED_COLLAPSED_TEXT, role="dense",
+            command=self._toggle_advanced_filters)
+        self._advanced_btn.pack(side="left")
         self._add_tooltip(
-            self._add_filter_btn,
-            "Add a filter to this search. Filters you have not added take no "
-            "space, so the Results list stays as tall as possible.",
+            self._advanced_btn,
+            "Every filter beyond the standard set, grouped by what it asks "
+            "about. They stay where you leave them, so a filter you use often "
+            "is one click away rather than one search away.",
             wraplength=360)
-        self._refresh_add_filter_menu()
 
-    def _refresh_add_filter_menu(self):
-        """Rebuild the catalogue, grouping by category and marking what is on."""
-        menu = getattr(self, "_add_filter_menu", None)
-        if menu is None:
-            return
-        menu.delete(0, "end")
-        active = set(getattr(self, "_optional_filter_rows", {}))
-        first = True
-        for category, entries in filter_catalog(active):
-            if not first:
-                menu.add_separator()
-            first = False
-            menu.add_command(label=category, state="disabled")
+        self._advanced_host = ttk.Frame(parent)
+        self._build_advanced_filter_rows()
+        # Built now, shown on request: building on first expand would make the
+        # first click the slowest one in the panel.
+        self._advanced_host.pack_forget()
+
+    ADVANCED_COLLAPSED_TEXT = "▸  Advanced Filter Options"
+    ADVANCED_EXPANDED_TEXT = "▾  Advanced Filter Options"
+
+    def _build_advanced_filter_rows(self):
+        """Build every advanced filter once, under its category heading."""
+        for category, entries in advanced_filters():
+            heading = ttk.Label(
+                self._advanced_host, text=category.upper(),
+                style="Section.TLabel")
+            heading.pack(fill="x", anchor="w", pady=(8, 2))
             for entry in entries:
-                menu.add_command(
-                    label=("   " + entry["label"]
-                           + ("  (added)" if entry["active"] else "")),
-                    state="disabled" if entry["active"] else "normal",
-                    command=(None if entry["active"]
-                             else lambda key=entry["key"]:
-                                 self._add_optional_filter(key)))
-
-    def _add_optional_filter(self, key, *, notify=True):
-        """Build one optional filter row, or focus it when already present."""
-        if key in getattr(self, "_optional_filter_rows", {}):
-            return
-        definition = FILTER_BY_KEY.get(key)
-        builder = getattr(self, f"_build_filter_{key}", None)
-        if definition is None or builder is None:
-            return
-
-        frame = ttk.Frame(self._optional_filter_host)
-        frame.pack(fill="x")
-        frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)
-        frame.columnconfigure(1, weight=1)
-
-        label = ttk.Label(frame, text=definition["label"])
-        label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
-        self._add_tooltip(label, definition["tooltip"], wraplength=380)
-
-        builder(frame)
-
-        remove = AppButton(
-            frame, text="×", role="compact",
-            command=lambda: self._remove_optional_filter(key))
-        remove.grid(row=0, column=2, sticky="ne", padx=(6, 0), pady=2)
-        self._add_tooltip(
-            remove, f"Remove the {definition['label']} filter from this search.",
-            wraplength=300)
-
-        self._optional_filter_rows[key] = frame
+                key = entry["key"]
+                builder = getattr(self, f"_build_filter_{key}", None)
+                if builder is None:
+                    continue
+                frame = ttk.Frame(self._advanced_host)
+                frame.pack(fill="x")
+                frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)
+                frame.columnconfigure(1, weight=1)
+                label = ttk.Label(frame, text=entry["label"])
+                label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
+                self._add_tooltip(label, entry["tooltip"], wraplength=380)
+                builder(frame)
+                self._advanced_filter_rows[key] = frame
         self._refresh_search_blur_widgets()
-        self._refresh_add_filter_menu()
-        if notify:
-            self._update_search_filter_summary()
 
-    def _remove_optional_filter(self, key, *, notify=True):
-        """Destroy one optional filter row and reset the state it owned."""
-        frame = getattr(self, "_optional_filter_rows", {}).pop(key, None)
-        if frame is None:
+    def _toggle_advanced_filters(self, expand=None):
+        """Show or hide the advanced panel without rebuilding it."""
+        expanded = (not self._advanced_expanded) if expand is None else bool(expand)
+        if expanded == self._advanced_expanded and expand is not None:
             return
-        reset = getattr(self, f"_reset_filter_{key}", None)
-        if reset is not None:
+        self._advanced_expanded = expanded
+        if expanded:
+            self._advanced_host.pack(
+                fill="x", before=self._search_actions_frame)
+        else:
+            self._advanced_host.pack_forget()
+        if self._advanced_btn is not None:
+            self._advanced_btn.configure(
+                text=(self.ADVANCED_EXPANDED_TEXT if expanded
+                      else self.ADVANCED_COLLAPSED_TEXT))
+        # Collapsing shortens the form, so the Results viewport has to follow
+        # it back up rather than stay scrolled to where the taller panel was.
+        self._reset_results_viewport()
+
+    def _reset_advanced_filter_values(self):
+        """Empty every advanced filter without taking any of them away."""
+        for key in advanced_filter_keys():
+            reset = getattr(self, f"_reset_filter_{key}", None)
+            frame = self._advanced_filter_rows.get(key)
+            if reset is None or frame is None:
+                continue
             reset()
-        frame.destroy()
+            for child in frame.winfo_children():
+                if child.winfo_manager() == "grid" and child.grid_info().get(
+                        "column") == 1:
+                    child.destroy()
+            builder = getattr(self, f"_build_filter_{key}", None)
+            if builder is not None:
+                builder(frame)
         self._refresh_search_blur_widgets()
-        self._refresh_add_filter_menu()
-        if notify:
-            # One row less is a shorter form, so Add filter and everything
-            # below it move up. The Results viewport has to be told, or it
-            # stays scrolled to where the taller panel had left it.
-            self._reset_results_viewport()
-            self._update_search_filter_summary()
-
-    def _active_optional_filters(self):
-        return ordered_active_filters(getattr(self, "_optional_filter_rows", {}))
-
-    def _clear_optional_filters(self):
-        for key in list(getattr(self, "_optional_filter_rows", {})):
-            self._remove_optional_filter(key, notify=False)
-
-    def _reset_optional_filter_values(self):
-        """Empty every added filter without taking any of them away.
-
-        Clear used to remove the rows as well, which meant re-adding each
-        filter by hand before the next search. The rows are rebuilt rather
-        than reset in place because a reset releases the widgets a row owns;
-        rebuilding in the same order keeps the panel visually still.
-        """
-        active = list(getattr(self, "_optional_filter_rows", {}))
-        if not active:
-            return
-        self._clear_optional_filters()
-        for key in active:
-            self._add_optional_filter(key, notify=False)
 
     def _build_filter_produces(self, parent):
         self._build_produces_filter(parent, row=0)
@@ -1097,10 +1072,25 @@ class SearchFeatureMixin:
         self._numeric_pair(box, "q_toughness").pack(side="left")
 
     def _reset_filter_stats(self):
+        # Power/Toughness is a standard row, so its widgets outlive a Clear:
+        # empty them rather than dropping the handles the form still holds.
         for name in ("q_power_min", "q_power_max",
                      "q_toughness_min", "q_toughness_max"):
-            setattr(self, name, None)
+            self._set_search_entry_text(getattr(self, name, None), "")
 
+
+    def _build_standard_stats_filter(self, form, *, row):
+        """Power / Toughness on the main form, styled like its neighbours."""
+        label = ttk.Label(form, text="Power / Toughness")
+        label.grid(row=row, column=0, sticky="w", padx=(0, 8),
+                   pady=SEARCH_ROW_PADY)
+        self._add_tooltip(
+            label, FILTER_BY_KEY["stats"]["tooltip"], wraplength=380)
+        holder = ttk.Frame(form)
+        holder.grid(row=row, column=1, columnspan=3, sticky="ew",
+                    pady=SEARCH_ROW_PADY)
+        holder.columnconfigure(1, weight=1)
+        self._build_filter_stats(holder)
 
     def _build_printing_filter(self, parent, *, row=0):
         self._search_printings = SearchPrintingFilter(self, parent, row=row)
@@ -1189,6 +1179,9 @@ class SearchFeatureMixin:
         # group on the right so adding a selected result is always close at hand.
         btns = ttk.Frame(parent)
         btns.pack(fill="x", pady=(4, 5))
+        # The advanced panel packs itself in above this frame, so it must be
+        # reachable by name rather than by whatever happens to be last.
+        self._search_actions_frame = btns
 
         # Pack the right-side actions first so Tk reserves their full natural
         # width before allocating the left group.  Their position is unchanged,
@@ -1310,11 +1303,13 @@ class SearchFeatureMixin:
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name.set("")
-        # Rebuilding every optional row runs each filter's own reset, so the
-        # state they own is cleared without naming it twice here. The rows
-        # themselves stay: clearing a search is not the same as abandoning the
-        # set of questions it was asking.
-        self._reset_optional_filter_values()
+        # Every filter's own reset runs, so the state each owns is cleared
+        # without naming it twice here. The rows themselves stay, and so does
+        # whether Advanced is open: clearing a search is not the same as
+        # abandoning the set of questions it was asking.
+        self._reset_advanced_filter_values()
+        # Standard rows are never rebuilt, so each empties itself in place.
+        self._reset_filter_stats()
         self._rules_text_shadow = []
         self.q_rules_mode.set("all")
         self.q_card_type_mode.set("any")
@@ -1796,7 +1791,7 @@ class SearchFeatureMixin:
             "produces_mode": self.q_produces_mode.get(),
             "trait_mode": self.q_trait_mode.get(),
             "format_status": self.q_format_status.get(),
-            "optional_filters": list(self._active_optional_filters()),
+            "advanced_expanded": bool(getattr(self, "_advanced_expanded", False)),
             "optional_values": self._capture_optional_filter_values(),
             "traits": sorted(
                 getattr(self, "_selected_traits", set()) or ()),
@@ -1938,12 +1933,9 @@ class SearchFeatureMixin:
         for key, variable in self.color_vars.items():
             variable.set(key in wanted_colors)
 
-        # Rebuild the optional rows before restoring their values, so a
-        # restored session shows the same panel it was saved with.
-        self._clear_optional_filters()
-        for key in ordered_active_filters(
-                state.get("optional_filters", []) or ()):
-            self._add_optional_filter(key, notify=False)
+        # Advanced rows always exist, so only its open/closed state is
+        # restored; a session that was working in Advanced reopens there.
+        self._toggle_advanced_filters(bool(state.get("advanced_expanded", False)))
         self._selected_traits = {
             str(value) for value in state.get("traits", []) or ()
             if str(value) in TRAIT_LABELS}

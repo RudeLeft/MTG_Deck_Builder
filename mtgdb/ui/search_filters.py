@@ -1,21 +1,30 @@
-"""Optional Search filter registry and the on-demand filter panel.
+"""Search filter registry: the standard set, and the advanced ones by category.
 
-The Search form used to render every filter permanently, so each new filter
-cost vertical space for every user whether or not they used it -- and that
-space comes straight out of the Results table, which shares the column with no
-sash between them. This module inverts that: a filter is built when it is
-added and destroyed when it is removed, so an unused filter costs nothing.
+The Search form and the Results table share one column with no sash between
+them, so every permanently-rendered filter takes its height out of Results.
+Two designs have answered that. The first rendered everything; the second
+built each filter on demand from an Add filter menu, which cost nothing unused
+but made a real search several menu trips before it could be run.
+
+This is the third and it comes from using the second: a small standard set
+that is always present because nearly every search touches it, and everything
+else together behind one Advanced Filter Options button. One click reveals all
+of them, grouped by category, instead of one click per filter.
 
 The registry is deliberately data, not widgets. Each entry names its category,
-its label, the tooltip that explains what the filter actually matches, and the
-builder that constructs its row. `ui/search.py` owns the controls themselves;
-this module owns which of them currently exist.
+its label and the tooltip that explains what the filter actually matches;
+`ui/search.py` owns the controls themselves.
 """
 
 from __future__ import annotations
 
 
 CATEGORY_ORDER = ("Mana", "Card", "Printing")
+
+# Always on the Search form, in this order. These are the filters a search
+# starts from: what the card is called, what it is, what colour it is, how big
+# it is, and which printings are in scope.
+STANDARD_FILTERS = ("name", "card_type", "colors", "stats", "printings")
 
 # Tooltip wording rule, applied to every filter including the pinned ones:
 # one sentence saying what the filter matches, then at most one more for the
@@ -197,50 +206,42 @@ PINNED_FILTER_TOOLTIPS = {
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}
 
-# Present in most searches, so they are never removable and never appear in the
-# catalogue. Printings is pinned for a second reason: it carries the Paper and
-# English scope every search depends on, and it composes the shared
-# PrintingFilter that Open Deck also builds, so its widget lifecycle is not the
-# Search panel's to shorten.
+# Kept as the name the tooltips are keyed by: these four are built by hand in
+# ui/search.py rather than from a registry entry, because each has a shape no
+# generic row could give it.
 PINNED_FILTERS = ("name", "colors", "card_type", "printings")
 
 
-def filter_catalog(active_keys):
-    """Return the Add-filter menu contents grouped in category order.
+def advanced_filters():
+    """Every filter outside the standard set, grouped in category order.
 
-    Each entry reports whether it is already active, so the menu can show it
-    as added rather than silently doing nothing when chosen twice.
+    Order is the registry's, not the order a user happened to open things in,
+    so a filter is always in the same place on the panel.
     """
-    active = {str(key) for key in (active_keys or ())}
     grouped = []
     for category in CATEGORY_ORDER:
-        entries = [
+        entries = tuple(
             {
                 "key": entry["key"],
                 "label": entry["label"],
                 "tooltip": entry["tooltip"],
-                "active": entry["key"] in active,
             }
             for entry in FILTER_DEFINITIONS
             if entry["category"] == category
-        ]
+            and entry["key"] not in STANDARD_FILTERS
+        )
         if entries:
-            grouped.append((category, tuple(entries)))
+            grouped.append((category, entries))
     return tuple(grouped)
 
 
-def ordered_active_filters(active_keys):
-    """Order active filters by category so added rows never shuffle.
-
-    Insertion order would let the panel rearrange itself as filters are added
-    and removed, which makes a row hard to find again. Registry order is
-    stable for the life of the build.
-    """
-    active = {str(key) for key in (active_keys or ())}
+def advanced_filter_keys():
+    """Flat advanced order, for callers that only need the keys."""
     return tuple(
-        entry["key"] for entry in FILTER_DEFINITIONS if entry["key"] in active)
+        entry["key"] for _category, entries in advanced_filters()
+        for entry in entries)
 
 
-def is_removable(key):
-    """Pinned filters have no remove control; everything else does."""
-    return str(key) not in PINNED_FILTERS and str(key) in FILTER_BY_KEY
+def is_standard(key):
+    """Standard filters are always on the form and never inside Advanced."""
+    return str(key) in STANDARD_FILTERS

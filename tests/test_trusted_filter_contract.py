@@ -249,17 +249,19 @@ def main():
             and 'self.catalog("supertypes")' not in (
                 ROOT / "mtgdb/database/taxonomy.py").read_text(encoding="utf-8")),
 
-        "optional filters replace the fixed Advanced list": (
-            "def _build_advanced_filters(" not in search_source
-            and "Advanced Filters" not in search_source
-            and "def _build_optional_filter_zone(" in search_source
+        "a standard set on the form, everything else behind one button": (
+            # The Add filter menu made a real search several menu trips before
+            # it could be run, and re-added the same filters every session.
+            "def _build_advanced_filter_zone(" in search_source
+            and "_add_filter_menu" not in search_source
+            and "def _add_optional_filter(" not in search_source
             and {"rules_text", "subtype", "format", "rarity"}
             <= set(FILTER_BY_KEY)
             # Content is expressed as Card traits now, not its own filter.
             and "content" not in FILTER_BY_KEY
             and "printings" not in FILTER_BY_KEY),
-        "optional filter labels match primary Search field typography": (
-            'label = ttk.Label(frame, text=definition["label"])' in search_source
+        "advanced filter labels match primary Search field typography": (
+            'label = ttk.Label(frame, text=entry["label"])' in search_source
             and 'printings_label = ttk.Label(parent, text="Printings")'
             in printing_source
             and 'text="Content", style="Section.TLabel"' not in search_source

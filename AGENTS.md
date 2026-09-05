@@ -522,22 +522,30 @@ every feature together and is exempt.
   **Any** radio choice: it MUST display selected whenever no specific format is
   active, and selecting it MUST replace/unselect every specific format. An empty Set
   Type or Exact Set selection means Any. _Verification:_ **AUTO**.
-- **SRCH-034 — MUST:** Build optional Search filters only while they are in
-  use. The Search form and the Results table share one column with no sash
-  between them, so a permanently-rendered filter takes its height out of
-  Results for every user whether or not they use it. An optional filter is
-  declared in `ui/search_filters.py` with its category, label, and a tooltip
-  that states what the filter matches; `ui/search.py` owns its control and
-  builds the row when the filter is added, destroys it when removed, and
-  resets the state it owned. Removing a filter MUST clear its contribution to
-  the query and MUST return the Results viewport to its first row, because one
-  row less is a shorter form and the viewport otherwise stays scrolled to
-  where the taller panel left it. `Clear` MUST empty every optional row
-  without removing any of them: clearing a search is not the same as
-  abandoning the set of questions it was asking, and re-adding each filter by
-  hand after every Clear was the single most repeated action in the panel.
-  Workspace capture MUST record both the active filter set and the values
-  those controls hold so a restored session rebuilds the same panel.
+- **SRCH-034 — MUST:** Present Search as a standard set of filters always on
+  the form, with every other filter together behind one **Advanced Filter
+  Options** button. The Search form and the Results table share one column
+  with no sash between them, so a permanently-rendered filter takes its height
+  out of Results for every user. Two earlier designs answered that badly: the
+  first rendered everything, and the second built each filter on demand from
+  an Add filter menu, which cost nothing unused but turned a real search into
+  several menu trips and made the filters a user reaches for most something
+  they re-added every session. The standard set is
+  `name, card_type, colors, stats, printings`, in that order, because that is
+  the order a search is built: what the card is called, what it is, what
+  colour it is, how big it is, and which printings are in scope. Everything
+  else is declared in `ui/search_filters.py` with its category, label, and a
+  tooltip that states what the filter matches, and appears in the advanced
+  panel grouped by category in registry order, so a filter is always in the
+  same place. `ui/search.py` owns the controls. Advanced rows MUST be built
+  once and hidden rather than rebuilt on each expand — rebuilding makes the
+  first click the slowest one in the panel — and collapsing MUST return the
+  Results viewport to its first row, because a shorter form otherwise leaves
+  it scrolled to where the taller panel was. `Clear` MUST empty every filter
+  without removing any of them, including the standard rows, which are never
+  rebuilt and so have to empty themselves in place. Workspace capture MUST
+  record the values those controls hold and whether the advanced panel was
+  open, so a session that was working in Advanced reopens there.
   _Verification:_ **AUTO**.
 - **SRCH-035 — MUST:** Give every Search filter a tooltip that says what the
   filter matches against rather than naming the control, and distinguish it
@@ -657,14 +665,13 @@ every feature together and is exempt.
   a single selected row uses the same preset path with one exact name. The Card Name field
   MAY display the batch summary, but SQL ownership remains in
   `database/search_queries.py`. _Verification:_ **AUTO**.
-- **SRCH-021 — MUST:** Keep the normal Search surface focused on Card Name, Card Type,
-  Supertypes, Colors, numeric ranges, and Mechanics. Pin exactly Card Name, Card Type, Colors, and Printings, and
-  build every other filter on demand under SRCH-034. Printings is pinned because
-  it carries the Paper/English scope every search depends on and composes the
-  shared `PrintingFilter` that Open Deck also builds. There is no `Advanced
-  Filters` accordion: a fixed list of always-rendered rows takes Results height
-  from users who never touch those filters, which is what made each added filter
-  a cost to everyone. Content MUST show one compact horizontal choice group in the exact order
+- **SRCH-021 — MUST:** Keep the standard Search surface to exactly Card Name,
+  Card Type, Colors, Power / Toughness, and Printings, in that order, and keep
+  every other filter in the advanced panel under SRCH-034. Printings is
+  standard because it carries the Paper/English scope every search depends on
+  and composes the shared `PrintingFilter` that Open Deck also builds. The
+  advanced panel starts collapsed, so the filters no one on this search is
+  using still cost Results only the one row that reveals them. Content MUST show one compact horizontal choice group in the exact order
   `Cards | Tokens | Emblems | Art Series` on the same row as the Content label. The
   `Cards` choice MUST begin at the same shared Advanced control-column x-position as
   Rules Text, Subtype, Format, Rarity, and Printings; the Content choices MUST remain
@@ -1527,7 +1534,7 @@ every feature together and is exempt.
   of the Printings popup rather than consuming primary Search-row width.
   _Verification:_ **AUTO**.
 - **LAY-008 — MUST:** Keep the primary Search rows on one uniform vertical-spacing
-  token, keep Format/Rarity inside Advanced Filters immediately below Subtype, and omit redundant pane titles
+  token, keep Format and Rarity in the advanced panel's Printing category, and omit redundant pane titles
   `Card Search`, `Current Deck`, `Card Preview`, and `Deck Stats` while retaining the
   uppercase bold `MAINBOARD` and `SIDEBOARD` section labels. Results MUST present its
   count in that same gold section-heading role as `RESULTS | N Cards` (transient Search

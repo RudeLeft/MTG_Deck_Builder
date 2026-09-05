@@ -25,7 +25,8 @@ from mtgdb.ui.search import (
 from mtgdb.ui.search_checklist import SearchChecklistDialog
 from mtgdb.ui.search_filters import (
     CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTER_TOOLTIPS,
-    PINNED_FILTERS, filter_catalog, is_removable, ordered_active_filters,
+    PINNED_FILTERS, STANDARD_FILTERS, advanced_filter_keys, advanced_filters,
+    is_standard,
 )
 from mtgdb.ui.components import format_display_name
 from mtgdb.search.catalogs import SearchCatalogController
@@ -429,7 +430,7 @@ def main():
 
     # SRCH-034/035 registry contracts. These hold without Tk, because the
     # registry is deliberately data rather than widgets.
-    catalog = filter_catalog({"traits"})
+    catalog = advanced_filters()
     catalog_keys = [entry["key"] for _c, entries in catalog for entry in entries]
     tooltips = {entry["key"]: entry["tooltip"] for entry in FILTER_DEFINITIONS}
     trait_keys = {key for key, _label in TRAIT_CHOICES}
@@ -512,20 +513,17 @@ def main():
         "Search Clear returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
                 search_source, "_clear_search")),
-        "Clear empties the added filters without taking them away": (
-            # Clear used to destroy every row, so the next search began by
-            # re-adding the same filters by hand.
-            "self._reset_optional_filter_values()" in _method_body(
+        "Clear empties every filter without taking any away": (
+            "self._reset_advanced_filter_values()" in _method_body(
                 search_source, "_clear_search")
-            and "self._clear_optional_filters()" not in _method_body(
+            and "advanced_filter_keys()" in _method_body(
+                search_source, "_reset_advanced_filter_values")
+            # Standard rows are never rebuilt, so Clear has to empty them in
+            # place; the advanced sweep cannot reach them.
+            and "self._reset_filter_stats()" in _method_body(
                 search_source, "_clear_search")
-            and "self._add_optional_filter(key, notify=False)" in _method_body(
-                search_source, "_reset_optional_filter_values")),
-        "removing a filter returns Results to the first row": (
-            # One row less is a shorter form; the viewport has to follow it up
-            # exactly as it follows Clear.
-            "self._reset_results_viewport()" in _method_body(
-                search_source, "_remove_optional_filter")),
+            and "_set_search_entry_text" in _method_body(
+                search_source, "_reset_filter_stats")),
         "platform is part of the taxonomy cache key": (
             # Without it, the snapshot that arrived after an Arena toggle
             # described paper and overwrote the Arena set list.
@@ -598,26 +596,45 @@ def main():
             catalog_refresh_touches_no_missing_widget),
         "optional widget handles exist as None before any row is built": (
             optional_handles_start_as_none),
-        "every optional filter is declared with a category and tooltip": (
+        "every filter is declared with a category and tooltip": (
             all(entry["category"] in CATEGORY_ORDER for entry in FILTER_DEFINITIONS)
             and all(len(entry["tooltip"]) >= 60 for entry in FILTER_DEFINITIONS)
-            and len(catalog_keys) == len(set(catalog_keys))
-            and len(catalog_keys) == len(FILTER_DEFINITIONS)),
-        "the catalogue reports what is already added": (
-            [e["active"] for _c, es in catalog for e in es if e["key"] == "traits"]
-            == [True]
-            and not any(e["active"] for _c, es in catalog for e in es
-                        if e["key"] != "traits")),
-        "optional filter order is registry order, not insertion order": (
-            ordered_active_filters(["rules_text", "produces"])
-            == ("produces", "rules_text")
-            and ordered_active_filters(["released", "produces"])
-            == ("produces", "released")
-            and ordered_active_filters(()) == ()),
-        "pinned filters are never removable and never in the catalogue": (
-            all(not is_removable(key) for key in PINNED_FILTERS)
-            and not (set(PINNED_FILTERS) & set(catalog_keys))
-            and is_removable("traits")),
+            and len(catalog_keys) == len(set(catalog_keys))),
+        "the standard set is on the form in the order a search is built": (
+            STANDARD_FILTERS
+            == ("name", "card_type", "colors", "stats", "printings")
+            # Power/Toughness is a standard row now, so it is built by the
+            # form rather than reached through the advanced panel.
+            and "self._build_standard_stats_filter(form, row=4)" in _method_body(
+                search_source, "_build_search_pane")
+            and all(is_standard(key) for key in STANDARD_FILTERS)),
+        "advanced holds every other filter, grouped and in registry order": (
+            set(catalog_keys) | set(STANDARD_FILTERS)
+            == set(FILTER_BY_KEY) | {"name", "colors", "card_type", "printings"}
+            and not (set(catalog_keys) & set(STANDARD_FILTERS))
+            # Category order is the registry's, so a filter is always in the
+            # same place rather than wherever it was opened first.
+            and [category for category, _entries in catalog]
+            == [c for c in CATEGORY_ORDER]
+            and advanced_filter_keys()[:3]
+            == ("mana_value", "produces", "mana_pips")),
+        "advanced rows are built once and only hidden": (
+            "def _build_advanced_filter_rows(" in search_source
+            and "self._advanced_host.pack_forget()" in _method_body(
+                search_source, "_toggle_advanced_filters")
+            # Rebuilding on expand would make the first click the slowest.
+            and "self._build_advanced_filter_rows()" in _method_body(
+                search_source, "_build_advanced_filter_zone")
+            and "_build_advanced_filter_rows" not in _method_body(
+                search_source, "_toggle_advanced_filters")),
+        "collapsing advanced returns Results to the first row": (
+            "self._reset_results_viewport()" in _method_body(
+                search_source, "_toggle_advanced_filters")),
+        "whether advanced is open survives the session": (
+            '"advanced_expanded": bool(getattr(self, "_advanced_expanded", False)),'
+            in _method_body(search_source, "_capture_search_workspace_state")
+            and 'state.get("advanced_expanded", False)' in _method_body(
+                search_source, "_restore_search_workspace_state")),
         "tooltips say what is matched, not what the control is": (
             # Each of these names the boundary its filter is confused with:
             # Produces against colour, Mechanics against rules text, Rarity
@@ -840,14 +857,15 @@ def main():
             'self._pending_search_request = False' in search_source
             and 'set_count = getattr(self, "_set_result_count", None)' in search_source
             and 'text="RESULTS | Trusted filters unavailable"' in search_source),
-        "the pinned core is built and every other filter is on demand": (
+        "the standard core is built and every other filter is in Advanced": (
             'text="Active Filters"' not in search_source
             and "self._build_name_filter(form)" in search_source
             and "self._build_card_type_filters(form)" in search_source
             and "self._build_color_filters(form)" in search_source
             and "self._build_printing_filter(form, row=6)" in search_source
-            and "self._build_optional_filter_zone(parent)" in search_source
-            and "def _build_advanced_filters(" not in search_source
+            and "self._build_advanced_filter_zone(parent)" in search_source
+            # Every registry filter still has a builder: Advanced is where the
+            # rows live now, not a second way of declaring them.
             and all(f"def _build_filter_{key}(" in search_source
                     for key in FILTER_BY_KEY)),
         "picker summaries expose ten values before remainder count": (
