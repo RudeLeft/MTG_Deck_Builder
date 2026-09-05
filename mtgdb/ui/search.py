@@ -45,15 +45,21 @@ RELEASE_YEAR_FIRST = 1993
 RELEASE_YEAR_LAST = datetime.date.today().year + 2
 # Content kinds live here now: they are yes/no facts about what an object is,
 # and a separate Content row for four checkboxes was a filter of its own.
+# Which kinds of object a search covers. Cards is one of the four and can be
+# turned off: without it the scope could only ever grow, so "show me the
+# tokens" meant adding 3,000 tokens to 100,000 cards and hunting for them.
 CONTENT_TRAIT_KEYS = {
-    "include_tokens": "token",
-    "include_emblems": "emblem",
-    "include_art_series": "art",
+    "content_cards": "card",
+    "content_tokens": "token",
+    "content_emblems": "emblem",
+    "content_art_series": "art",
 }
+DEFAULT_CONTENT_TRAITS = ("content_cards",)
 TRAIT_CHOICES = (
-    ("include_tokens", "Include Tokens"),
-    ("include_emblems", "Include Emblems"),
-    ("include_art_series", "Include Art Series"),
+    ("content_cards", "Cards"),
+    ("content_tokens", "Tokens"),
+    ("content_emblems", "Emblems"),
+    ("content_art_series", "Art Series"),
     ("not_universes_beyond", "Not Universes Beyond"),
     ("universes_beyond", "Universes Beyond"),
     ("reserved", "Reserved List"),
@@ -128,7 +134,7 @@ class SearchFeatureMixin:
         # states a deck check asks about and nothing could previously reach.
         self.q_format_status = tk.StringVar(value="playable")
         self.q_rules_mode = tk.StringVar(value="all")
-        self._selected_traits = set()
+        self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
         # Traits combine with Any by default, like Subtype and Mechanics.
         # Requiring all of them made two selections return nothing.
         self.q_trait_mode = tk.StringVar(value="any")
@@ -537,7 +543,9 @@ class SearchFeatureMixin:
         self._traits_btn.grid(row=0, column=1, sticky="ew", pady=2)
 
     def _reset_filter_traits(self):
-        self._selected_traits = set()
+        # Clearing returns to Cards rather than to nothing: an empty content
+        # scope is not a search anybody meant to run.
+        self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
         self._traits_btn = None
 
     def _choose_traits(self):
@@ -566,7 +574,7 @@ class SearchFeatureMixin:
             if key in TRAIT_LABELS}
         self._open_search_multi_picker(
             "Card Traits",
-            # The first three choose what the search covers rather than adding
+            # The first four choose what the search covers rather than adding
             # a condition, so the Any/All/None row below cannot apply to them.
             # Grouping them says so, in the same "group - value" form the
             # Mechanics and Subtype pickers already use.
@@ -576,9 +584,10 @@ class SearchFeatureMixin:
             mode_var=self.q_trait_mode,
             mode_label="Selected traits:",
             help_text=(
-                "Choose one or several card traits. Scope choices add whole "
-                "kinds of object to the search and ignore the Any/All/None "
-                "row; every Trait below them is a condition it governs."))
+                "Scope chooses which kinds of object the search covers, and "
+                "ignores the Any/All/None row: untick Cards and tick Tokens "
+                "to search tokens alone. Every Trait below is a condition "
+                "that row does govern."))
 
     LAYOUT_LABELS = {
         "modal_dfc": "Modal double-faced",
@@ -1156,18 +1165,19 @@ class SearchFeatureMixin:
 
 
     def _content_types_from_traits(self):
-        """Content kinds requested through Card traits.
+        """Which kinds of object the search covers, chosen in Card traits.
 
-        Cards are always searched; Tokens, Emblems and Art Series are separate
-        printed objects that stay out until asked for, which is what DATA-008
-        requires of Art Series in particular.
+        All four are independent, so turning Cards off and Tokens on searches
+        tokens alone. Tokens, Emblems and Art Series stay off until asked for,
+        which is what DATA-008 requires of Art Series in particular. Turning
+        every one of them off would search nothing at all, so the last one
+        standing falls back to Cards rather than emptying the Results table
+        with no way to tell why.
         """
         selected = set(getattr(self, "_selected_traits", set()) or ())
-        kinds = {"card"}
-        for key, kind in CONTENT_TRAIT_KEYS.items():
-            if key in selected:
-                kinds.add(kind)
-        return kinds
+        kinds = {
+            kind for key, kind in CONTENT_TRAIT_KEYS.items() if key in selected}
+        return kinds or {"card"}
 
     def _selected_content_types(self):
         return self._content_types_from_traits()
@@ -1950,12 +1960,13 @@ class SearchFeatureMixin:
             value for value in saved_content
             if value in ("card", "token", "emblem", "art")
         } or {"card"}
-        traits = set(getattr(self, "_selected_traits", set()) or ())
-        for trait_key, kind in CONTENT_TRAIT_KEYS.items():
-            traits.discard(trait_key)
-            if kind in content:
-                traits.add(trait_key)
-        self._selected_traits = traits
+        # The saved content list is authoritative for scope, and a workspace
+        # written before Cards became a choice carries no trait for it, so the
+        # scope traits are derived here and applied after the saved trait list
+        # rather than before it.
+        restored_content_traits = {
+            trait_key for trait_key, kind in CONTENT_TRAIT_KEYS.items()
+            if kind in content}
 
         self._pending_catalog_filter_state = {
             "card_types": {str(value) for value in state.get("card_types", [])},
@@ -2010,7 +2021,8 @@ class SearchFeatureMixin:
         self._toggle_advanced_filters(bool(state.get("advanced_expanded", False)))
         self._selected_traits = {
             str(value) for value in state.get("traits", []) or ()
-            if str(value) in TRAIT_LABELS}
+            if str(value) in TRAIT_LABELS and str(value) not in CONTENT_TRAIT_KEYS
+        } | restored_content_traits
         if getattr(self, "_traits_btn", None) is not None:
             self._traits_btn.configure(text=self._picker_button_text(
                 {TRAIT_LABELS[key] for key in self._selected_traits},

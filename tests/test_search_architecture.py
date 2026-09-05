@@ -719,6 +719,25 @@ def main():
             traits_narrow_the_query
             and unknown_trait_is_ignored_not_widening),
         "release bounds are inclusive years": release_bounds_are_inclusive,
+        "the content scope can narrow as well as widen": (
+            # While Cards could not be turned off, asking to see the tokens
+            # meant adding 3,000 of them to 100,000 cards and hunting.
+            'DEFAULT_CONTENT_TRAITS = ("content_cards",)' in search_source
+            and '("content_cards", "Cards")' in search_source
+            and "kind for key, kind in CONTENT_TRAIT_KEYS.items() if key in selected"
+            in search_source
+            # Every scope off would search nothing at all, which is not a
+            # search anybody meant to run.
+            and 'return kinds or {"card"}' in search_source
+            and "set(DEFAULT_CONTENT_TRAITS)" in _method_body(
+                search_source, "_reset_filter_traits")),
+        "a saved content scope survives a workspace written without it": (
+            # The saved traits list used to overwrite the scope derived from
+            # the saved content, so an older workspace lost its tokens.
+            "restored_content_traits" in _method_body(
+                search_source, "_restore_search_workspace_state")
+            and 'str(value) not in CONTENT_TRAIT_KEYS' in _method_body(
+                search_source, "_restore_search_workspace_state")),
         "including tokens rebuilds the vocabulary it widens": (
             # The results were always right; the pickers kept describing cards
             # only, because the callback that rescopes them had no caller.

@@ -153,9 +153,9 @@ FILTER_DEFINITIONS = (
             "Yes-or-no facts that no other filter covers: Universes Beyond, "
             "Reserved List, Commander game changers, two-faced cards, hybrid "
             "and Phyrexian costs, and creatures with more power than "
-            "toughness. The Scope choices at the top of the list are the only "
-            "way to search tokens, emblems and Art Series cards, which are "
-            "left out of every search until you ask for them."),
+            "toughness. The Scope choices at the top of the list decide which "
+            "kinds of object are searched at all: Cards alone by default, and "
+            "untick Cards to search only tokens, emblems or Art Series."),
     },
     {
         "key": "format",

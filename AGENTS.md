@@ -1666,9 +1666,16 @@ every feature together and is exempt.
   invented fallback vocabulary. _Verification:_ **AUTO**.
 - **DATA-008 — MUST:** Derive Search Content only as Cards, Tokens, Emblems, and
   Art Series from Scryfall-backed row/layout semantics. Content is chosen through
-  Card traits rather than its own filter row: Cards are always searched and the
-  other kinds are opt-in traits that select a content kind instead of adding a
-  query clause. Because they widen what the search covers, changing one MUST
+  Card traits rather than its own filter row: all four are independent Scope
+  choices that select a content kind instead of adding a query clause, and
+  Cards MUST be one of them rather than an assumption. While Cards could not
+  be turned off the scope could only ever grow, so asking to see the tokens
+  added 3,000 of them to 100,000 cards and left the user to find them. Tokens,
+  Emblems and Art Series stay off until asked for, and an empty scope MUST
+  fall back to Cards: searching no kind of object at all is not a search
+  anybody meant to run. A saved content list is authoritative for scope when a
+  workspace is restored, because a workspace written before Cards was a choice
+  carries no trait for it. Because they change what the search covers, changing one MUST
   rebuild the trusted vocabulary for the new scope — the results were correct
   while Subtype, Card type and Set went on describing cards only — and they
   MUST be grouped apart from the traits the Any/All/None row governs, which

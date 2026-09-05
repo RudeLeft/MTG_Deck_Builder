@@ -270,13 +270,19 @@ def main():
             and 'text="Rarity", style="Section.TLabel"' not in search_source
             and 'text="Printings", style="Section.TLabel"' not in printing_source),
         "content kinds are chosen through Card traits": (
-            '"include_tokens": "token"' in search_source
-            and '"include_emblems": "emblem"' in search_source
-            and '"include_art_series": "art"' in search_source
-            and '("include_art_series", "Include Art Series")' in search_source
-            # Cards are always searched; the other kinds are opt-in traits, so
-            # Art Series stays out until explicitly asked for (DATA-008).
-            and 'kinds = {"card"}' in search_source
+            '"content_tokens": "token"' in search_source
+            and '"content_emblems": "emblem"' in search_source
+            and '"content_art_series": "art"' in search_source
+            and '("content_art_series", "Art Series")' in search_source
+            # Cards is one of the four and can be turned off. While it could
+            # not, the scope could only grow, so "show me the tokens" meant
+            # adding 3,000 tokens to 100,000 cards and hunting for them.
+            and '"content_cards": "card"' in search_source
+            and '("content_cards", "Cards")' in search_source
+            # Art Series still stays out until explicitly asked for, and an
+            # empty scope falls back to Cards rather than to nothing.
+            and 'DEFAULT_CONTENT_TRAITS = ("content_cards",)' in search_source
+            and "return kinds or {\"card\"}" in search_source
             and "Supplemental" not in search_source),
         "Printings default to Paper only and Any set": (
             'text="Paper only · Any set type · Any set"' in printing_source
