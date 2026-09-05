@@ -134,18 +134,6 @@ FILTER_DEFINITIONS = (
             "both of its colors, the way devotion reads it."),
     },
     {
-        # Not "printings": that key belongs to the standard Printings filter,
-        # which chooses which printings a search may return at all.
-        "key": "print_count",
-        "category": "Printing",
-        "label": "Printed in",
-        "tooltip": (
-            "How many different sets the card has appeared in. One finds "
-            "cards printed only once; two or more finds everything reprinted. "
-            "This counts every set, so narrowing the search does not change "
-            "it."),
-    },
-    {
         "key": "traits",
         "category": "Card",
         "label": "Card traits",

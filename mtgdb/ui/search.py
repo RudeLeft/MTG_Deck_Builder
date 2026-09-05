@@ -144,8 +144,6 @@ class SearchFeatureMixin:
         self._card_shape_btn = None
         self.pip_vars = {}
         self.q_pip_min = None
-        self.q_print_min = None
-        self.q_print_max = None
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
         # Widget handles for advanced rows. They must exist as None from the
@@ -698,16 +696,6 @@ class SearchFeatureMixin:
         self.pip_vars = {}
         self.q_pip_min = None
 
-    def _build_filter_print_count(self, parent):
-        box = self._numeric_pair(parent, "q_print", width=4)
-        box.grid(row=0, column=1, sticky="w", pady=2)
-        ttk.Label(box, text="sets", style="Muted.TLabel").pack(
-            side="left", padx=(5, 0))
-
-    def _reset_filter_print_count(self):
-        self.q_print_min = None
-        self.q_print_max = None
-
     def _build_filter_loyalty(self, parent):
         self._numeric_pair(parent, "q_loyalty").grid(
             row=0, column=1, sticky="w", pady=2)
@@ -797,8 +785,7 @@ class SearchFeatureMixin:
 
     ADVANCED_TEXT_FIELDS = (
         "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
-        "q_released_min", "q_released_max",
-        "q_print_min", "q_print_max", "q_pip_min",
+        "q_released_min", "q_released_max", "q_pip_min",
     )
 
     def _capture_advanced_filter_values(self):
@@ -2157,7 +2144,6 @@ class SearchFeatureMixin:
                 "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
                 "Defense": ("q_defense_min", "q_defense_max"),
                 "Released": ("q_released_min", "q_released_max"),
-                "Printed in": ("q_print_min", "q_print_max"),
             }
             for label, (low, high) in optional_ranges.items():
                 numeric[low] = self._numeric_field_value(getattr(self, low, None))
@@ -2202,7 +2188,6 @@ class SearchFeatureMixin:
             pips=[value for value, variable in self.pip_vars.items()
                   if variable.get()],
             pip_min=numeric["q_pip_min"],
-            print_min=numeric["q_print_min"], print_max=numeric["q_print_max"],
             loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
             defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
             released_from=numeric["q_released_min"],

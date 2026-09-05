@@ -44,8 +44,6 @@ class SearchCriteria:
     layout_mode: str = "any"
     pips: tuple[str, ...] = ()
     pip_min: float | None = None
-    print_min: float | None = None
-    print_max: float | None = None
     cmc_min: float | None = None
     cmc_max: float | None = None
     power_min: float | None = None

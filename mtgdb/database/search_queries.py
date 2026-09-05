@@ -337,19 +337,6 @@ class SearchQueryBuilder:
             f"NOT {group}" if str(layout_mode).casefold() == "none" else group)
         self.params.extend(clean)
 
-    def add_print_count_filters(self, print_min, print_max):
-        """Filter by how many sets the card has been printed in.
-
-        Stored per row at import: the same question asked as a correlated
-        subquery took over two minutes across this table. It counts every set
-        the card appears in, so narrowing the search does not change it.
-        """
-        for bound, operator in ((print_min, ">="), (print_max, "<=")):
-            if bound is None:
-                continue
-            self.clauses.append(f"COALESCE(print_sets, 1) {operator} ?")
-            self.params.append(int(bound))
-
     def add_pip_filters(self, pips, pip_min):
         """Require at least N symbols of each selected colour in the cost.
 
@@ -491,8 +478,7 @@ class CardSearchQueryMixin:
                color_mode="within", color_scope="identity",
                produces=None, produces_mode="includes",
                traits=None, trait_mode="any", layouts=None, layout_mode="any",
-               pips=None, pip_min=None, print_min=None, print_max=None,
-               loyalty_min=None, loyalty_max=None,
+               pips=None, pip_min=None, loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
                released_to=None, games=None,
                cmc_min=None, cmc_max=None, power_min=None,
@@ -530,7 +516,6 @@ class CardSearchQueryMixin:
         builder.add_trait_filters(traits, trait_mode)
         builder.add_layout_filter(layouts, layout_mode)
         builder.add_pip_filters(pips, pip_min)
-        builder.add_print_count_filters(print_min, print_max)
         builder.add_stat_filters(
             loyalty_min, loyalty_max, defense_min, defense_max)
         builder.add_release_filters(released_from, released_to)

@@ -139,9 +139,6 @@ def _extract_row(card):
         json.dumps(card.get("all_parts") or []),
         json.dumps(card.get("card_faces") or []),
         card.get("layout"),
-        # print_sets is derived after the load; every row starts at its own
-        # single printing so a partial import can never claim a reprint.
-        1,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
     )
 
@@ -157,9 +154,9 @@ INSERT OR REPLACE INTO cards (
     universes_beyond, produced_mana,
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
     related_parts, card_faces, layout,
-    print_sets, pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
+    pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-          ?,?,?,?,?,?,?)
+          ?,?,?,?,?,?)
 """
 
 
@@ -357,16 +354,6 @@ class ScryfallBulkImporter:
                     "WHERE security_stamp = 'triangle' AND set_code IS NOT NULL"
                     ")"
                 )
-                # How many sets a card appears in is a property of the
-                # oracle_id group. Asking for it per query cost over two
-                # minutes as a correlated subquery and half a second as a
-                # grouped join; storing it costs about two seconds here.
-                cur.execute(
-                    "UPDATE cards SET print_sets = COALESCE((SELECT total FROM ("
-                    "SELECT oracle_id AS grouped_id, "
-                    "COUNT(DISTINCT set_code) AS total FROM cards "
-                    "WHERE oracle_id IS NOT NULL GROUP BY oracle_id) "
-                    "WHERE grouped_id = cards.oracle_id), 1)")
                 if maintenance_cb:
                     maintenance_cb("classify", 1, 1)
 

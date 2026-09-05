@@ -220,10 +220,6 @@ def main():
             and "Owl Adventure" in _opt(pips=["W"], pip_min=2)
             # Two colours at once is an AND, not a colour-identity question.
             and _opt(pips=["G", "W"], pip_min=2) == {"Owl Adventure"})
-        print_count_is_stored_not_derived = (
-            _opt(print_min=2) == {"Reprinted Owl"}
-            and _opt(print_min=1, print_max=1) == _opt() - {"Reprinted Owl"}
-            and "print_sets" in _CARD_COLUMN_NAMES)
         colorless_adds_nothing_beside_a_colour = (
             _opt(colors=["W", "C"], color_mode="exact")
             == _opt(colors=["W"], color_mode="exact"))
@@ -825,13 +821,16 @@ def main():
             # hybrid halves; the parser at import can do both.
             and "_mana_pips" in bulk_import_source
             and "LENGTH(mana_cost)" not in search_query_source),
-        "print count is stored per row rather than aggregated per query": (
-            print_count_is_stored_not_derived
-            # As a correlated subquery this question took over two minutes.
-            and "UPDATE cards SET print_sets" in bulk_import_source
-            and "COUNT(DISTINCT set_code)" in bulk_import_source
-            and "GROUP BY" not in _method_body(
-                search_query_source, "add_print_count_filters")),
+        "a removed filter leaves nothing of itself behind": (
+            # Printed in was built and then not wanted. A criterion with no
+            # control is the orphan SRCH-039 forbids, and a stored column with
+            # no criterion is the same waste one layer down: it cost 1.9s of
+            # every import and a column on every row.
+            "print_sets" not in _CARD_COLUMN_NAMES
+            and "print_sets" not in bulk_import_source
+            and "print_count" not in search_source
+            and "print_min" not in {field.name for field in fields(SearchCriteria)}
+            and "print_count" not in FILTER_BY_KEY),
         "no criterion outlives the control that reaches it": (
             # Artist kept a working query path, a criterion and a passing gate
             # after its row was removed -- a feature no user could run, proved
