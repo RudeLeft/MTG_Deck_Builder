@@ -235,7 +235,7 @@ def main():
         'def _build_filter_rarity(',
         'self._format_btn.grid(row=0, column=1, sticky="ew", pady=2)',
         'self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=2)',
-        'frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)',
+        'frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)',
     ))
     button_family_pairs = (
         ("TButton", "Primary.TButton"),

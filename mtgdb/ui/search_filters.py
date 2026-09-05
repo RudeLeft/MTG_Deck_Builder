@@ -26,7 +26,7 @@ CATEGORY_ORDER = ("Mana", "Card", "Printing")
 # it is, and which printings are in scope.
 STANDARD_FILTERS = ("name", "card_type", "colors", "stats", "printings")
 
-# Tooltip wording rule, applied to every filter including the pinned ones:
+# Tooltip wording rule, applied to every filter including the standard ones:
 # one sentence saying what the filter matches, then at most one more for the
 # boundary people get wrong about it. Describe cards, not where the data came
 # from -- naming a data source tells the user nothing about their search.
@@ -131,7 +131,7 @@ FILTER_DEFINITIONS = (
             "both of its colors, the way devotion reads it."),
     },
     {
-        # Not "printings": that key belongs to the pinned Printings filter,
+        # Not "printings": that key belongs to the standard Printings filter,
         # which chooses which printings a search may return at all.
         "key": "print_count",
         "category": "Printing",
@@ -181,11 +181,11 @@ FILTER_DEFINITIONS = (
     },
 )
 
-# The four filters that are always present explain themselves the same way the
-# optional ones do. Their controls are built by ui/search.py, but the wording
-# belongs with every other filter's wording so the whole panel reads as one
-# voice rather than four exceptions.
-PINNED_FILTER_TOOLTIPS = {
+# The standard filters with no registry entry: Card Name, Colors, Card type
+# and Printings are built by hand, and Power / Toughness is standard but keeps
+# its registry entry. All five explain themselves the same way the advanced
+# ones do, so the whole panel reads as one voice rather than four exceptions.
+STANDARD_FILTER_TOOLTIPS = {
     "name": (
         "Matches any card whose name contains what you type, so bolt finds "
         "Lightning Bolt. Searching from a deck selection looks for those "
@@ -206,10 +206,20 @@ PINNED_FILTER_TOOLTIPS = {
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}
 
-# Kept as the name the tooltips are keyed by: these four are built by hand in
-# ui/search.py rather than from a registry entry, because each has a shape no
-# generic row could give it.
-PINNED_FILTERS = ("name", "colors", "card_type", "printings")
+
+def filter_tooltip(key):
+    """The tooltip for any filter, standard or advanced.
+
+    Four standard filters are built by hand in `ui/search.py` because each has
+    a shape no generic row could give it, so their wording lives in the dict
+    above rather than in a registry entry. Every caller asks here instead of
+    knowing which of the two a filter came from, which is also what stops the
+    same filter being described twice in two different voices.
+    """
+    entry = FILTER_BY_KEY.get(str(key))
+    if entry is not None:
+        return entry["tooltip"]
+    return STANDARD_FILTER_TOOLTIPS.get(str(key), "")
 
 
 def advanced_filters():

@@ -115,7 +115,7 @@ mtgdb/
     tables.py            #   shared table schema, formatting, sort, columns, reorder
     card_detail.py       #   main card preview, Legality/Rotate/Zoom actions, legality/text fallbacks
     search.py            #   trusted main/advanced filters, criteria/workspace capture
-    search_filters.py    #   optional on-demand Search filter registry + tooltips
+    search_filters.py    #   standard/advanced Search filter registry + tooltips
     search_printings.py  #   Search adapter/summary for the shared Printings picker
     search_checklist.py  #   hidden-first reusable search checklist dialog
     set_filters.py       #   shared Printings controller/popup + observed set controls
@@ -224,7 +224,7 @@ only in the module that owns X.
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
 | `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
 | `mtgdb/ui/search.py` | Trusted Search layout/state: primary Card Type/Supertypes/Colors/numeric/Mechanics filters, Advanced Content/Rules Text/Subtype/Format/Rarity/Printings coordination and alignment, validated criteria, exact-name presets, complete Clear, strict workspace restore, summaries |
-| `mtgdb/ui/search_filters.py` | Search filter registry: category, label, and match-explaining tooltip for each on-demand filter, the pinned filters' tooltips, plus catalogue ordering |
+| `mtgdb/ui/search_filters.py` | Search filter registry: the standard set, each advanced filter's category, label, and match-explaining tooltip, the hand-built filters' tooltips, and one lookup that serves both |
 | `mtgdb/ui/search_printings.py` | Search adaptation of the shared Printings component: Search button/summary wiring, Search-owned callbacks, Search English/content scope |
 | `mtgdb/ui/search_checklist.py` | Hidden-first reusable searchable virtual choice dialog for taxonomy/format/rarity pickers; multi-select uses checkboxes and single-select uses radio controls |
 | `mtgdb/ui/set_filters.py` | Shared `PrintingFilter` controller/popup for Paper-only, English, observed Set Type, cascading Exact Set state/lifecycle, bounded two-column Exact Set virtualization, shared catalog enable/disable state, and set-type rendering/shell primitives; no product grouping/default taxonomy |
@@ -295,7 +295,7 @@ have at least two routing examples.
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
 | `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Legality/Rotate/Zoom actions, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
 | `mtgdb/ui/search.py` | add/change trusted primary/Advanced Search controls, criteria capture, or scoped taxonomy refresh<br>change strict workspace restore, filter summaries, complete Clear/reset, callbacks, Rules Text editing semantics, or exact-name presets | `mtgdb/search/models.py`; `mtgdb/search/controller.py`; `mtgdb/search/repository.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/search_queries.py` | Shared printing/set state belongs in `ui/set_filters.py` with Search adaptation in `ui/search_printings.py`; UI MUST consume taxonomy vocabulary, never invent/restore it; missing stored fields route through schema/import first. |
-| `mtgdb/ui/search_filters.py` | add an optional on-demand Search filter or change its category/label<br>change any Search filter's tooltip wording, pinned or optional, or the catalogue ordering | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
+| `mtgdb/ui/search_filters.py` | add an advanced Search filter or change its category/label<br>change the standard set or any Search filter's tooltip wording | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
 | `mtgdb/ui/search_printings.py` | change how Search opens/summarizes the shared Printings picker<br>change Search-specific content/language callbacks into shared printing state | `mtgdb/ui/set_filters.py`; `mtgdb/ui/search.py`; `mtgdb/database/taxonomy.py` | Paper/Set Type/Exact Set popup behavior belongs in `ui/set_filters.py`; do not duplicate the shared controller here. |
 | `mtgdb/ui/search_checklist.py` | change searchable taxonomy/format/rarity choice behavior<br>change hidden-first fixed-row virtualization, filtering, selection, columns, or dismissal | `mtgdb/ui/search.py`; `mtgdb/ui/components.py` | Keep logical values in Python and the physical choice-widget pool bounded; single-select choices use radio controls; table-column filters use `ui/table_filters.py`. |
 | `mtgdb/ui/set_filters.py` | change shared Paper-only/English/Set Type/Exact Set picker state, cascading scope, popup lifecycle, fixed-row Exact Set virtualization, shared loading enable/disable behavior, or modal/nonmodal behavior<br>change human-readable rendering or flat controls for observed Scryfall `set_type` | `mtgdb/ui/search_printings.py`; `mtgdb/ui/deck_files.py`; `mtgdb/database/taxonomy.py` | Search and Open Deck MUST compose this shared controller; subclass adapters must not duplicate common catalog-control behavior or define set-type membership/default groups. |
@@ -535,7 +535,9 @@ every feature together and is exempt.
   the order a search is built: what the card is called, what it is, what
   colour it is, how big it is, and which printings are in scope. Everything
   else is declared in `ui/search_filters.py` with its category, label, and a
-  tooltip that states what the filter matches, and appears in the advanced
+  tooltip that states what the filter matches, reached through one
+  `filter_tooltip` lookup that serves standard and advanced alike so a filter
+  cannot be described twice in two voices, and appears in the advanced
   panel grouped by category in registry order, so a filter is always in the
   same place. `ui/search.py` owns the controls. Advanced rows MUST be built
   once and hidden rather than rebuilt on each expand — rebuilding makes the

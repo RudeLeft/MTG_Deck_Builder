@@ -17,8 +17,8 @@ from mtgdb.ui.components import (
 )
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.search_filters import (
-    FILTER_BY_KEY, PINNED_FILTER_TOOLTIPS, STANDARD_FILTERS,
-    advanced_filter_keys, advanced_filters,
+    FILTER_BY_KEY, STANDARD_FILTERS, advanced_filter_keys, advanced_filters,
+    filter_tooltip,
 )
 from mtgdb.ui.search_printings import SearchPrintingFilter
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
@@ -33,9 +33,9 @@ CARD_TYPE_MAX_COLUMNS = 5
 SUPERTYPE_COLUMNS = 5
 CHIP_GRID_X_GAP = 4
 SEARCH_ROW_PADY = 3
-# Keeps every optional filter label on the same x-position as the fixed
-# Advanced rows above them, so the control column does not step in and out.
-OPTIONAL_FILTER_LABEL_WIDTH = 76
+# Keeps every advanced filter label on the same x-position as the standard
+# rows above them, so the control column does not step in and out.
+FILTER_LABEL_WIDTH = 76
 FORMAT_STATUS_CHOICES = (
     ("Playable", "playable"), ("Banned", "banned"),
     ("Restricted", "restricted"),
@@ -93,7 +93,7 @@ class SearchFeatureMixin:
         in the widget. Variables and selection sets are made once here and the
         builders bind to them, which lets a row be removed and re-added without
         losing what the user chose. Text-backed controls have no variable, so
-        they shadow their value through _capture_optional_filter_values.
+        they shadow their value through _capture_advanced_filter_values.
         """
         self.card_type_vars = {}
         self._card_type_catalog = []
@@ -142,7 +142,7 @@ class SearchFeatureMixin:
         self.q_print_max = None
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
-        # Widget handles for optional rows. They must exist as None from the
+        # Widget handles for advanced rows. They must exist as None from the
         # start: a guard that reads self._rarity_btn raises AttributeError just
         # as readily as the call it was written to protect.
         self.q_rules = None
@@ -197,7 +197,7 @@ class SearchFeatureMixin:
         name_label = ttk.Label(form, text="Card Name")
         name_label.grid(row=0, column=0, sticky="w",
                         padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_pinned_filter_tooltip(name_label, "name")
+        self._add_standard_filter_tooltip(name_label, "name")
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name = AutocompleteEntry(form)
@@ -279,7 +279,7 @@ class SearchFeatureMixin:
         type_label = ttk.Label(form, text="Card type")
         type_label.grid(
             row=1, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_pinned_filter_tooltip(type_label, "card_type")
+        self._add_standard_filter_tooltip(type_label, "card_type")
         typebox = ttk.Frame(form)
         typebox.grid(row=1, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._card_type_chip_frame = ttk.Frame(typebox)
@@ -301,7 +301,7 @@ class SearchFeatureMixin:
         color_label = ttk.Label(form, text="Colors")
         color_label.grid(
             row=3, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_pinned_filter_tooltip(color_label, "colors")
+        self._add_standard_filter_tooltip(color_label, "colors")
         colorwrap = ttk.Frame(form)
         colorwrap.grid(row=3, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         colorbox = ttk.Frame(colorwrap)
@@ -496,7 +496,7 @@ class SearchFeatureMixin:
 
 
     # ------------------------------------------------------------------
-    # optional filter controls
+    # advanced filter controls
     # ------------------------------------------------------------------
 
     def _numeric_pair(self, parent, attribute_prefix, width=5):
@@ -724,10 +724,10 @@ class SearchFeatureMixin:
 
     @staticmethod
     def _set_picker_text(button, text):
-        """Update an optional picker's caption, or do nothing when absent.
+        """Update a picker's caption, or do nothing when absent.
 
         The trusted-catalog refresh runs on every startup and does not know
-        which optional rows exist, so it must be able to record vocabulary
+        which rows have been rebuilt, so it must be able to record vocabulary
         without a button to show it on.
         """
         if button is not None:
@@ -752,7 +752,7 @@ class SearchFeatureMixin:
             return ""
         return rules.entry.get()
 
-    def _optional_numeric(self, widget):
+    def _numeric_field_value(self, widget):
         """Spinbox value as a number, or None when absent or blank."""
         if widget is None:
             return None
@@ -764,16 +764,16 @@ class SearchFeatureMixin:
             return None
         return self._parse_search_number(text, "filter value")
 
-    OPTIONAL_TEXT_FIELDS = (
+    ADVANCED_TEXT_FIELDS = (
         "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
         "q_released_min", "q_released_max",
         "q_print_min", "q_print_max", "q_pip_min",
     )
 
-    def _capture_optional_filter_values(self):
-        """Text currently held by optional filter controls, by attribute name."""
+    def _capture_advanced_filter_values(self):
+        """Text currently held by advanced filter controls, by attribute name."""
         values = {}
-        for name in self.OPTIONAL_TEXT_FIELDS:
+        for name in self.ADVANCED_TEXT_FIELDS:
             widget = getattr(self, name, None)
             if widget is None:
                 continue
@@ -783,15 +783,15 @@ class SearchFeatureMixin:
                 continue
         return {name: value for name, value in values.items() if value}
 
-    def _restore_optional_filter_values(self, values):
-        """Refill optional controls after their rows have been rebuilt.
+    def _restore_advanced_filter_values(self, values):
+        """Refill advanced controls after their rows have been rebuilt.
 
         A readonly combobox rejects delete/insert, so anything offering set()
         is restored through it and only entry-style widgets are edited.
         """
         for name, value in dict(values or {}).items():
             widget = getattr(self, name, None)
-            if widget is None or name not in self.OPTIONAL_TEXT_FIELDS:
+            if widget is None or name not in self.ADVANCED_TEXT_FIELDS:
                 continue
             try:
                 if isinstance(widget, ttk.Combobox):
@@ -813,12 +813,12 @@ class SearchFeatureMixin:
         return tuple(sorted(keys - set(CONTENT_TRAIT_KEYS)))
 
     # ------------------------------------------------------------------
-    # optional filters, built on demand
+    # advanced filters, built once and revealed together
     # ------------------------------------------------------------------
 
-    def _add_pinned_filter_tooltip(self, widget, key):
-        """Explain an always-present filter exactly like an added one."""
-        text = PINNED_FILTER_TOOLTIPS.get(key)
+    def _add_standard_filter_tooltip(self, widget, key):
+        """Explain a standard filter exactly like an advanced one."""
+        text = filter_tooltip(key)
         if text:
             self._add_tooltip(widget, text, wraplength=380)
 
@@ -871,7 +871,7 @@ class SearchFeatureMixin:
                     continue
                 frame = ttk.Frame(self._advanced_host)
                 frame.pack(fill="x")
-                frame.columnconfigure(0, minsize=OPTIONAL_FILTER_LABEL_WIDTH)
+                frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)
                 frame.columnconfigure(1, weight=1)
                 label = ttk.Label(frame, text=entry["label"])
                 label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
@@ -1097,8 +1097,7 @@ class SearchFeatureMixin:
         label = ttk.Label(form, text="Power / Toughness")
         label.grid(row=row, column=0, sticky="w", padx=(0, 8),
                    pady=SEARCH_ROW_PADY)
-        self._add_tooltip(
-            label, FILTER_BY_KEY["stats"]["tooltip"], wraplength=380)
+        self._add_standard_filter_tooltip(label, "stats")
         holder = ttk.Frame(form)
         holder.grid(row=row, column=1, columnspan=3, sticky="ew",
                     pady=SEARCH_ROW_PADY)
@@ -1343,7 +1342,7 @@ class SearchFeatureMixin:
             "rarities": set(), "keywords": set(), "subtypes": set(),
         }
         self._search_printings.clear()
-        # Removing optional rows shortens the form, so the Results viewport
+        # Clearing can shorten what the rows display, so the Results viewport
         # would otherwise stay scrolled to wherever the taller panel had left
         # it. Return it to the first row along with the criteria.
         self._reset_results_viewport()
@@ -1805,7 +1804,7 @@ class SearchFeatureMixin:
             "trait_mode": self.q_trait_mode.get(),
             "format_status": self.q_format_status.get(),
             "advanced_expanded": bool(getattr(self, "_advanced_expanded", False)),
-            "optional_values": self._capture_optional_filter_values(),
+            "advanced_values": self._capture_advanced_filter_values(),
             "traits": sorted(
                 getattr(self, "_selected_traits", set()) or ()),
             "layouts": sorted(getattr(self, "_selected_layouts", set()) or ()),
@@ -1845,7 +1844,7 @@ class SearchFeatureMixin:
 
     @staticmethod
     def _set_search_entry_text(widget, value):
-        # The numeric rows are optional, so a restore may name a widget that
+        # An advanced row is rebuilt on Clear, so a restore may name a widget that
         # does not currently exist; the row rebuild refills it instead.
         if widget is None:
             return
@@ -1868,7 +1867,7 @@ class SearchFeatureMixin:
         self._search_name_batch_display = " | ".join(restored_names)
         self.q_name.set(self._search_name_batch_display if restored_names
                         else str(state.get("name") or ""))
-        # The Rules text row may not exist yet -- optional rows are rebuilt
+        # The Rules text row may not exist yet -- advanced rows are rebuilt
         # further down -- so restore through the shadow the builder reads.
         self._rules_text_shadow = [
             str(phrase) for phrase in state.get("rules", []) if str(phrase)]
@@ -1956,9 +1955,12 @@ class SearchFeatureMixin:
             self._traits_btn.configure(text=self._picker_button_text(
                 {TRAIT_LABELS[key] for key in self._selected_traits},
                 "Any", "traits", max_visible=10, single_line=True))
-        self._restore_optional_filter_values(state.get("optional_values", {}))
+        # Workspaces written before the standard/advanced split named this
+        # key "optional_values"; the values inside it never changed.
+        self._restore_advanced_filter_values(
+            state.get("advanced_values", state.get("optional_values", {})))
         # Produces is restored here rather than with Colors: its checkboxes
-        # belong to an optional row, so anything set before the rows are
+        # belong to an advanced row, so anything set before the rows are
         # rebuilt is discarded along with the widgets that held it.
         wanted_produces = {str(value) for value in state.get("produces", [])}
         for key, variable in self.produces_vars.items():
@@ -2022,7 +2024,11 @@ class SearchFeatureMixin:
 
     @staticmethod
     def _parse_search_number(value, label):
-        """Parse one optional numeric Search field with a user-facing error."""
+        """Parse one numeric Search field with a user-facing error.
+
+        A field whose row has been rebuilt reads as no restriction rather than
+        raising, which is what lets Clear rebuild a row mid-session.
+        """
         text = str(value or "").strip()
         if not text:
             return None
@@ -2063,16 +2069,16 @@ class SearchFeatureMixin:
                 "The card database is empty.\n\nUse Database -> Update Database first.")
             return
         try:
-            # An absent optional filter means no restriction, so a missing
-            # spinbox reads as None rather than raising.
+            # An empty field means no restriction, so a spinbox that has
+            # just been rebuilt reads as None rather than raising.
             numeric = {
-                "cmc_min": self._optional_numeric(getattr(self, "q_cmc_min", None)),
-                "cmc_max": self._optional_numeric(getattr(self, "q_cmc_max", None)),
-                "power_min": self._optional_numeric(getattr(self, "q_power_min", None)),
-                "power_max": self._optional_numeric(getattr(self, "q_power_max", None)),
-                "toughness_min": self._optional_numeric(
+                "cmc_min": self._numeric_field_value(getattr(self, "q_cmc_min", None)),
+                "cmc_max": self._numeric_field_value(getattr(self, "q_cmc_max", None)),
+                "power_min": self._numeric_field_value(getattr(self, "q_power_min", None)),
+                "power_max": self._numeric_field_value(getattr(self, "q_power_max", None)),
+                "toughness_min": self._numeric_field_value(
                     getattr(self, "q_toughness_min", None)),
-                "toughness_max": self._optional_numeric(
+                "toughness_max": self._numeric_field_value(
                     getattr(self, "q_toughness_max", None)),
             }
             optional_ranges = {
@@ -2082,8 +2088,8 @@ class SearchFeatureMixin:
                 "Printed in": ("q_print_min", "q_print_max"),
             }
             for label, (low, high) in optional_ranges.items():
-                numeric[low] = self._optional_numeric(getattr(self, low, None))
-                numeric[high] = self._optional_numeric(getattr(self, high, None))
+                numeric[low] = self._numeric_field_value(getattr(self, low, None))
+                numeric[high] = self._numeric_field_value(getattr(self, high, None))
             # Every pair of bounds is checked. Leaving these three out meant a
             # backwards range ran and returned nothing, with no way to tell
             # that apart from a search that genuinely matches no card -- and
@@ -2093,7 +2099,7 @@ class SearchFeatureMixin:
             self._validate_search_range("Toughness", numeric["toughness_min"], numeric["toughness_max"])
             for label, (low, high) in optional_ranges.items():
                 self._validate_search_range(label, numeric[low], numeric[high])
-            numeric["q_pip_min"] = self._optional_numeric(
+            numeric["q_pip_min"] = self._numeric_field_value(
                 getattr(self, "q_pip_min", None))
         except ValueError as exc:
             self.results_count_lbl.configure(text="RESULTS | Invalid search filter")

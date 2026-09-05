@@ -24,8 +24,8 @@ from mtgdb.ui.search import (
 )
 from mtgdb.ui.search_checklist import SearchChecklistDialog
 from mtgdb.ui.search_filters import (
-    CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTER_TOOLTIPS,
-    PINNED_FILTERS, STANDARD_FILTERS, advanced_filter_keys, advanced_filters,
+    CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, STANDARD_FILTER_TOOLTIPS,
+    STANDARD_FILTERS, advanced_filter_keys, advanced_filters, filter_tooltip,
     is_standard,
 )
 from mtgdb.ui.components import format_display_name
@@ -541,11 +541,14 @@ def main():
             and not any(
                 word in text.casefold()
                 for text in ([entry["tooltip"] for entry in FILTER_DEFINITIONS]
-                             + list(PINNED_FILTER_TOOLTIPS.values()))
+                             + list(STANDARD_FILTER_TOOLTIPS.values()))
                 for word in ("scryfall", "database", "snapshot"))
-            # The always-present filters are explained too, not skipped.
-            and set(PINNED_FILTER_TOOLTIPS) == set(PINNED_FILTERS)
-            and "_add_pinned_filter_tooltip" in printings_source),
+            # Every standard filter is explained too, whether its wording
+            # comes from the registry or from the hand-built dict, and one
+            # lookup serves both so neither can be described twice.
+            and all(filter_tooltip(key) for key in STANDARD_FILTERS)
+            and set(STANDARD_FILTER_TOOLTIPS) | {"stats"} == set(STANDARD_FILTERS)
+            and "_add_standard_filter_tooltip" in printings_source),
         "format names are spelled out rather than run together": (
             format_display_name("paupercommander") == "Pauper Commander"
             and format_display_name("standardbrawl") == "Standard Brawl"
@@ -641,6 +644,11 @@ def main():
         "collapsing advanced returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
                 search_source, "_toggle_advanced_filters")),
+        "a workspace saved before the split still restores": (
+            # The values never changed, only the key naming them. Dropping the
+            # old key would have emptied every advanced row on first launch.
+            'state.get("advanced_values", state.get("optional_values", {}))'
+            in _method_body(search_source, "_restore_search_workspace_state")),
         "whether advanced is open survives the session": (
             '"advanced_expanded": bool(getattr(self, "_advanced_expanded", False)),'
             in _method_body(search_source, "_capture_search_workspace_state")
@@ -689,7 +697,7 @@ def main():
                     "wanted_produces")
             > _method_body(
                 search_source, "_restore_search_workspace_state").index(
-                    "_restore_optional_filter_values(")),
+                    "_restore_advanced_filter_values(")),
         "the platform selection is saved and restored": (
             '"games": list(self._search_printings.selected_games()),'
             in _method_body(search_source, "_capture_search_workspace_state")
