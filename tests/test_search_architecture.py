@@ -411,12 +411,19 @@ def main():
             'self.q_supertype_mode = tk.StringVar(value="any")' in search_source
             and "self._build_mode_row(" in _method_body(
                 search_source, "_build_filter_supertypes")),
-        "every mode row offers None, inline rows included": (
-            # Card Type builds its mode radios inline rather than through the
-            # shared dialog, so it silently kept only Any and All when the
-            # dialog gained None.
-            '(("Any", "any"), ("All", "all"), ("None", "none"))' in search_source
-            and ("None", "none") in SearchChecklistDialog.MODE_CHOICES),
+        "every Any/All/None row comes from one builder": (
+            # Card Type hand-built its row and silently kept only Any and All
+            # when None was added everywhere else. One construction point means
+            # a new mode reaches every row at once.
+            ("None", "none") in SearchFeatureMixin.MODE_ROW_CHOICES
+            and ("None", "none") in SearchChecklistDialog.MODE_CHOICES
+            and "self._build_mode_row(" in _method_body(
+                search_source, "_build_card_type_filters")
+            and "self._build_mode_row(" in _method_body(
+                search_source, "_build_filter_supertypes")
+            # The triple appears exactly once: as MODE_ROW_CHOICES itself.
+            and search_source.count(
+                '(("Any", "any"), ("All", "all"), ("None", "none"))') == 1),
         "none mode is the exact complement of any": (
             negation_is_complementary),
         "mechanics and traits can be negated too": (

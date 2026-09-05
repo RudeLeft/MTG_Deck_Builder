@@ -269,23 +269,15 @@ class SearchFeatureMixin:
         self._card_type_chip_frame.pack(fill="x")
         self._card_type_chip_frame.bind(
             "<Configure>", self._layout_card_type_chips, add="+")
-        mode = ttk.Frame(typebox)
-        mode.pack(fill="x", pady=(2, 0))
-        ttk.Label(mode, text="Selected types:", style="Muted.TLabel").pack(side="left")
-        type_mode_help = {
-            "any": "Any: the card must have at least one selected Card Type.",
-            "all": ("All: the card must have every selected Card Type across "
-                    "its full type line, including multiple faces."),
-            "none": ("None: exclude every card having any selected Card Type, "
-                     "which is how to ask for a green non-creature."),
-        }
-        for label, value in (("Any", "any"), ("All", "all"), ("None", "none")):
-            radio = ttk.Radiobutton(
-                mode, text=label, variable=self.q_card_type_mode, value=value,
-                style="FormChoice.TRadiobutton",
-                command=self._update_search_filter_summary)
-            radio.pack(side="left", padx=(3, 0))
-            self._add_tooltip(radio, type_mode_help[value], wraplength=390)
+        self._build_mode_row(
+            typebox, "Selected types:", self.q_card_type_mode, "card types",
+            meanings={
+                "any": "Any: the card must have at least one selected Card Type.",
+                "all": ("All: the card must have every selected Card Type across "
+                        "its full type line, including multiple faces."),
+                "none": ("None: exclude every card having any selected Card Type, "
+                         "which is how to ask for a green non-creature."),
+            })
 
 
     def _build_color_filters(self, form):
@@ -764,17 +756,26 @@ class SearchFeatureMixin:
         self._selected_rarities = set()
         self._rarity_btn = None
 
-    def _build_mode_row(self, parent, label, variable, noun):
-        """One Any/All/None row, worded for the values it governs."""
+    MODE_ROW_CHOICES = (("Any", "any"), ("All", "all"), ("None", "none"))
+
+    def _build_mode_row(self, parent, label, variable, noun, meanings=None):
+        """One Any/All/None row, worded for the values it governs.
+
+        The single construction point for these rows. Card Type built its own
+        for a while and silently kept only Any and All when None was added
+        everywhere else, which is the failure this helper exists to prevent.
+        Callers may override the wording where they can say something more
+        precise than the generic phrasing.
+        """
         mode = ttk.Frame(parent)
         mode.pack(fill="x", pady=(2, 0))
         ttk.Label(mode, text=label, style="Muted.TLabel").pack(side="left")
-        meanings = {
+        meanings = dict(meanings or {}) or {
             "any": f"Any: the card only needs one of the selected {noun}.",
             "all": f"All: the card must have every selected {noun}.",
             "none": f"None: exclude every card having any selected {noun}.",
         }
-        for text, value in (("Any", "any"), ("All", "all"), ("None", "none")):
+        for text, value in self.MODE_ROW_CHOICES:
             radio = ttk.Radiobutton(
                 mode, text=text, variable=variable, value=value,
                 style="FormChoice.TRadiobutton",
