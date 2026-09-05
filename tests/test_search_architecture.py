@@ -20,6 +20,7 @@ from mtgdb.ui.results import SearchResultsMixin
 from mtgdb.ui.search import (
     CONTENT_TRAIT_KEYS, TRAIT_CHOICES, SearchFeatureMixin,
 )
+from mtgdb.ui.search_checklist import SearchChecklistDialog
 from mtgdb.ui.search_filters import (
     CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTERS,
     filter_catalog, is_removable, ordered_active_filters,
@@ -403,6 +404,12 @@ def main():
             search_source, "_set_search_entry_text"))
 
     checks = {
+        "every mode row offers None, inline rows included": (
+            # Card Type builds its mode radios inline rather than through the
+            # shared dialog, so it silently kept only Any and All when the
+            # dialog gained None.
+            '(("Any", "any"), ("All", "all"), ("None", "none"))' in search_source
+            and ("None", "none") in SearchChecklistDialog.MODE_CHOICES),
         "none mode is the exact complement of any": (
             negation_is_complementary),
         "mechanics and traits can be negated too": (

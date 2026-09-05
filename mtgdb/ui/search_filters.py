@@ -52,7 +52,7 @@ FILTER_DEFINITIONS = (
     {
         "key": "loyalty",
         "category": "Card",
-        "label": "Loyalty",
+        "label": "Loyalty (Planeswalker)",
         "tooltip": (
             "Starting loyalty printed on a planeswalker. Cards without loyalty "
             "are excluded rather than counted as zero, so this filter always "
@@ -61,7 +61,7 @@ FILTER_DEFINITIONS = (
     {
         "key": "defense",
         "category": "Card",
-        "label": "Defense",
+        "label": "Defense (Battle)",
         "tooltip": (
             "Defense printed on a battle. Separate from Loyalty because no "
             "card has both, so combining them would always find nothing."),

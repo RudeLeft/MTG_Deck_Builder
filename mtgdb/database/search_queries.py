@@ -285,6 +285,8 @@ class SearchQueryBuilder:
         "phyrexian_mana": "mana_cost LIKE '%/P%'",
         "has_x_cost": "mana_cost LIKE '%{X}%'",
         "color_indicator": "color_indicator IS NOT NULL AND color_indicator <> ''",
+        "variable_stats": (
+            "power LIKE '%*%' OR toughness LIKE '%*%'"),
         "top_heavy": (
             "power NOT GLOB '*[^0-9.-]*' AND toughness NOT GLOB '*[^0-9.-]*' "
             "AND power <> '' AND toughness <> '' "

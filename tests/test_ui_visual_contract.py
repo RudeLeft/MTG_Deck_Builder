@@ -348,6 +348,23 @@ def main():
                 in sources["search_checklist.py"]),
         "Card Type chips use responsive four/five-column grid": (
             _card_type_grid_contract()),
+        "each choice style matches the surface behind it": (
+            # One style carried the list viewport's input background
+            # everywhere, painting a black box on the lighter surfaces the
+            # mode rows sit on.
+            fake_style.configured["ListChoice.TRadiobutton"]["background"]
+            == T.PALETTE["input"]
+            and fake_style.configured["FormChoice.TRadiobutton"]["background"]
+            == T.PALETTE["surface"]
+            and fake_style.configured["DialogChoice.TRadiobutton"]["background"]
+            == T.PALETTE["surface2"]
+            # UI-010: selected and resting indicators must still differ.
+            and all(
+                dict(fake_style.mapped[name]["indicatorbackground"])["selected"]
+                != fake_style.configured[name]["indicatorbackground"]
+                for name in ("ListChoice.TRadiobutton",
+                             "FormChoice.TRadiobutton",
+                             "DialogChoice.TRadiobutton"))),
         "Supertypes use one compact five-column row": (
             SearchUI.SUPERTYPE_COLUMNS == 5
             and 'columns=SUPERTYPE_COLUMNS,' in sources["search.py"]),

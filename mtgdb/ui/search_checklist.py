@@ -371,7 +371,7 @@ class SearchChecklistDialog:
             for label, value in (mode_choices or self.MODE_CHOICES):
                 radio = ttk.Radiobutton(
                     mode, text=label, variable=self.popup_mode, value=value,
-                    style="ListChoice.TRadiobutton")
+                    style="DialogChoice.TRadiobutton")
                 radio.pack(side="left", padx=(7, 0))
                 meaning = meanings.get(value)
                 if meaning:

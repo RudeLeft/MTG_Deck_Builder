@@ -208,6 +208,22 @@ def install_ui_styles(root):
                              ("active", p["surface3"])],
     )
 
+    # Same hollow-then-gold indicator, but painted on the surface the mode row
+    # actually sits on. ListChoice carries the input background of a list
+    # viewport, which reads as a black box anywhere else.
+    for name, ground in (
+            ("FormChoice.TRadiobutton", p["surface"]),
+            ("DialogChoice.TRadiobutton", p["surface2"]),
+    ):
+        style.configure(name, background=ground, foreground=p["text"],
+                        font=FONT_HELPER, indicatorbackground=p["input"])
+        style.map(
+            name,
+            background=[("active", ground)],
+            indicatorbackground=[("selected", p["accent"]),
+                                 ("active", p["surface3"])],
+        )
+
     # Role-based buttons. Feature code selects a semantic component role.
     _configure_button(style, "TButton", background=p["surface2"],
                       foreground=p["text"], font=FONT_BODY,

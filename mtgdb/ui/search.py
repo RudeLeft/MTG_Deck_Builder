@@ -64,6 +64,7 @@ TRAIT_CHOICES = (
     ("has_x_cost", "X in mana cost"),
     ("color_indicator", "Has a color indicator"),
     ("top_heavy", "Power greater than toughness"),
+    ("variable_stats", "Variable power or toughness (*)"),
 )
 TRAIT_LABELS = dict(TRAIT_CHOICES)
 PICKER_SUMMARY_PER_LINE = 5
@@ -272,11 +273,13 @@ class SearchFeatureMixin:
             "any": "Any: the card must have at least one selected Card Type.",
             "all": ("All: the card must have every selected Card Type across "
                     "its full type line, including multiple faces."),
+            "none": ("None: exclude every card having any selected Card Type, "
+                     "which is how to ask for a green non-creature."),
         }
-        for label, value in (("Any", "any"), ("All", "all")):
+        for label, value in (("Any", "any"), ("All", "all"), ("None", "none")):
             radio = ttk.Radiobutton(
                 mode, text=label, variable=self.q_card_type_mode, value=value,
-                style="ListChoice.TRadiobutton",
+                style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, type_mode_help[value], wraplength=390)
@@ -311,7 +314,7 @@ class SearchFeatureMixin:
                              ("Exactly", "exact")):
             radio = ttk.Radiobutton(
                 colormode, text=label, variable=self.q_color_mode, value=value,
-                style="ListChoice.TRadiobutton",
+                style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, color_mode_help[value], wraplength=390)
@@ -351,7 +354,7 @@ class SearchFeatureMixin:
                              ("Exactly", "exact")):
             radio = ttk.Radiobutton(
                 mode, text=label, variable=self.q_produces_mode, value=value,
-                style="ListChoice.TRadiobutton",
+                style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, help_text[value], wraplength=390)
@@ -399,11 +402,11 @@ class SearchFeatureMixin:
         self.q_rules_mode = tk.StringVar(value="all")
         rules_all = ttk.Radiobutton(
             mode_box, text="All", variable=self.q_rules_mode, value="all",
-            style="ListChoice.TRadiobutton")
+            style="FormChoice.TRadiobutton")
         rules_all.pack(side="left")
         rules_any = ttk.Radiobutton(
             mode_box, text="Any", variable=self.q_rules_mode, value="any",
-            style="ListChoice.TRadiobutton")
+            style="FormChoice.TRadiobutton")
         rules_any.pack(side="left", padx=(4, 0))
         self._add_tooltip(
             rules_all, "All: every Rules Text chip must match the card.")
