@@ -137,6 +137,14 @@ class SearchCatalogController:
             except Exception:
                 log.exception("Could not load %s catalog", label)
                 return default
+        # One grouped legality scan answers both the picker's per-state lists
+        # and the playable list every other screen reads. Asking for them
+        # separately scanned every card's legality JSON twice for the same
+        # answer, which was a quarter of this loader's cold cost.
+        by_status = safe(
+            "format legality",
+            lambda: self.repository.formats_by_status(
+                content, paper_only, games=platforms or None), {})
         return {
             "card_types": safe(
                 "card-type", lambda: self.repository.card_types(content, paper_only), []),
@@ -148,8 +156,7 @@ class SearchCatalogController:
             "supertype_status": safe(
                 "supertype authority status",
                 self.repository.supertype_taxonomy_status, (False, "")),
-            "formats": safe(
-                "format", lambda: self.repository.formats(content, paper_only), []),
+            "formats": list(by_status.get("playable") or ()),
             "rarities": safe(
                 "rarity", lambda: self.repository.rarities(content, paper_only), []),
             "keywords": safe(
@@ -160,10 +167,7 @@ class SearchCatalogController:
                 "set-type",
                 lambda: self.repository.set_types(
                     content, paper_only, games=platforms or None), []),
-            "formats_by_status": safe(
-                "format legality",
-                lambda: self.repository.formats_by_status(
-                    content, paper_only, games=platforms or None), {}),
+            "formats_by_status": by_status,
         }
 
     def _load_sets(self, content, paper_only, selected, platforms=()):

@@ -14,6 +14,8 @@ from mtgdb.database.semantics import _card_content_kind
 from mtgdb.database.schema import RULES_SUPERTYPES_META_KEY
 from mtgdb.ui.search_filters import FILTER_BY_KEY, FILTER_DEFINITIONS
 from mtgdb.search.models import SearchCriteria
+from mtgdb.search.catalogs import SearchCatalogController
+from mtgdb.search.repository import SearchRepository
 
 
 def card(card_id, name, type_line, set_code, set_type, *, games=("paper",),
@@ -70,6 +72,22 @@ def main():
         taxonomy_source = (ROOT / "mtgdb/database/taxonomy.py").read_text(encoding="utf-8")
 
         paper_cards = ("card",)
+
+        # The snapshot carries both the playable list every screen reads and
+        # the per-legality lists the Format picker offers. They come from one
+        # scan: asking the database twice for the same answer cost a quarter
+        # of the cold catalog load.
+        catalogs = SearchCatalogController(SearchRepository(db))
+        try:
+            loaded_base = catalogs._load_base(paper_cards, True, ("paper",))
+        finally:
+            catalogs.shutdown()
+        one_scan_serves_both_format_lists = (
+            list(loaded_base["formats"]) == ["modern", "vintage"]
+            and tuple(loaded_base["formats"])
+            == loaded_base["formats_by_status"]["playable"]
+            and "self.repository.formats(" not in
+            (ROOT / "mtgdb/search/catalogs.py").read_text(encoding="utf-8"))
 
         # DATA-004 / DATA-005 fail-closed. The rows above are identical, but no
         # Scryfall catalog and no verified Wizards Supertype parse exist. Every
@@ -156,6 +174,8 @@ def main():
                 and db.formats_by_status(paper_cards, True, games=("arena",))
                     == {"playable": ("alchemy",), "banned": (),
                         "restricted": ()}),
+            "one legality scan serves every format list": (
+                one_scan_serves_both_format_lists),
             "Format picker has no hardcoded preferred vocabulary": (
                 "FORMATS =" not in constants_source
                 and "FORMATS" not in taxonomy_source),
