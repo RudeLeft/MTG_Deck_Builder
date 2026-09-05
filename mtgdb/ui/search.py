@@ -392,21 +392,16 @@ class SearchFeatureMixin:
              "text; use double quotes for an exact phrase. Press Enter to add "
              "another Rules Text chip."),
             wraplength=420)
-        mode_box = ttk.Frame(rules_box); mode_box.grid(row=1, column=0, sticky="w", pady=(1, 0))
-        ttk.Label(mode_box, text="Rules text:").pack(side="left", padx=(0, 4))
-        self.q_rules_mode = tk.StringVar(value="all")
-        rules_all = ttk.Radiobutton(
-            mode_box, text="All", variable=self.q_rules_mode, value="all",
-            style="FormChoice.TRadiobutton")
-        rules_all.pack(side="left")
-        rules_any = ttk.Radiobutton(
-            mode_box, text="Any", variable=self.q_rules_mode, value="any",
-            style="FormChoice.TRadiobutton")
-        rules_any.pack(side="left", padx=(4, 0))
-        self._add_tooltip(
-            rules_all, "All: every Rules Text chip must match the card.")
-        self._add_tooltip(
-            rules_any, "Any: at least one Rules Text chip must match the card.")
+        mode_box = ttk.Frame(rules_box)
+        mode_box.grid(row=1, column=0, sticky="w", pady=(1, 0))
+        self._build_mode_row(
+            mode_box, "Rules text:", self.q_rules_mode, "chips",
+            meanings={
+                "any": "Any: at least one Rules Text chip must match the card.",
+                "all": "All: every Rules Text chip must match the card.",
+                "none": ("None: exclude every card matching any Rules Text "
+                         "chip, which finds cards that never mention a word."),
+            })
 
 
     # ------------------------------------------------------------------
@@ -1673,7 +1668,8 @@ class SearchFeatureMixin:
             paper_only=bool(state.get("paper_only", True)))
 
         safe_modes = (
-            (self.q_rules_mode, state.get("rules_mode"), {"all", "any"}, "all"),
+            (self.q_rules_mode, state.get("rules_mode"),
+             {"all", "any", "none"}, "all"),
             (self.q_card_type_mode, state.get("card_type_mode"),
              {"all", "any", "none"}, "any"),
             (self.q_supertype_mode, state.get("supertype_mode", state.get("characteristic_mode")),

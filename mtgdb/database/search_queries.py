@@ -107,8 +107,12 @@ class SearchQueryBuilder:
 
         if not groups:
             return
-        joiner = " OR " if str(text_mode).casefold() == "any" else " AND "
-        self.clauses.append("(" + joiner.join(groups) + ")")
+        normalized = str(text_mode).casefold()
+        # "none" excludes a card matching any chip, which is the only way to
+        # ask for cards that never mention graveyards.
+        joiner = " OR " if normalized in ("any", "none") else " AND "
+        clause = "(" + joiner.join(groups) + ")"
+        self.clauses.append(f"NOT {clause}" if normalized == "none" else clause)
         for params in group_params:
             self.params.extend(params)
 

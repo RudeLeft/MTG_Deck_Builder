@@ -47,7 +47,10 @@ def _card(card_id, name, keyword="Flying"):
         "released_at": "2026-01-01",
         "games": ["paper"],
         "keywords": [keyword],
-        "oracle_text": "Flying",
+        # Text follows the keyword so rules-text gates have a card that does
+        # not mention flying; every card sharing one string made a negated
+        # rules-text search indistinguishable from an empty result.
+        "oracle_text": keyword,
         "legalities": {"modern": "legal"},
         "image_uris": {"normal": "normal", "png": "png"},
     }
@@ -227,6 +230,18 @@ def main():
             and "First Bird" not in _opt(keywords=["Flying"], keyword_mode="none"))
         trait_negation = (
             _opt(traits=["single_faced"], trait_mode="none") == set())
+        # Rules text builds its clauses on its own path, so "none" has to be
+        # implemented there separately from the shared term helper. Without it
+        # "cards that never mention flying" was unaskable.
+        flyers = _opt(text=("flying",), text_mode="any")
+        non_flyers = _opt(text=("flying",), text_mode="none")
+        rules_text_negation = (
+            flyers and non_flyers
+            and not (flyers & non_flyers)
+            and flyers | non_flyers == _opt()
+            # Two chips must be excluded independently: NOT (a OR b), not
+            # NOT (a AND b), which would have returned every card here.
+            and _opt(text=("flying", "vigilance"), text_mode="none") == set())
 
         # SRCH-038. Playable is legal-or-restricted; banned and restricted are
         # the states a deck check asks about.
@@ -428,6 +443,10 @@ def main():
             negation_is_complementary),
         "mechanics and traits can be negated too": (
             keyword_negation and trait_negation),
+        "rules text can be negated too": (
+            rules_text_negation
+            and "self._build_mode_row(" in _method_body(
+                search_source, "_build_rules_text_filter")),
         "format legality states are separately reachable": (
             legality_states_are_distinct),
         "printing type re-scopes the set vocabulary": (
