@@ -40,6 +40,12 @@ class SearchCriteria:
     produces_mode: str = "includes"
     traits: tuple[str, ...] = ()
     trait_mode: str = "any"
+    layouts: tuple[str, ...] = ()
+    layout_mode: str = "any"
+    pips: tuple[str, ...] = ()
+    pip_min: float | None = None
+    print_min: float | None = None
+    print_max: float | None = None
     cmc_min: float | None = None
     cmc_max: float | None = None
     power_min: float | None = None
@@ -69,7 +75,7 @@ class SearchCriteria:
         tuple_fields = {
             "names", "text", "card_types", "supertypes", "subtypes", "keywords",
             "colors", "produces", "traits", "rarities", "games",
-            "content_types",
+            "layouts", "pips", "content_types",
         }
         optional_tuple_fields = {"set_codes", "set_types"}
         for name in tuple_fields:
@@ -90,7 +96,7 @@ class SearchCriteria:
         for name in (
                 "names", "text", "card_types", "supertypes", "subtypes", "keywords",
                 "colors", "produces", "traits", "rarities", "games",
-                "content_types"):
+                "layouts", "pips", "content_types"):
             values[name] = list(values[name])
         for name in ("set_codes", "set_types"):
             if values[name] is not None:

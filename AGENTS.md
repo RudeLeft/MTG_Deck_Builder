@@ -576,6 +576,23 @@ every feature together and is exempt.
   control: colour scope and Artist both kept working SQL, a criterion and a
   passing gate after their controls were gone, which is a feature no user can
   run, proved by a test. _Verification:_ **AUTO**.
+- **SRCH-040 — MUST:** Derive "multi-faced" from whether Scryfall gave the
+  card faces, never from a list of layouts maintained here. The list called
+  Saga, Class, Case, Leveler, Prototype, Mutate and Meld multi-faced — 761
+  paper printings with a single face — while genuinely two-faced layouts this
+  build had not heard of read as single-faced. Card shape is the separate
+  question and MUST be its own filter over the observed `layout` vocabulary; a
+  card has exactly one shape, so that control offers Any and None only. A mode
+  its values cannot satisfy MUST NOT be offered. _Verification:_ **AUTO**.
+- **SRCH-041 — MUST:** Store per-row what a search would otherwise aggregate.
+  Coloured pip counts and the number of sets a card appears in are computed at
+  import, not per query: the print count as a correlated subquery took over
+  two minutes across this table and half a second as a grouped join, against
+  0.14s from a stored column, and pip counts computed in SQL can use no index
+  and cannot see hybrid halves. A hybrid symbol counts once for each of its
+  colours, which is how devotion reads it and what "costs two green" means. A
+  stored count that cannot follow the current filters MUST say so in its
+  tooltip rather than appear to. _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.
@@ -770,7 +787,7 @@ every feature together and is exempt.
 - **DBI-008 — MUST NOT:** Put schema, connection construction, bulk extraction,
   canonical search construction, or taxonomy discovery directly in the façade.
   _Verification:_ **AUTO**.
-- **DBI-009 — MUST:** Preserve schema version 11, the card-column contract,
+- **DBI-009 — MUST:** Preserve schema version 12, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
   functions. Every connection opened in `database/schema.py` MUST set an
   explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;

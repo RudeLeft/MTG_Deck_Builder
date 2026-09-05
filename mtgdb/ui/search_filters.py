@@ -104,6 +104,36 @@ FILTER_DEFINITIONS = (
             "around an entry to require that exact phrase."),
     },
     {
+        "key": "card_shape",
+        "category": "Card",
+        "label": "Card shape",
+        "tooltip": (
+            "How the card is printed: Adventure, Saga, Split, Flip, Meld, "
+            "Class, Leveler and the rest. A card has exactly one shape, so "
+            "this filter offers Any and None rather than All."),
+    },
+    {
+        "key": "mana_pips",
+        "category": "Mana",
+        "label": "Colored pips",
+        "tooltip": (
+            "How many colored mana symbols the cost has, counted per color: "
+            "two green finds {G}{G} and {2}{G}{G}. A hybrid symbol counts for "
+            "both of its colors, the way devotion reads it."),
+    },
+    {
+        # Not "printings": that key belongs to the pinned Printings filter,
+        # which chooses which printings a search may return at all.
+        "key": "print_count",
+        "category": "Printing",
+        "label": "Printed in",
+        "tooltip": (
+            "How many different sets the card has appeared in. One finds "
+            "cards printed only once; two or more finds everything reprinted. "
+            "This counts every set, so narrowing the search does not change "
+            "it."),
+    },
+    {
         "key": "traits",
         "category": "Card",
         "label": "Card traits",

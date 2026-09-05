@@ -65,6 +65,9 @@ class SearchRepository:
                           games=None):
         return self._db.formats_by_status(content_types, paper_only, games=games)
 
+    def layouts(self, content_types=None, paper_only=False, games=None):
+        return self._db.layouts(content_types, paper_only, games=games)
+
     def rarities(self, content_types=None, paper_only=False):
         return self._db.rarities(content_types, paper_only)
 

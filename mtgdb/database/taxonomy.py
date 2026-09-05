@@ -109,6 +109,21 @@ class CardTaxonomyMixin:
         ordered.extend(sorted(present - known, key=str.casefold))
         return ordered
 
+    def layouts(self, content_types=None, paper_only=False, games=None):
+        """Observed printed shapes in the current scope, most common first.
+
+        Layout is Scryfall's own field, so the vocabulary is whatever the
+        local rows actually carry -- including a shape this build has never
+        heard of, which stays selectable rather than disappearing.
+        """
+        scope, params = self._scope(content_types, paper_only, games=games)
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT layout, COUNT(*) AS total FROM cards "
+                f"WHERE layout IS NOT NULL AND layout <> '' AND {scope} "
+                "GROUP BY layout ORDER BY total DESC, layout", params).fetchall()
+        return [(row["layout"], row["total"]) for row in rows]
+
     def rarities(self, content_types=None, paper_only=False):
         scope, params = self._scope(content_types, paper_only)
         with self._lock:

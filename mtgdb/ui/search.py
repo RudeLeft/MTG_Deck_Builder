@@ -131,6 +131,14 @@ class SearchFeatureMixin:
         # Traits combine with Any by default, like Subtype and Mechanics.
         # Requiring all of them made two selections return nothing.
         self.q_trait_mode = tk.StringVar(value="any")
+        self._selected_layouts = set()
+        self.q_layout_mode = tk.StringVar(value="any")
+        self._layout_catalog = []
+        self._card_shape_btn = None
+        self.pip_vars = {}
+        self.q_pip_min = None
+        self.q_print_min = None
+        self.q_print_max = None
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
         # Widget handles for optional rows. They must exist as None from the
@@ -558,6 +566,115 @@ class SearchFeatureMixin:
                 "kinds of object to the search and ignore the Any/All/None "
                 "row; every Trait below them is a condition it governs."))
 
+    LAYOUT_LABELS = {
+        "modal_dfc": "Modal double-faced",
+        "double_faced_token": "Double-faced token",
+        "art_series": "Art series",
+        "reversible_card": "Reversible",
+        "transform": "Transforming",
+    }
+
+    def _layout_display_name(self, value):
+        """Readable name for one Scryfall layout key.
+
+        An unmapped key is title-cased rather than hidden: a shape this build
+        has never seen must still be selectable.
+        """
+        key = str(value or "").strip()
+        return self.LAYOUT_LABELS.get(
+            key.casefold(), key.replace("_", " ").capitalize())
+
+    def _build_filter_card_shape(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="ew", pady=2)
+        self._card_shape_btn = AppButton(
+            box, text=self._picker_button_text(
+                {self._layout_display_name(value)
+                 for value in self._selected_layouts},
+                "Any", "shapes", max_visible=10, single_line=True),
+            role="picker", command=self._choose_card_shapes)
+        self._card_shape_btn.pack(fill="x")
+        self._build_mode_row(
+            box, "Selected shapes:", self.q_layout_mode, "shapes",
+            meanings={
+                "any": "Any: the card is printed in one of the selected shapes.",
+                "none": ("None: exclude every card printed in a selected "
+                         "shape, which is how to search ordinary cards only."),
+            },
+            choices=self.ANY_NONE_CHOICES)
+
+    def _reset_filter_card_shape(self):
+        self._selected_layouts = set()
+        self.q_layout_mode.set("any")
+        self._card_shape_btn = None
+
+    def _choose_card_shapes(self):
+        def apply(chosen):
+            self._selected_layouts = {
+                str(value) for value in chosen
+                if str(value) in {key for key, _count in self._layout_catalog}}
+            self._set_picker_text(
+                self._card_shape_btn,
+                self._picker_button_text(
+                    {self._layout_display_name(value)
+                     for value in self._selected_layouts},
+                    "Any", "shapes", max_visible=10, single_line=True))
+            self._update_search_filter_summary()
+
+        self._open_search_multi_picker(
+            "Choose Card Shapes",
+            [(key, f"{self._layout_display_name(key)} · {count:,}")
+             for key, count in self._layout_catalog],
+            set(self._selected_layouts), apply,
+            mode_var=self.q_layout_mode,
+            mode_label="Selected shapes:",
+            mode_choices=self.ANY_NONE_CHOICES,
+            help_text=(
+                "Choose one or several printed shapes. The count beside each "
+                "one is how many printings currently have it."))
+
+    def _build_filter_mana_pips(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="ew", pady=2)
+        pips = ttk.Frame(box)
+        pips.pack(fill="x")
+        for color in (*COLORS, "C"):
+            variable = tk.BooleanVar(value=False)
+            self.pip_vars[color] = variable
+            kw = {"text": " " + MANA_NAMES[color], "variable": variable,
+                  "style": "Color.TCheckbutton",
+                  "command": self._update_search_filter_summary}
+            if self.pips.get(color):
+                kw["image"] = self.pips[color]
+                kw["compound"] = "left"
+            ttk.Checkbutton(pips, **kw).pack(side="left", padx=(0, 8))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(2, 0))
+        ttk.Label(row, text="At least:", style="Muted.TLabel").pack(side="left")
+        self.q_pip_min = AppSpinbox(row, from_=1, to=9, width=3)
+        self.q_pip_min.pack(side="left", padx=(5, 0))
+        self.q_pip_min.delete(0, "end")
+        self.q_pip_min.insert(0, "1")
+        ttk.Label(
+            row, text="of each selected color", style="Muted.TLabel").pack(
+                side="left", padx=(5, 0))
+
+    def _reset_filter_mana_pips(self):
+        for variable in self.pip_vars.values():
+            variable.set(False)
+        self.pip_vars = {}
+        self.q_pip_min = None
+
+    def _build_filter_print_count(self, parent):
+        box = self._numeric_pair(parent, "q_print", width=4)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        ttk.Label(box, text="sets", style="Muted.TLabel").pack(
+            side="left", padx=(5, 0))
+
+    def _reset_filter_print_count(self):
+        self.q_print_min = None
+        self.q_print_max = None
+
     def _build_filter_loyalty(self, parent):
         self._numeric_pair(parent, "q_loyalty").grid(
             row=0, column=1, sticky="w", pady=2)
@@ -648,6 +765,7 @@ class SearchFeatureMixin:
     OPTIONAL_TEXT_FIELDS = (
         "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
         "q_released_min", "q_released_max",
+        "q_print_min", "q_print_max", "q_pip_min",
     )
 
     def _capture_optional_filter_values(self):
@@ -873,8 +991,12 @@ class SearchFeatureMixin:
         self._rarity_btn = None
 
     MODE_ROW_CHOICES = (("Any", "any"), ("All", "all"), ("None", "none"))
+    # A card has exactly one shape, so All could only ever find nothing.
+    # Offering a mode its values cannot satisfy is worse than offering fewer.
+    ANY_NONE_CHOICES = (("Any", "any"), ("None", "none"))
 
-    def _build_mode_row(self, parent, label, variable, noun, meanings=None):
+    def _build_mode_row(self, parent, label, variable, noun, meanings=None,
+                        choices=None):
         """One Any/All/None row, worded for the values it governs.
 
         The single construction point for these rows. Card Type built its own
@@ -891,7 +1013,7 @@ class SearchFeatureMixin:
             "all": f"All: the card must have every selected {noun}.",
             "none": f"None: exclude every card having any selected {noun}.",
         }
-        for text, value in self.MODE_ROW_CHOICES:
+        for text, value in (choices or self.MODE_ROW_CHOICES):
             radio = ttk.Radiobutton(
                 mode, text=text, variable=variable, value=value,
                 style="FormChoice.TRadiobutton",
@@ -1200,6 +1322,7 @@ class SearchFeatureMixin:
         self.q_color_scope.set("identity")
         self.q_produces_mode.set("includes")
         self.q_trait_mode.set("any")
+        self.q_layout_mode.set("any")
         for variable in self.card_type_vars.values():
             variable.set(False)
         for variable in self.color_vars.values():
@@ -1537,6 +1660,18 @@ class SearchFeatureMixin:
             self._format_catalog_by_status.get("playable") or snapshot.formats)
         self._set_format_filter(
             pending["format"] if pending["format"] in self._format_catalog else "")
+        self._layout_catalog = [
+            (str(value), int(count)) for value, count in snapshot.layouts]
+        valid_layouts = {value for value, _count in self._layout_catalog}
+        self._selected_layouts = {
+            value for value in getattr(self, "_selected_layouts", set()) or ()
+            if value in valid_layouts}
+        self._set_picker_text(
+            getattr(self, "_card_shape_btn", None),
+            self._picker_button_text(
+                {self._layout_display_name(value)
+                 for value in self._selected_layouts},
+                "Any", "shapes", max_visible=10, single_line=True))
         self._rarity_catalog = list(snapshot.rarities)
         self._selected_rarities = set(pending["rarities"]).intersection(
             self._rarity_catalog)
@@ -1594,84 +1729,16 @@ class SearchFeatureMixin:
         return True
 
     def _update_search_filter_summary(self):
-        label = getattr(self, "_active_filter_label", None)
-        if label is None:
-            return
-        parts = []
-        name = self.q_name.get().strip() if hasattr(self, "q_name") else ""
-        if getattr(self, "_search_name_batch", ()) and name == getattr(
-                self, "_search_name_batch_display", ""):
-            parts.append("Names: " + ", ".join(self._search_name_batch))
-        elif name:
-            parts.append(f"Name: {name}")
-        selected_types = [
-            value for value, variable in self.card_type_vars.items() if variable.get()]
-        if selected_types:
-            parts.append("Type: " + "/".join(selected_types))
-        properties = [
-            value for value, variable in self.property_vars.items() if variable.get()]
-        if properties:
-            parts.append("Supertypes: " + "/".join(properties))
-        colors = [value for value, variable in self.color_vars.items() if variable.get()]
-        if colors:
-            scope = ("identity" if self.q_color_scope.get() == "identity"
-                     else "card colors")
-            parts.append(
-                f"Colors ({scope}, {self.q_color_mode.get()}): "
-                + "".join(colors))
-        produces = [value for value, variable in self.produces_vars.items()
-                    if variable.get()]
-        if produces:
-            parts.append(
-                f"Produces ({self.q_produces_mode.get()}): " + "".join(produces))
-        properties = self._selected_trait_keys()
-        if properties:
-            parts.append("Card traits: " + ", ".join(
-                TRAIT_LABELS.get(key, key) for key in properties))
-        for label, low, high in (
-                ("Loyalty", "q_loyalty_min", "q_loyalty_max"),
-                ("Defense", "q_defense_min", "q_defense_max"),
-                ("Released", "q_released_min", "q_released_max")):
-            bounds = [str(getattr(self, name).get()).strip()
-                      for name in (low, high)
-                      if getattr(self, name, None) is not None]
-            bounds = [value for value in bounds if value]
-            if bounds:
-                parts.append(f"{label}: " + "-".join(bounds))
-        if self._selected_keywords:
-            parts.append("Mechanics: " + ", ".join(sorted(self._selected_keywords)))
-        rules = self._rules_text_values(commit_pending=False)
-        if rules:
-            parts.append("Text: " + ", ".join(rules))
-        if self.q_format.get():
-            parts.append("Format: " + self.q_format.get())
-        if self._selected_rarities:
-            parts.append("Rarity: " + ", ".join(sorted(self._selected_rarities)))
-        for label_text, lo_widget, hi_widget in (
-            ("MV", self.q_cmc_min, self.q_cmc_max),
-            ("Power", self.q_power_min, self.q_power_max),
-            ("Toughness", self.q_toughness_min, self.q_toughness_max),
-        ):
-            lo, hi = lo_widget.get().strip(), hi_widget.get().strip()
-            if lo or hi:
-                parts.append(f"{label_text}: {lo or '…'}–{hi or '…'}")
-        content = self._selected_content_types()
-        if content != {"card"}:
-            pretty = {
-                "card": "Cards", "token": "Tokens",
-                "emblem": "Emblems", "art": "Art Series",
-            }
-            parts.append("Content: " + ", ".join(
-                pretty[key] for key in ("card", "token", "emblem", "art")
-                if key in content))
-        if self._selected_subtypes:
-            parts.append("Subtype: " + ", ".join(sorted(self._selected_subtypes)))
-        try:
-            if not self._search_printings.is_default_selection():
-                parts.append("Printings: " + self._search_printings.button.cget("text"))
-        except Exception:
-            pass
-        label.configure(text="Active filters: " + ("  •  ".join(parts) if parts else "None"))
+        """The seam every filter control calls when its value changes.
+
+        There is deliberately no aggregate "Active filters" line: each picker
+        summarizes itself on its own button, which is where the user is
+        looking. This method kept building that line for a long time after the
+        label it wrote to stopped existing -- ninety lines that ran on every
+        checkbox click and could not change anything a user saw. The seam is
+        worth keeping and the body is not.
+        """
+        return None
 
 
     @staticmethod
@@ -1733,6 +1800,11 @@ class SearchFeatureMixin:
             "optional_values": self._capture_optional_filter_values(),
             "traits": sorted(
                 getattr(self, "_selected_traits", set()) or ()),
+            "layouts": sorted(getattr(self, "_selected_layouts", set()) or ()),
+            "layout_mode": self.q_layout_mode.get(),
+            "pips": sorted(
+                value for value, variable in self.pip_vars.items()
+                if variable.get()),
             "card_types": card_types,
             "supertypes": supertypes,
             "colors": [key for key, variable in self.color_vars.items() if variable.get()],
@@ -1854,6 +1926,8 @@ class SearchFeatureMixin:
              {"within", "includes", "exact"}, "includes"),
             (self.q_trait_mode, state.get("trait_mode"),
              {"any", "all", "none"}, "any"),
+            (self.q_layout_mode, state.get("layout_mode"),
+             {"any", "none"}, "any"),
             (self.q_format_status, state.get("format_status"),
              {"playable", "banned", "restricted"}, "playable"),
         )
@@ -1884,6 +1958,18 @@ class SearchFeatureMixin:
         wanted_produces = {str(value) for value in state.get("produces", [])}
         for key, variable in self.produces_vars.items():
             variable.set(key in wanted_produces)
+        # Card shape and Colored pips own row-built state for the same reason.
+        self._selected_layouts = {
+            str(value) for value in state.get("layouts", []) or ()}
+        self._set_picker_text(
+            getattr(self, "_card_shape_btn", None),
+            self._picker_button_text(
+                {self._layout_display_name(value)
+                 for value in self._selected_layouts},
+                "Any", "shapes", max_visible=10, single_line=True))
+        wanted_pips = {str(value) for value in state.get("pips", []) or ()}
+        for key, variable in self.pip_vars.items():
+            variable.set(key in wanted_pips)
 
         for widget, key in (
             (self.q_cmc_min, "cmc_min"), (self.q_cmc_max, "cmc_max"),
@@ -1988,6 +2074,7 @@ class SearchFeatureMixin:
                 "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
                 "Defense": ("q_defense_min", "q_defense_max"),
                 "Released": ("q_released_min", "q_released_max"),
+                "Printed in": ("q_print_min", "q_print_max"),
             }
             for label, (low, high) in optional_ranges.items():
                 numeric[low] = self._optional_numeric(getattr(self, low, None))
@@ -2001,6 +2088,8 @@ class SearchFeatureMixin:
             self._validate_search_range("Toughness", numeric["toughness_min"], numeric["toughness_max"])
             for label, (low, high) in optional_ranges.items():
                 self._validate_search_range(label, numeric[low], numeric[high])
+            numeric["q_pip_min"] = self._optional_numeric(
+                getattr(self, "q_pip_min", None))
         except ValueError as exc:
             self.results_count_lbl.configure(text="RESULTS | Invalid search filter")
             self._status(str(exc))
@@ -2025,6 +2114,12 @@ class SearchFeatureMixin:
             produces_mode=self.q_produces_mode.get(),
             traits=self._selected_trait_keys(),
             trait_mode=self.q_trait_mode.get(),
+            layouts=sorted(self._selected_layouts),
+            layout_mode=self.q_layout_mode.get(),
+            pips=[value for value, variable in self.pip_vars.items()
+                  if variable.get()],
+            pip_min=numeric["q_pip_min"],
+            print_min=numeric["q_print_min"], print_max=numeric["q_print_max"],
             loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
             defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
             released_from=numeric["q_released_min"],

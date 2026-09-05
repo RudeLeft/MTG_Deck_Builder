@@ -32,6 +32,7 @@ class SearchCatalogSnapshot:
     set_types: tuple
     sets: tuple
     formats_by_status: dict
+    layouts: tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +128,7 @@ class SearchCatalogController:
             tuple(base["formats"]), tuple(base["rarities"]),
             tuple(base["keywords"]), tuple(base["subtypes"]),
             tuple(base["set_types"]), tuple(sets),
-            dict(base["formats_by_status"]),
+            dict(base["formats_by_status"]), tuple(base["layouts"]),
         )
 
     def _load_base(self, content, paper_only, platforms=()):
@@ -168,6 +169,10 @@ class SearchCatalogController:
                 lambda: self.repository.set_types(
                     content, paper_only, games=platforms or None), []),
             "formats_by_status": by_status,
+            "layouts": safe(
+                "card-shape",
+                lambda: self.repository.layouts(
+                    content, paper_only, games=platforms or None), []),
         }
 
     def _load_sets(self, content, paper_only, selected, platforms=()):

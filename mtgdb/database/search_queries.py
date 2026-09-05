@@ -272,18 +272,21 @@ class SearchQueryBuilder:
             self.clauses.append(f"CAST({field} AS REAL) <= ?")
             self.params.append(float(maximum))
 
-    MULTI_FACE_LAYOUTS = (
-        "transform", "modal_dfc", "split", "flip", "adventure", "meld",
-        "leveler", "saga", "class", "case", "prototype", "mutate",
-        "double_faced_token", "reversible_card",
-    )
+    # A card has two faces when Scryfall gives it two, not when its layout
+    # appears on a list somebody maintained. The list called Saga, Class,
+    # Case, Leveler, Prototype, Mutate and Meld multi-faced -- 761 paper
+    # printings with a single face -- while genuinely two-faced layouts this
+    # build had never seen read as single-faced. Reading card_faces is also
+    # self-correcting for the next layout Scryfall invents.
+    HAS_FACES_CLAUSE = (
+        "card_faces IS NOT NULL AND card_faces NOT IN ('', '[]', 'null')")
     TRAIT_CLAUSES = {
         "universes_beyond": "universes_beyond = 1",
         "not_universes_beyond": "COALESCE(universes_beyond, 0) = 0",
         "reserved": "reserved = 1",
         "game_changer": "game_changer = 1",
-        "multi_faced": None,
-        "single_faced": None,
+        "multi_faced": HAS_FACES_CLAUSE,
+        "single_faced": f"NOT ({HAS_FACES_CLAUSE})",
         "hybrid_mana": "mana_cost LIKE '%/%' AND mana_cost NOT LIKE '%/P%'",
         "phyrexian_mana": "mana_cost LIKE '%/P%'",
         "has_x_cost": "mana_cost LIKE '%{X}%'",
@@ -304,18 +307,9 @@ class SearchQueryBuilder:
         selected property narrows the search; an unknown key is ignored so a
         restored workspace from a newer build cannot widen a query.
         """
-        placeholders = ",".join("?" * len(self.MULTI_FACE_LAYOUTS))
         fragments = []
         values = []
         for key in sorted({str(value) for value in (traits or [])}):
-            if key in ("multi_faced", "single_faced"):
-                # NOT IN against a NULL layout yields NULL, which would drop a
-                # row that simply has no recorded layout rather than keeping it.
-                operator = "IN" if key == "multi_faced" else "NOT IN"
-                fragments.append(
-                    f"COALESCE(layout, '') {operator} ({placeholders})")
-                values.extend(self.MULTI_FACE_LAYOUTS)
-                continue
             clause = self.TRAIT_CLAUSES.get(key)
             if clause:
                 fragments.append(f"({clause})")
@@ -326,6 +320,55 @@ class SearchQueryBuilder:
         group = "(" + joiner.join(fragments) + ")"
         self.clauses.append(f"NOT {group}" if normalized == "none" else group)
         self.params.extend(values)
+
+    def add_layout_filter(self, layouts, layout_mode="any"):
+        """Filter by the printed shape of the card.
+
+        A card has exactly one layout, so All would always find nothing and
+        the control offers only Any and None.
+        """
+        clean = sorted({str(value).strip() for value in (layouts or [])
+                        if str(value).strip()})
+        if not clean:
+            return
+        placeholders = ",".join("?" * len(clean))
+        group = f"COALESCE(layout, '') IN ({placeholders})"
+        self.clauses.append(
+            f"NOT {group}" if str(layout_mode).casefold() == "none" else group)
+        self.params.extend(clean)
+
+    def add_print_count_filters(self, print_min, print_max):
+        """Filter by how many sets the card has been printed in.
+
+        Stored per row at import: the same question asked as a correlated
+        subquery took over two minutes across this table. It counts every set
+        the card appears in, so narrowing the search does not change it.
+        """
+        for bound, operator in ((print_min, ">="), (print_max, "<=")):
+            if bound is None:
+                continue
+            self.clauses.append(f"COALESCE(print_sets, 1) {operator} ?")
+            self.params.append(int(bound))
+
+    def add_pip_filters(self, pips, pip_min):
+        """Require at least N symbols of each selected colour in the cost.
+
+        Counted at import, once per colour, with hybrid halves counting for
+        both -- so {G/W}{G/W} satisfies two green and two white.
+        """
+        selected = [
+            str(value).strip().upper() for value in (pips or [])
+            if str(value).strip().upper() in (*COLORS, "C")]
+        if not selected:
+            return
+        try:
+            minimum = int(pip_min) if pip_min is not None else 1
+        except (TypeError, ValueError):
+            minimum = 1
+        minimum = max(1, minimum)
+        for color in sorted(set(selected)):
+            self.clauses.append(f"pips_{color.casefold()} >= ?")
+            self.params.append(minimum)
 
     GAME_PLATFORMS = ("paper", "mtgo", "arena")
 
@@ -447,7 +490,9 @@ class CardSearchQueryMixin:
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
                color_mode="within", color_scope="identity",
                produces=None, produces_mode="includes",
-               traits=None, trait_mode="any", loyalty_min=None, loyalty_max=None,
+               traits=None, trait_mode="any", layouts=None, layout_mode="any",
+               pips=None, pip_min=None, print_min=None, print_max=None,
+               loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
                released_to=None, games=None,
                cmc_min=None, cmc_max=None, power_min=None,
@@ -483,6 +528,9 @@ class CardSearchQueryMixin:
         builder.add_color_filter(colors, color_mode, color_scope)
         builder.add_produces_filter(produces, produces_mode)
         builder.add_trait_filters(traits, trait_mode)
+        builder.add_layout_filter(layouts, layout_mode)
+        builder.add_pip_filters(pips, pip_min)
+        builder.add_print_count_filters(print_min, print_max)
         builder.add_stat_filters(
             loyalty_min, loyalty_max, defense_min, defense_max)
         builder.add_release_filters(released_from, released_to)

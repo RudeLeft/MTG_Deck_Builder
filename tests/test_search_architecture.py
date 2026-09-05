@@ -15,6 +15,7 @@ from mtgdb.database.db import CardDB
 from mtgdb.search.controller import SearchController
 from mtgdb.search.models import SearchCriteria
 from mtgdb.database.search_queries import SearchQueryBuilder
+from mtgdb.database.schema import _CARD_COLUMN_NAMES
 from mtgdb.search.repository import SEARCH_RESULT_COLUMNS, SearchRepository
 from mtgdb.search.results import SearchResultStore
 from mtgdb.ui.results import SearchResultsMixin
@@ -159,6 +160,20 @@ def main():
             # something to tell apart from the paper vocabulary.
             dict(_card("10", "Alchemy Owl"), games=["arena"], set="ana",
                  set_name="Arena Set", set_type="alchemy"),
+            # A Saga has one face and a two-part cost; the old multi-face
+            # layout list called every Saga multi-faced.
+            dict(_card("11", "Sagacious Owl"), type_line="Enchantment — Saga",
+                 layout="saga", mana_cost="{G}{G}"),
+            # Two faces, so the trait must find it through card_faces rather
+            # than through a layout this build happens to know.
+            dict(_card("12", "Owl Adventure"), layout="adventure",
+                 mana_cost="{G/W}{G/W}",
+                 card_faces=[{"name": "Owl Adventure"}, {"name": "Off We Go"}]),
+            # One card, two printings: the only fixture that can tell a
+            # reprint from a card printed once.
+            dict(_card("13", "Reprinted Owl"), oracle_id="shared-bird"),
+            dict(_card("14", "Reprinted Owl"), oracle_id="shared-bird",
+                 set="tst2", set_name="Second Test Set"),
         ])
 
         # SRCH-033/034 query coverage for the optional filters.
@@ -167,7 +182,7 @@ def main():
                 columns=("id", "name"), **kwargs)}
 
         traits_narrow_the_query = (
-            _opt(traits=["multi_faced"]) == set()
+            _opt(traits=["multi_faced"]) == {"Owl Adventure"}
             and _opt(traits=["single_faced"]) >= {"First Bird"}
             and _opt(traits=["top_heavy"]) == set())
         release_bounds_are_inclusive = (
@@ -180,6 +195,34 @@ def main():
         # An identity cannot be both white and colourless, so the query has
         # always ignored the C. Ticking it alongside a colour therefore looked
         # like a filter that did nothing.
+        # SRCH-040/041. Shape, pips and print count.
+        shape_is_exclusive = (
+            _opt(layouts=["saga"]) == {"Sagacious Owl"}
+            and _opt(layouts=["saga"], layout_mode="none")
+            == _opt() - {"Sagacious Owl"}
+            # All would always find nothing, so the control must not offer it.
+            and ("All", "all") not in SearchFeatureMixin.ANY_NONE_CHOICES)
+        faces_decide_multi_faced = (
+            # The Saga is single-faced despite a layout the old list called
+            # multi-faced; the Adventure is multi-faced because it has faces.
+            "Sagacious Owl" in _opt(traits=["single_faced"])
+            and "Sagacious Owl" not in _opt(traits=["multi_faced"])
+            and "Owl Adventure" in _opt(traits=["multi_faced"])
+            and _opt(traits=["multi_faced"]) | _opt(traits=["single_faced"])
+            == _opt())
+        pips_count_per_colour = (
+            "Sagacious Owl" in _opt(pips=["G"], pip_min=2)
+            and "Sagacious Owl" not in _opt(pips=["G"], pip_min=3)
+            # A hybrid symbol counts for both of its colours, which is what
+            # devotion does and what "costs two green" is asked to mean.
+            and "Owl Adventure" in _opt(pips=["G"], pip_min=2)
+            and "Owl Adventure" in _opt(pips=["W"], pip_min=2)
+            # Two colours at once is an AND, not a colour-identity question.
+            and _opt(pips=["G", "W"], pip_min=2) == {"Owl Adventure"})
+        print_count_is_stored_not_derived = (
+            _opt(print_min=2) == {"Reprinted Owl"}
+            and _opt(print_min=1, print_max=1) == _opt() - {"Reprinted Owl"}
+            and "print_sets" in _CARD_COLUMN_NAMES)
         colorless_adds_nothing_beside_a_colour = (
             _opt(colors=["W", "C"], color_mode="exact")
             == _opt(colors=["W"], color_mode="exact"))
@@ -236,7 +279,8 @@ def main():
             "Second Bird" in _opt(keywords=["Flying"], keyword_mode="none")
             and "First Bird" not in _opt(keywords=["Flying"], keyword_mode="none"))
         trait_negation = (
-            _opt(traits=["single_faced"], trait_mode="none") == set())
+            _opt(traits=["single_faced"], trait_mode="none")
+            == {"Owl Adventure"})
         # Rules text builds its clauses on its own path, so "none" has to be
         # implemented there separately from the shared term helper. Without it
         # "cards that never mention flying" was unaskable.
@@ -275,7 +319,7 @@ def main():
         produces_treats_colorless_as_a_member = (
             _produces(("C",), "includes") == {"Sol Ring"})
         empty_produces_filters_nothing = (
-            len(_produces((), "includes")) == 10)
+            len(_produces((), "includes")) == 13)
         # The same helper serves colour identity, where an exact multi-colour
         # request previously built "W,U" against stored "U,W" and matched none.
         identity_exact_multicolor = {row["name"] for row in db.search(
@@ -316,6 +360,8 @@ def main():
     search_source = (ROOT / "mtgdb/ui/search.py").read_text(encoding="utf-8")
     search_query_source = (
         ROOT / "mtgdb/database/search_queries.py").read_text(encoding="utf-8")
+    bulk_import_source = (
+        ROOT / "mtgdb/database/bulk_import.py").read_text(encoding="utf-8")
     printings_source = (
         (ROOT / "mtgdb/ui/search_printings.py").read_text(encoding="utf-8")
         + (ROOT / "mtgdb/ui/set_filters.py").read_text(encoding="utf-8"))
@@ -664,6 +710,31 @@ def main():
                 for name in ("keyword", "creature_type", "characteristics",
                              "characteristic_mode", "rarity", "set_code",
                              "exclude_art", "show_tokens", "limit"))),
+        "card shape is a filter, and only Any or None can apply to it": (
+            shape_is_exclusive
+            and FILTER_BY_KEY["card_shape"]["category"] == "Card"
+            and "choices=self.ANY_NONE_CHOICES" in _method_body(
+                search_source, "_build_filter_card_shape")),
+        "multi-faced is read from the faces, not from a layout list": (
+            # The list called Saga, Class, Case, Leveler, Prototype, Mutate
+            # and Meld multi-faced: 761 paper printings with one face.
+            faces_decide_multi_faced
+            and "MULTI_FACE_LAYOUTS" not in search_query_source
+            and "HAS_FACES_CLAUSE" in search_query_source),
+        "colored pips are counted at import, once per colour": (
+            pips_count_per_colour
+            and all(f"pips_{c}" in _CARD_COLUMN_NAMES for c in "wubrgc")
+            # Counting them in SQL cannot use an index and cannot see the
+            # hybrid halves; the parser at import can do both.
+            and "_mana_pips" in bulk_import_source
+            and "LENGTH(mana_cost)" not in search_query_source),
+        "print count is stored per row rather than aggregated per query": (
+            print_count_is_stored_not_derived
+            # As a correlated subquery this question took over two minutes.
+            and "UPDATE cards SET print_sets" in bulk_import_source
+            and "COUNT(DISTINCT set_code)" in bulk_import_source
+            and "GROUP BY" not in _method_body(
+                search_query_source, "add_print_count_filters")),
         "no criterion outlives the control that reaches it": (
             # Artist kept a working query path, a criterion and a passing gate
             # after its row was removed -- a feature no user could run, proved
@@ -684,8 +755,7 @@ def main():
             and '"produces": [key for key, variable in self.produces_vars.items()'
                 in search_source
             and 'wanted_produces = {str(value) for value in state.get("produces", [])}'
-                in search_source
-            and 'f"Produces ({self.q_produces_mode.get()}): "' in search_source),
+                in search_source),
         "produced mana is filtered independently of colour identity": (
             produces_ignores_identity),
         "exact produced mana sorts the requested set": (

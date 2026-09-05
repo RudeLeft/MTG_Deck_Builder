@@ -231,7 +231,10 @@ def main():
             and "Abilities" not in FILTER_BY_KEY["mechanics"]["tooltip"]),
         "trusted type filters expose explicit authority failures": (
             FILTER_BY_KEY["supertypes"]["label"] == "Supertypes"
-            and '"Supertypes: "' in search_source
+            # The control itself, not a summary string: the old assertion
+            # named text that lived only in a dead code path.
+            and "def _build_filter_supertypes(" in search_source
+            and '"Selected supertypes:"' in search_source
             and not any(entry["label"] == "Properties"
                         for entry in FILTER_DEFINITIONS)
             and '"Properties: "' not in search_source

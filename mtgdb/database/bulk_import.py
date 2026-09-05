@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import re
 import os
 
 from mtgdb.database.schema import _INDEX_DEFINITIONS, open_writer_connection
@@ -28,6 +29,26 @@ def _all_oracle_text(card):
             seen.add(key)
             unique.append(key)
     return _normalize_rules_text(" ".join(unique))
+
+_MANA_SYMBOL = re.compile(r"\{([^}]+)\}")
+PIP_COLORS = ("W", "U", "B", "R", "G", "C")
+
+
+def _mana_pips(mana_cost):
+    """Count coloured symbols in a mana cost, once per colour.
+
+    A hybrid symbol counts for both of its colours, which is how devotion
+    reads them and what someone asking for "two green" means: {G/W}{G/W}
+    costs two green and two white. Phyrexian {G/P} is one green. Generic,
+    variable and snow symbols contribute to no colour.
+    """
+    counts = dict.fromkeys(PIP_COLORS, 0)
+    for symbol in _MANA_SYMBOL.findall(str(mana_cost or "")):
+        for part in str(symbol).upper().split("/"):
+            if part in counts:
+                counts[part] += 1
+    return counts
+
 
 def _extract_row(card):
     """Turn a Scryfall card object into the tuple our schema expects."""
@@ -63,11 +84,16 @@ def _extract_row(card):
     def either(key):
         return card.get(key, face.get(key))
 
+    mana_cost = card.get("mana_cost") or face.get("mana_cost") or ""
+    # Both halves of a split card are one printing with one cost string, so
+    # counting the whole string answers "costs two green" for either half.
+    pips = _mana_pips(mana_cost)
+
     return (
         card["id"],
         card.get("oracle_id"),
         card["name"],
-        card.get("mana_cost") or face.get("mana_cost") or "",
+        mana_cost,
         float(card.get("cmc") or 0),
         _complete_type_line(card),
         _raw_type_line(card),
@@ -113,6 +139,10 @@ def _extract_row(card):
         json.dumps(card.get("all_parts") or []),
         json.dumps(card.get("card_faces") or []),
         card.get("layout"),
+        # print_sets is derived after the load; every row starts at its own
+        # single printing so a partial import can never claim a reprint.
+        1,
+        pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
     )
 
 
@@ -126,8 +156,10 @@ INSERT OR REPLACE INTO cards (
     reserved, full_art, game_changer, color_indicator, security_stamp,
     universes_beyond, produced_mana,
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
-    related_parts, card_faces, layout
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    related_parts, card_faces, layout,
+    print_sets, pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+          ?,?,?,?,?,?,?)
 """
 
 
@@ -325,6 +357,16 @@ class ScryfallBulkImporter:
                     "WHERE security_stamp = 'triangle' AND set_code IS NOT NULL"
                     ")"
                 )
+                # How many sets a card appears in is a property of the
+                # oracle_id group. Asking for it per query cost over two
+                # minutes as a correlated subquery and half a second as a
+                # grouped join; storing it costs about two seconds here.
+                cur.execute(
+                    "UPDATE cards SET print_sets = COALESCE((SELECT total FROM ("
+                    "SELECT oracle_id AS grouped_id, "
+                    "COUNT(DISTINCT set_code) AS total FROM cards "
+                    "WHERE oracle_id IS NOT NULL GROUP BY oracle_id) "
+                    "WHERE grouped_id = cards.oracle_id), 1)")
                 if maintenance_cb:
                     maintenance_cb("classify", 1, 1)
 

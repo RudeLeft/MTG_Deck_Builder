@@ -5,7 +5,7 @@ import sqlite3
 
 
 
-_SCHEMA_VERSION = 11
+_SCHEMA_VERSION = 12
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -75,7 +75,20 @@ CREATE TABLE IF NOT EXISTS cards (
     keywords          TEXT,   -- json array
     related_parts     TEXT,   -- json array copied from Scryfall all_parts
     card_faces        TEXT,   -- json array; preserves future multi-face structure
-    layout            TEXT
+    layout            TEXT,
+    -- Sets this card's oracle_id appears in. Derived after the bulk load
+    -- because it is a property of the group, not of one printing; computing
+    -- it per query took over two minutes as a correlated subquery.
+    print_sets        INTEGER NOT NULL DEFAULT 1,
+    -- Coloured mana symbols in the cost, counted once per colour. Hybrid
+    -- halves count for both of their colours, which is what devotion does
+    -- and what "costs two green" is asked to mean.
+    pips_w            INTEGER NOT NULL DEFAULT 0,
+    pips_u            INTEGER NOT NULL DEFAULT 0,
+    pips_b            INTEGER NOT NULL DEFAULT 0,
+    pips_r            INTEGER NOT NULL DEFAULT 0,
+    pips_g            INTEGER NOT NULL DEFAULT 0,
+    pips_c            INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards(name COLLATE NOCASE);
@@ -88,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_set_lang ON cards(set_code, lang);
 CREATE INDEX IF NOT EXISTS idx_cards_settype_lang ON cards(set_type, lang);
 CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity);
 CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity);
+CREATE INDEX IF NOT EXISTS idx_cards_print_sets ON cards(print_sets);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -111,6 +125,8 @@ _INDEX_DEFINITIONS = [
     ("idx_cards_settype_lang",
      "CREATE INDEX IF NOT EXISTS idx_cards_settype_lang ON cards(set_type, lang)"),
     ("idx_cards_rarity", "CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity)"),
+    ("idx_cards_print_sets",
+     "CREATE INDEX IF NOT EXISTS idx_cards_print_sets ON cards(print_sets)"),
     ("idx_cards_color_identity",
      "CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity)"),
 ]
