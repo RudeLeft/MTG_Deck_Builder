@@ -15,7 +15,7 @@ from mtgdb.images.service import (
     card_face_image_url,
     card_viewable_faces,
 )
-from mtgdb.ui.components import AppButton
+from mtgdb.ui.components import AppButton, format_display_name
 from mtgdb.ui.tokens import (
     CARD_PREVIEW_PORTRAIT_SIZE,
     CARD_ZOOM_BASE_PORTRAIT_SIZE,
@@ -796,7 +796,7 @@ class CardDetailMixin:
             key=str.casefold))
         labels = []
         for value in ordered:
-            label = value.replace("_", " ").title()
+            label = format_display_name(value)
             if legal.get(value) == "restricted":
                 label += " (Restricted)"
             labels.append(label)

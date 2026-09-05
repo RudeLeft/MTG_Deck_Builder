@@ -563,7 +563,11 @@ def main():
             and "self._format_catalog" in editor_source
             and "AppCombobox" not in editor_source
             and "_format_catalog.append" not in editor_source
-            and '.replace("_", " ").capitalize()' in editor_source),
+            # Format spelling is shared with Search and the card preview:
+            # "Paupercommander" in one place and "Pauper Commander" in another
+            # reads as two different formats.
+            and "format_display_name(" in editor_source
+            and '.replace("_", " ").capitalize()' not in editor_source),
         "statistics UI consumes domain-owned calculations": all(
             marker in stats_source for marker in (
                 "analyze_deck(self.deck)",

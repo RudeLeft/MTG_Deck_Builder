@@ -22,9 +22,11 @@ from mtgdb.ui.search import (
 )
 from mtgdb.ui.search_checklist import SearchChecklistDialog
 from mtgdb.ui.search_filters import (
-    CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTERS,
-    filter_catalog, is_removable, ordered_active_filters,
+    CATEGORY_ORDER, FILTER_BY_KEY, FILTER_DEFINITIONS, PINNED_FILTER_TOOLTIPS,
+    PINNED_FILTERS, filter_catalog, is_removable, ordered_active_filters,
 )
+from mtgdb.ui.components import format_display_name
+from mtgdb.search.catalogs import SearchCatalogController
 
 
 def _card(card_id, name, keyword="Flying"):
@@ -457,6 +459,72 @@ def main():
         "Search Clear returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
                 search_source, "_clear_search")),
+        "Clear empties the added filters without taking them away": (
+            # Clear used to destroy every row, so the next search began by
+            # re-adding the same filters by hand.
+            "self._reset_optional_filter_values()" in _method_body(
+                search_source, "_clear_search")
+            and "self._clear_optional_filters()" not in _method_body(
+                search_source, "_clear_search")
+            and "self._add_optional_filter(key, notify=False)" in _method_body(
+                search_source, "_reset_optional_filter_values")),
+        "removing a filter returns Results to the first row": (
+            # One row less is a shorter form; the viewport has to follow it up
+            # exactly as it follows Clear.
+            "self._reset_results_viewport()" in _method_body(
+                search_source, "_remove_optional_filter")),
+        "platform is part of the taxonomy cache key": (
+            # Without it, the snapshot that arrived after an Arena toggle
+            # described paper and overwrote the Arena set list.
+            len(SearchCatalogController._key(("card",), True, (), ("arena",)))
+            == 4
+            and SearchCatalogController._key(("card",), True, (), ("arena",))
+            != SearchCatalogController._key(("card",), True, (), ("paper",))
+            and "games" in _method_body(
+                search_source, "_refresh_search_catalogs")),
+        "every filter explains itself in the same voice": (
+            all(entry.get("tooltip", "").strip().endswith(".")
+                for entry in FILTER_DEFINITIONS)
+            # A tooltip that names where the data came from spends the user's
+            # attention on something that cannot change their search.
+            and not any(
+                word in text.casefold()
+                for text in ([entry["tooltip"] for entry in FILTER_DEFINITIONS]
+                             + list(PINNED_FILTER_TOOLTIPS.values()))
+                for word in ("scryfall", "database", "snapshot"))
+            # The always-present filters are explained too, not skipped.
+            and set(PINNED_FILTER_TOOLTIPS) == set(PINNED_FILTERS)
+            and "_add_pinned_filter_tooltip" in printings_source),
+        "format names are spelled out rather than run together": (
+            format_display_name("paupercommander") == "Pauper Commander"
+            and format_display_name("standardbrawl") == "Standard Brawl"
+            and format_display_name("modern") == "Modern"
+            # An unknown key still reaches the user rather than disappearing,
+            # and a multi-word one is spaced rather than only capitalized.
+            and format_display_name("neoformat") == "Neoformat"
+            and format_display_name("neo_format") == "Neo Format"
+            and "capitalize()" not in _method_body(
+                search_source, "_set_format_filter")),
+        "the Format list follows the chosen legality": (
+            # Almost no format restricts anything, so offering all of them
+            # under Restricted offered a guaranteed-empty search.
+            "mode_command=self._rescope_format_choices" in _method_body(
+                search_source, "_choose_format")
+            and "self._format_catalog_for_status()" in _method_body(
+                search_source, "_choose_format")
+            # The unscoped list must not reach the picker's values: the guard
+            # that drops an impossible selection is not a substitute for
+            # listing only the formats the legality can produce.
+            and "for fmt in self._format_catalog]" not in _method_body(
+                search_source, "_choose_format")
+            and "mode_command=mode_command" in checklist_source
+            # The dialog builds itself through show(), so a mode_command the
+            # constructor forgets to pass on is a dead control until the
+            # picker is closed and opened a second time.
+            and "mode_command=mode_command" in _method_body(
+                checklist_source[
+                    checklist_source.index("class SearchChecklistDialog"):],
+                "__init__")),
         "printing type selects platforms rather than a paper flag": (
             games_select_platforms),
         "content kinds come from traits and add no clause": (
@@ -479,9 +547,6 @@ def main():
             and all(len(entry["tooltip"]) >= 60 for entry in FILTER_DEFINITIONS)
             and len(catalog_keys) == len(set(catalog_keys))
             and len(catalog_keys) == len(FILTER_DEFINITIONS)),
-        "Clear removes every optional filter row": (
-            "self._clear_optional_filters()" in _method_body(
-                search_source, "_clear_search")),
         "the catalogue reports what is already added": (
             [e["active"] for _c, es in catalog for e in es if e["key"] == "traits"]
             == [True]
@@ -498,11 +563,14 @@ def main():
             and not (set(PINNED_FILTERS) & set(catalog_keys))
             and is_removable("traits")),
         "tooltips say what is matched, not what the control is": (
-            "colour" in tooltips["produces"]
-            and "any colour" in tooltips["produces"]
+            # Each of these names the boundary its filter is confused with:
+            # Produces against colour, Mechanics against rules text, Rarity
+            # against the card rather than the printing.
+            "not the same as its colour" in tooltips["produces"]
             and "rules text" in tooltips["mechanics"]
-            and "Oracle text" in tooltips["rules_text"]
+            and "rules text" in tooltips["rules_text"]
             and "planeswalker" in tooltips["loyalty"]
+            and "printing" in tooltips["rarity"]
             # Loyalty and Defense are separate because no card has both;
             # the tooltip has to say so or the split looks arbitrary.
             and "no card has both" in tooltips["defense"]),

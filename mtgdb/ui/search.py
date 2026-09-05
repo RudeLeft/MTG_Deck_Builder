@@ -13,11 +13,11 @@ from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
     AppButton, AppCombobox, AppMenubutton, AppSpinbox, ClassicCheckbutton,
-    TokenBubbleEntry,
+    TokenBubbleEntry, format_display_name,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.search_filters import (
-    FILTER_BY_KEY, filter_catalog, ordered_active_filters,
+    FILTER_BY_KEY, PINNED_FILTER_TOOLTIPS, filter_catalog, ordered_active_filters,
 )
 from mtgdb.ui.search_printings import SearchPrintingFilter
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
@@ -181,8 +181,10 @@ class SearchFeatureMixin:
     def _build_name_filter(self, form):
         # Primary card identity starts with a full-width name field. Language is
         # still one Search criterion but its control lives with Printings.
-        ttk.Label(form, text="Card Name").grid(row=0, column=0, sticky="w",
-                                               padx=(0, 8), pady=SEARCH_ROW_PADY)
+        name_label = ttk.Label(form, text="Card Name")
+        name_label.grid(row=0, column=0, sticky="w",
+                        padx=(0, 8), pady=SEARCH_ROW_PADY)
+        self._add_pinned_filter_tooltip(name_label, "name")
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name = AutocompleteEntry(form)
@@ -261,8 +263,10 @@ class SearchFeatureMixin:
             self.after_idle(finish_blur)
 
     def _build_card_type_filters(self, form):
-        ttk.Label(form, text="Card type").grid(
+        type_label = ttk.Label(form, text="Card type")
+        type_label.grid(
             row=1, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+        self._add_pinned_filter_tooltip(type_label, "card_type")
         typebox = ttk.Frame(form)
         typebox.grid(row=1, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._card_type_chip_frame = ttk.Frame(typebox)
@@ -281,8 +285,10 @@ class SearchFeatureMixin:
 
 
     def _build_color_filters(self, form):
-        ttk.Label(form, text="Colors").grid(
+        color_label = ttk.Label(form, text="Colors")
+        color_label.grid(
             row=3, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+        self._add_pinned_filter_tooltip(color_label, "colors")
         colorwrap = ttk.Frame(form)
         colorwrap.grid(row=3, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         colorbox = ttk.Frame(colorwrap)
@@ -600,6 +606,12 @@ class SearchFeatureMixin:
     # optional filters, built on demand
     # ------------------------------------------------------------------
 
+    def _add_pinned_filter_tooltip(self, widget, key):
+        """Explain an always-present filter exactly like an added one."""
+        text = PINNED_FILTER_TOOLTIPS.get(key)
+        if text:
+            self._add_tooltip(widget, text, wraplength=380)
+
     def _build_optional_filter_zone(self, parent):
         """Host for filters that exist only while they are in use.
 
@@ -693,6 +705,10 @@ class SearchFeatureMixin:
         self._refresh_search_blur_widgets()
         self._refresh_add_filter_menu()
         if notify:
+            # One row less is a shorter form, so Add filter and everything
+            # below it move up. The Results viewport has to be told, or it
+            # stays scrolled to where the taller panel had left it.
+            self._reset_results_viewport()
             self._update_search_filter_summary()
 
     def _active_optional_filters(self):
@@ -701,6 +717,21 @@ class SearchFeatureMixin:
     def _clear_optional_filters(self):
         for key in list(getattr(self, "_optional_filter_rows", {})):
             self._remove_optional_filter(key, notify=False)
+
+    def _reset_optional_filter_values(self):
+        """Empty every added filter without taking any of them away.
+
+        Clear used to remove the rows as well, which meant re-adding each
+        filter by hand before the next search. The rows are rebuilt rather
+        than reset in place because a reset releases the widgets a row owns;
+        rebuilding in the same order keeps the panel visually still.
+        """
+        active = list(getattr(self, "_optional_filter_rows", {}))
+        if not active:
+            return
+        self._clear_optional_filters()
+        for key in active:
+            self._add_optional_filter(key, notify=False)
 
     def _build_filter_produces(self, parent):
         self._build_produces_filter(parent, row=0)
@@ -1068,9 +1099,11 @@ class SearchFeatureMixin:
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name.set("")
-        # Removing every optional row also runs each filter's own reset, so the
-        # state they own is cleared without naming it twice here.
-        self._clear_optional_filters()
+        # Rebuilding every optional row runs each filter's own reset, so the
+        # state they own is cleared without naming it twice here. The rows
+        # themselves stay: clearing a search is not the same as abandoning the
+        # set of questions it was asking.
+        self._reset_optional_filter_values()
         self._rules_text_shadow = []
         self.q_rules_mode.set("all")
         self.q_card_type_mode.set("any")
@@ -1138,14 +1171,15 @@ class SearchFeatureMixin:
                                   mode_var=None, mode_default="any",
                                   mode_label="Selected values:",
                                   help_text="Type to narrow the list.",
-                                  single_select=False, mode_choices=None):
+                                  single_select=False, mode_choices=None,
+                                  mode_command=None):
         """Open the reusable hidden-first, batch-rendered search picker."""
         return open_search_checklist(
             self, title=title, values=values, selected=selected,
             apply_callback=apply_callback, mode_var=mode_var,
             mode_default=mode_default, mode_label=mode_label,
             help_text=help_text, single_select=single_select,
-            mode_choices=mode_choices)
+            mode_choices=mode_choices, mode_command=mode_command)
 
 
     def _choose_subtypes(self):
@@ -1178,14 +1212,33 @@ class SearchFeatureMixin:
             help_text="Choose one or several card mechanics.")
 
 
+    def _format_catalog_for_status(self, status=None):
+        """Formats that can actually be legal, banned or restricted somewhere.
+
+        Only a handful of formats restrict anything, so offering all of them
+        under Restricted was offering a guaranteed-empty search. Falls back to
+        the playable list whenever the scoped snapshot has not arrived yet.
+        """
+        status = str(status or self.q_format_status.get() or "playable").casefold()
+        grouped = getattr(self, "_format_catalog_by_status", None) or {}
+        return list(grouped.get(status) or self._format_catalog)
+
+    def _rescope_format_choices(self, status):
+        """Supply the picker a new value list when its Legality changes."""
+        values = self._format_catalog_for_status(status)
+        current = self.q_format.get().strip()
+        return (
+            [("", "Any")] + [(fmt, format_display_name(fmt)) for fmt in values],
+            {current} if current in values else {""},
+        )
+
     def _set_format_filter(self, value):
         value = str(value or "").strip()
         if value not in self._format_catalog:
             value = ""
         self.q_format.set(value)
         self._set_picker_text(
-            self._format_btn,
-            value.replace("_", " ").capitalize() if value else "Any")
+            self._format_btn, format_display_name(value) or "Any")
 
 
     def _choose_format(self):
@@ -1201,20 +1254,28 @@ class SearchFeatureMixin:
             # if a stale/restored caller ever supplies more than one value.
             normalized = {str(value or "").strip() for value in (chosen or ())}
             value = "" if "" in normalized else next(iter(normalized), "")
+            # A format the chosen legality cannot produce is no longer offered,
+            # so a selection left over from another legality is dropped rather
+            # than kept as a silently empty search.
+            if value and value not in self._format_catalog_for_status():
+                value = ""
             self._set_format_filter(value)
 
         self._open_search_multi_picker(
             "Choose Format",
             [("", "Any")] + [
-                (fmt, fmt.replace("_", " ").capitalize())
-                for fmt in self._format_catalog],
+                (fmt, format_display_name(fmt))
+                for fmt in self._format_catalog_for_status()],
             selected,
             apply,
-            help_text="Choose the format cards must be legal in.",
+            help_text=(
+                "Choose a format, then the legality it must have in it. "
+                "Only formats that have cards in the chosen state are listed."),
             single_select=True,
             mode_var=self.q_format_status,
             mode_label="Legality:",
-            mode_choices=FORMAT_STATUS_CHOICES)
+            mode_choices=FORMAT_STATUS_CHOICES,
+            mode_command=self._rescope_format_choices)
 
     def _choose_rarities(self):
         def apply(chosen):
@@ -1283,9 +1344,14 @@ class SearchFeatureMixin:
         if selected_set_types is None:
             selected_set_types = (
                 printing_filter.selected_set_types() if printing_filter else ())
-        base_scope = (content, paper_only)
+        # Platform is part of the scope, not a detail of it. Requesting without
+        # it meant the snapshot that arrived after a Paper/Arena/MTGO toggle
+        # described the wrong platform and overwrote the set list the toggle
+        # had just produced.
+        games = printing_filter.selected_games() if printing_filter else ()
+        base_scope = (content, paper_only, tuple(games))
         start = self.search_catalog_controller.request(
-            content, paper_only, selected_set_types)
+            content, paper_only, selected_set_types, games)
         if start.kind == "cached":
             self._apply_search_catalog_snapshot(start.payload)
             return
@@ -1373,7 +1439,12 @@ class SearchFeatureMixin:
         for value, variable in self.property_vars.items():
             variable.set(value in pending["supertypes"])
 
-        self._format_catalog = list(snapshot.formats)
+        self._format_catalog_by_status = {
+            state: list(values) for state, values
+            in (snapshot.formats_by_status or {}).items()
+        }
+        self._format_catalog = list(
+            self._format_catalog_by_status.get("playable") or snapshot.formats)
         self._set_format_filter(
             pending["format"] if pending["format"] in self._format_catalog else "")
         self._rarity_catalog = list(snapshot.rarities)
@@ -1402,7 +1473,8 @@ class SearchFeatureMixin:
             max_visible=10, single_line=True))
 
         actual_set_types = self._search_printings.apply_snapshot(snapshot)
-        self._search_catalog_scope = (snapshot.content_types, snapshot.paper_only)
+        self._search_catalog_scope = (
+            snapshot.content_types, snapshot.paper_only, tuple(snapshot.games))
         if set(actual_set_types) != set(snapshot.selected_set_types):
             # Invalid restored/old set types were pruned; resolve Exact Sets for
             # the now-authoritative selection without blocking the UI.

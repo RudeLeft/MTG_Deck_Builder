@@ -17,134 +17,153 @@ from __future__ import annotations
 
 CATEGORY_ORDER = ("Mana", "Card", "Printing")
 
-# Tooltip wording rule: say what the filter matches against, not what the
-# control is. A user who reads only the tooltip should know whether the filter
-# answers their question, and where its answer differs from a neighbouring one.
+# Tooltip wording rule, applied to every filter including the pinned ones:
+# one sentence saying what the filter matches, then at most one more for the
+# boundary people get wrong about it. Describe cards, not where the data came
+# from -- naming a data source tells the user nothing about their search.
 FILTER_DEFINITIONS = (
     {
         "key": "mana_value",
         "category": "Mana",
         "label": "Mana value",
         "tooltip": (
-            "Total converted mana cost, counting generic and coloured mana "
-            "together. A card costing {2}{G} has mana value 3. Leave a bound "
-            "empty for no limit on that side."),
+            "The total cost of a card, counting coloured and generic mana "
+            "together: {2}{G} is 3. Leave a box empty for no limit on that "
+            "side."),
     },
     {
         "key": "produces",
         "category": "Mana",
         "label": "Produces",
         "tooltip": (
-            "Mana the card can actually make, from Scryfall's produced-mana "
-            "data. This is not the card's colour: Birds of Paradise is green "
-            "but produces all five, and Command Tower has no colour at all. "
-            "Includes cards whose text only says “any colour”."),
+            "The mana a card can make, which is not the same as its colour. "
+            "Birds of Paradise is green but makes all five colours, and "
+            "Command Tower is colourless but makes any of them."),
     },
     {
         "key": "stats",
         "category": "Card",
         "label": "Power / Toughness",
         "tooltip": (
-            "Printed power and toughness as numbers. Cards with variable "
-            "stats such as */* are excluded, because there is no number to "
-            "compare. Use the Properties filter for the top-heavy check."),
+            "Printed power and toughness, compared as numbers. Cards with "
+            "variable stats such as */* have no number to compare, so they "
+            "are left out."),
     },
     {
         "key": "loyalty",
         "category": "Card",
         "label": "Loyalty (Planeswalker)",
         "tooltip": (
-            "Starting loyalty printed on a planeswalker. Cards without loyalty "
-            "are excluded rather than counted as zero, so this filter always "
-            "narrows to planeswalkers."),
+            "The starting loyalty printed on a planeswalker. Only "
+            "planeswalkers have loyalty, so this filter always narrows the "
+            "search to them."),
     },
     {
         "key": "defense",
         "category": "Card",
         "label": "Defense (Battle)",
         "tooltip": (
-            "Defense printed on a battle. Separate from Loyalty because no "
-            "card has both, so combining them would always find nothing."),
+            "The defense printed on a battle. Kept separate from Loyalty "
+            "because no card has both, so combining the two would always "
+            "find nothing."),
     },
     {
         "key": "supertypes",
         "category": "Card",
         "label": "Supertypes",
         "tooltip": (
-            "Words before the dash on the type line, such as Legendary, "
-            "Basic or Snow. Vocabulary comes from the current Comprehensive "
-            "Rules, so it never contains invented words."),
+            "The words in front of the card type, such as Legendary, Basic "
+            "or Snow. Most cards have none, so this filter narrows a search "
+            "sharply."),
     },
     {
         "key": "subtype",
         "category": "Card",
         "label": "Subtype",
         "tooltip": (
-            "Words after the dash on the type line — creature types like "
-            "Goblin, land types like Island, and equipment or aura subtypes. "
-            "Only values that appear on a card in the current scope are "
-            "offered."),
+            "The words after the dash on the type line: creature types such "
+            "as Goblin, land types such as Island, and Equipment or Aura "
+            "subtypes."),
     },
     {
         "key": "mechanics",
         "category": "Card",
         "label": "Mechanics",
         "tooltip": (
-            "Named keyword abilities, keyword actions and ability words such "
-            "as Flying, Scry or Landfall. Matches Scryfall's keyword data "
-            "rather than searching rules text, so it will not match a card "
-            "that merely mentions the word."),
+            "Named abilities such as Flying, Scry or Landfall. Finds cards "
+            "that actually have the ability, not cards that merely mention "
+            "its name in their rules text."),
     },
     {
         "key": "rules_text",
         "category": "Card",
         "label": "Rules text",
         "tooltip": (
-            "Searches the full Oracle text of every face. Each chip must "
-            "appear, with other words allowed between its words; wrap a chip "
-            "in double quotes to require that exact phrase. Reminder text is "
-            "included."),
+            "Words in a card's rules text, across every face. Each entry has "
+            "to appear, with other words allowed in between; put quotes "
+            "around an entry to require that exact phrase."),
     },
     {
         "key": "traits",
         "category": "Card",
         "label": "Card traits",
         "tooltip": (
-            "Yes-or-no facts about a card that no other filter covers: "
-            "Universes Beyond, Reserved List, Commander game changers, "
-            "double-faced and other multi-face layouts, hybrid and Phyrexian "
-            "costs, and creatures whose power exceeds their toughness. Pick "
-            "the negative form to exclude instead of include."),
+            "Yes-or-no facts that no other filter covers: Universes Beyond, "
+            "Reserved List, Commander game changers, two-faced cards, hybrid "
+            "and Phyrexian costs, and creatures with more power than "
+            "toughness."),
     },
     {
         "key": "format",
         "category": "Printing",
         "label": "Format",
         "tooltip": (
-            "Cards legal or restricted in the chosen format, using the "
-            "legality data on each card. Banned and not-legal cards are "
-            "excluded. Format membership comes from the local snapshot, so a "
-            "brand-new format appears after the next database update."),
+            "Cards with the legality you choose in the format you choose: "
+            "playable, banned or restricted. Playable covers both legal and "
+            "restricted cards."),
     },
     {
         "key": "rarity",
         "category": "Printing",
         "label": "Rarity",
         "tooltip": (
-            "Rarity of the specific printing, not the card. A card printed at "
-            "both common and mythic matches either, through its separate "
-            "printings."),
+            "The rarity of an individual printing rather than of the card. A "
+            "card printed at both common and mythic can be found under "
+            "either one."),
     },
     {
         "key": "released",
         "category": "Printing",
         "label": "Released",
         "tooltip": (
-            "Year the printing was released. Bounds are inclusive, so 2015 to "
-            "2020 covers both. This is the printing's own date — an old card "
-            "in a recent set matches the recent year."),
+            "The year a printing came out, with both years included. An old "
+            "card reprinted recently matches the recent year, not the year "
+            "it was first printed."),
     },
 )
+
+# The four filters that are always present explain themselves the same way the
+# optional ones do. Their controls are built by ui/search.py, but the wording
+# belongs with every other filter's wording so the whole panel reads as one
+# voice rather than four exceptions.
+PINNED_FILTER_TOOLTIPS = {
+    "name": (
+        "Matches any card whose name contains what you type, so bolt finds "
+        "Lightning Bolt. Searching from a deck selection looks for those "
+        "exact names instead."),
+    "colors": (
+        "The colours of a card, taken from its mana cost, its rules text and "
+        "both of its faces. The row underneath decides whether those colours "
+        "must match exactly, be included, or simply not be exceeded."),
+    "card_type": (
+        "The main type on the type line, such as Creature, Instant or Land. "
+        "A card with two of them, like an Artifact Creature, matches either "
+        "one."),
+    "printings": (
+        "Which printings a search may return: platform, set type, individual "
+        "sets and language. It also decides what the other filters have to "
+        "offer, so narrowing it here narrows them too."),
+}
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}
 

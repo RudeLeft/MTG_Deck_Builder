@@ -26,8 +26,9 @@ class SearchPrintingFilter(PrintingFilter):
         )
         self._pending_restore_types = None
         self._pending_restore_codes = None
-        ttk.Label(parent, text="Printings").grid(
-            row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+        printings_label = ttk.Label(parent, text="Printings")
+        printings_label.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+        owner._add_pinned_filter_tooltip(printings_label, "printings")
         self.button = AppButton(
             parent, text="Paper only · Any set type · Any set", role="picker",
             command=self.toggle_popup)

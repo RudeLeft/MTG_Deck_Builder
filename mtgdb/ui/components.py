@@ -31,6 +31,43 @@ def deck_board_label(board):
     return "Mainboard" if board == "main" else "Sideboard"
 
 
+# Scryfall's legality keys are single lowercase words, so the obvious
+# .capitalize() renders real multi-word format names as "Paupercommander" and
+# "Standardbrawl". These are spellings only: membership still comes entirely
+# from the legality data on the cards, and an unlisted key still displays.
+_FORMAT_WORD_LABELS = {
+    "competitivebrawl": "Competitive Brawl",
+    "duel": "Duel Commander",
+    "future": "Future Standard",
+    # A short all-consonant key is an acronym, and title-casing one reads as a
+    # typo. Spell out only the expansions this build is sure of.
+    "tlr": "TLR",
+    "penny": "Penny Dreadful",
+    "oathbreaker": "Oathbreaker",
+    "oldschool": "Old School",
+    "paupercommander": "Pauper Commander",
+    "predh": "PreDH",
+    "premodern": "Premodern",
+    "standardbrawl": "Standard Brawl",
+}
+
+
+def format_display_name(value):
+    """Return the readable name for one Scryfall format key.
+
+    Shared so Search, the deck pane and the card preview cannot disagree about
+    what a format is called. An unknown key is title-cased rather than hidden:
+    a format this build has never heard of must still be selectable.
+    """
+    key = str(value or "").strip()
+    if not key:
+        return ""
+    known = _FORMAT_WORD_LABELS.get(key.casefold())
+    if known:
+        return known
+    return key.replace("_", " ").title()
+
+
 _BUTTON_STYLES = {
     "standard": "TButton",
     "primary": "Primary.TButton",

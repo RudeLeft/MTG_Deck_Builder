@@ -34,7 +34,8 @@ def main():
         db.load_cards([
             card("paper", "Trusted Goblin", "Legendary Creature — Goblin", "seta",
                  "expansion", keywords=("Lifelink",), rarity="rare",
-                 legalities={"modern": "legal", "standard": "not_legal"}),
+                 legalities={"modern": "legal", "standard": "not_legal",
+                             "vintage": "restricted", "legacy": "banned"}),
             card("digital", "Arena Equipment", "Snow Artifact — Equipment", "setb",
                  "alchemy", games=("arena",), keywords=("Ward",), rarity="mythic",
                  legalities={"alchemy": "legal"}),
@@ -138,9 +139,23 @@ def main():
                 and set(value for value, _ in db.keyword_catalog(paper_cards, False))
                     == {"Lifelink", "Ward"}),
             "Formats list only playable locally backed values": (
-                db.formats(paper_cards, True) == ["modern"]
-                and set(db.formats(paper_cards, False)) == {"modern", "alchemy"}
+                db.formats(paper_cards, True) == ["modern", "vintage"]
+                and set(db.formats(paper_cards, False))
+                    == {"modern", "vintage", "alchemy"}
                 and "standard" not in db.formats(paper_cards, True)),
+            "each legality state lists only the formats that can satisfy it": (
+                # The Format picker offers one list per legality. Offering
+                # every format under Restricted offered a guaranteed-empty
+                # search, since almost no format restricts anything.
+                db.formats_by_status(paper_cards, True)
+                == {"playable": ("modern", "vintage"),
+                    "banned": ("legacy",),
+                    "restricted": ("vintage",)}
+                # An explicit platform replaces the paper scope, so Arena
+                # offers Arena's formats and none of paper's.
+                and db.formats_by_status(paper_cards, True, games=("arena",))
+                    == {"playable": ("alchemy",), "banned": (),
+                        "restricted": ()}),
             "Format picker has no hardcoded preferred vocabulary": (
                 "FORMATS =" not in constants_source
                 and "FORMATS" not in taxonomy_source),
@@ -222,7 +237,8 @@ def main():
             and "printings" not in FILTER_BY_KEY),
         "optional filter labels match primary Search field typography": (
             'label = ttk.Label(frame, text=definition["label"])' in search_source
-            and 'text="Printings").grid(' in printing_source
+            and 'printings_label = ttk.Label(parent, text="Printings")'
+            in printing_source
             and 'text="Content", style="Section.TLabel"' not in search_source
             and 'text="Subtype", style="Section.TLabel"' not in search_source
             and 'text="Format", style="Section.TLabel"' not in search_source

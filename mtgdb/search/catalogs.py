@@ -19,6 +19,7 @@ log = logging.getLogger("mtg")
 class SearchCatalogSnapshot:
     content_types: tuple[str, ...]
     paper_only: bool
+    games: tuple[str, ...]
     selected_set_types: tuple[str, ...]
     card_types: tuple
     card_type_status: tuple
@@ -30,6 +31,7 @@ class SearchCatalogSnapshot:
     subtypes: tuple
     set_types: tuple
     sets: tuple
+    formats_by_status: dict
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,20 +65,25 @@ class SearchCatalogController:
         self._thread = spawn_daemon(self._run, "search-taxonomy")
 
     @staticmethod
-    def _key(content_types, paper_only, selected_set_types=()):
+    def _key(content_types, paper_only, selected_set_types=(), games=()):
         content = tuple(sorted({str(value) for value in (content_types or ()) if value}))
         if not content:
             content = ("card",)
         selected = tuple(sorted({str(value) for value in (selected_set_types or ()) if value}))
-        return content, bool(paper_only), selected
+        # Platform belongs in the key: Paper, Arena and MTGO print different
+        # sets, so a snapshot loaded for one platform describes a vocabulary
+        # the others do not have. Leaving it out let a stale paper snapshot
+        # overwrite the Arena set list the moment it arrived.
+        platforms = tuple(sorted({str(value) for value in (games or ()) if value}))
+        return content, bool(paper_only), platforms, selected
 
     @property
     def generation(self):
         with self._condition:
             return self._generation
 
-    def request(self, content_types, paper_only, selected_set_types=()):
-        key = self._key(content_types, paper_only, selected_set_types)
+    def request(self, content_types, paper_only, selected_set_types=(), games=()):
+        key = self._key(content_types, paper_only, selected_set_types, games)
         with self._condition:
             if self._closed:
                 raise RuntimeError("Search catalog controller is closed")
@@ -100,8 +107,8 @@ class SearchCatalogController:
         self._clear_events()
 
     def _cached_snapshot_locked(self, key):
-        content, paper_only, selected = key
-        base_key = (content, paper_only)
+        content, paper_only, platforms, selected = key
+        base_key = (content, paper_only, platforms)
         base = self._base_cache.get(base_key)
         sets = self._set_cache.get(key)
         if base is None or sets is None:
@@ -112,17 +119,18 @@ class SearchCatalogController:
 
     @staticmethod
     def _snapshot(key, base, sets):
-        content, paper_only, selected = key
+        content, paper_only, platforms, selected = key
         return SearchCatalogSnapshot(
-            content, paper_only, selected,
+            content, paper_only, platforms, selected,
             tuple(base["card_types"]), tuple(base["card_type_status"]),
             tuple(base["supertypes"]), tuple(base["supertype_status"]),
             tuple(base["formats"]), tuple(base["rarities"]),
             tuple(base["keywords"]), tuple(base["subtypes"]),
             tuple(base["set_types"]), tuple(sets),
+            dict(base["formats_by_status"]),
         )
 
-    def _load_base(self, content, paper_only):
+    def _load_base(self, content, paper_only, platforms=()):
         def safe(label, call, default):
             try:
                 return call()
@@ -149,13 +157,20 @@ class SearchCatalogController:
             "subtypes": safe(
                 "subtype", lambda: self.repository.subtype_catalog(content, paper_only), []),
             "set_types": safe(
-                "set-type", lambda: self.repository.set_types(content, paper_only), []),
+                "set-type",
+                lambda: self.repository.set_types(
+                    content, paper_only, games=platforms or None), []),
+            "formats_by_status": safe(
+                "format legality",
+                lambda: self.repository.formats_by_status(
+                    content, paper_only, games=platforms or None), {}),
         }
 
-    def _load_sets(self, content, paper_only, selected):
+    def _load_sets(self, content, paper_only, selected, platforms=()):
         try:
             return self.repository.sets(
-                list(selected) or None, content_types=content, paper_only=paper_only)
+                list(selected) or None, content_types=content,
+                paper_only=paper_only, games=platforms or None)
         except Exception:
             log.exception("Could not load exact-set catalog")
             return []
@@ -169,16 +184,17 @@ class SearchCatalogController:
                     return
                 generation, key = self._pending
                 self._pending = None
-                content, paper_only, selected = key
-                base_key = (content, paper_only)
+                content, paper_only, platforms, selected = key
+                base_key = (content, paper_only, platforms)
                 base = self._base_cache.get(base_key)
                 sets = self._set_cache.get(key)
             started = time.perf_counter()
             try:
                 if base is None:
-                    base = self._load_base(content, paper_only)
+                    base = self._load_base(content, paper_only, platforms)
                 if sets is None:
-                    sets = self._load_sets(content, paper_only, selected)
+                    sets = self._load_sets(
+                        content, paper_only, selected, platforms)
                 snapshot = self._snapshot(key, base, sets)
                 kind = "done"
                 payload = snapshot

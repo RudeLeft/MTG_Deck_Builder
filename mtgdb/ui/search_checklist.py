@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from tkinter import ttk
 
@@ -11,6 +12,8 @@ from mtgdb.ui.components import (
 from mtgdb.ui.tokens import (
     FONT_DIALOG_TITLE, FONT_HELPER, PALETTE, POPUP_PADDING,
 )
+
+log = logging.getLogger("mtg")
 
 
 class VirtualChecklistView(tk.Frame):
@@ -325,12 +328,16 @@ class SearchChecklistDialog:
 
     def __init__(self, owner, *, title, values, selected, apply_callback,
                  mode_var=None, mode_default="any", mode_label="Selected values:",
-                 mode_choices=None,
+                 mode_choices=None, mode_command=None,
                  help_text="Type to narrow the list.", single_select=False):
         self.owner = owner
         self.title = title
         self.apply_callback = apply_callback
         self.mode_var = mode_var
+        # Some modes change what there is to choose from rather than how the
+        # choice is read: no format restricts anything outside Vintage-like
+        # formats, so Restricted must re-ask the owner for its list.
+        self.mode_command = mode_command
         self.single_select = single_select
         p = PALETTE
 
@@ -371,7 +378,8 @@ class SearchChecklistDialog:
             for label, value in (mode_choices or self.MODE_CHOICES):
                 radio = ttk.Radiobutton(
                     mode, text=label, variable=self.popup_mode, value=value,
-                    style="DialogChoice.TRadiobutton")
+                    style="DialogChoice.TRadiobutton",
+                    command=self._on_mode_changed)
                 radio.pack(side="left", padx=(7, 0))
                 meaning = meanings.get(value)
                 if meaning:
@@ -413,13 +421,16 @@ class SearchChecklistDialog:
         self.show(
             title=title, values=values, selected=selected,
             apply_callback=apply_callback, mode_var=mode_var,
-            mode_default=mode_default, mode_label=mode_label, help_text=help_text)
+            mode_default=mode_default, mode_label=mode_label,
+            help_text=help_text, mode_command=mode_command)
 
     def show(self, *, title, values, selected, apply_callback, mode_var=None,
-             mode_default="any", mode_label="Selected values:", help_text=""):
+             mode_default="any", mode_label="Selected values:", help_text="",
+             mode_command=None):
         self.title = title
         self.apply_callback = apply_callback
         self.mode_var = mode_var
+        self.mode_command = mode_command
         self.popup.title(title)
         self._title_label.configure(text=title.upper())
         self._help_label.configure(text=help_text)
@@ -447,6 +458,19 @@ class SearchChecklistDialog:
         self.owner._present_hidden_popup(
             self.popup, preferred_width=560, preferred_height=preferred_height,
             min_width=560, min_height=330, lock_size=True, focus=self.find, grab=True)
+
+    def _on_mode_changed(self):
+        """Re-ask the owner for the values this mode can actually offer."""
+        command = self.mode_command
+        if command is None:
+            return
+        try:
+            values, selected = command(self.popup_mode.get())
+        except Exception:
+            log.exception("Could not rescope picker values for a mode change")
+            return
+        self.list_view.set_values(values, selected=selected)
+        self.list_view.filter(self.find_var.get())
 
     def close(self):
         popup = self.popup
@@ -510,6 +534,7 @@ def open_search_checklist(owner, **options):
             mode_default=options.get("mode_default", "any"),
             mode_label=options.get("mode_label", "Selected values:"),
             help_text=options.get("help_text", "Type to narrow the list."),
+            mode_command=options.get("mode_command"),
         )
     owner._active_search_checklist = dialog
     return dialog

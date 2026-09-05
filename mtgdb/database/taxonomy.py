@@ -118,6 +118,42 @@ class CardTaxonomyMixin:
                 f"AND {scope}", params).fetchall()
         return self._preferred_values((row["rarity"] for row in rows), RARITIES)
 
+    def formats_by_status(self, content_types=None, paper_only=False,
+                          games=None):
+        """Formats that have at least one scoped card in each legality state.
+
+        The Format picker offers one list per legality, so a state that no
+        format can satisfy is never offered: only Vintage and Old School
+        restrict anything, and listing every format under Restricted sent the
+        user to a guaranteed-empty result. One grouped scan answers all three
+        states, because the scan itself is the expensive part.
+        """
+        scope, scope_params = self._scope(
+            content_types, paper_only, prefix="cards.", games=games)
+        grouped = {"playable": set(), "banned": set(), "restricted": set()}
+        try:
+            with self._lock:
+                rows = self.conn.execute(
+                    "SELECT DISTINCT legal.key AS format, legal.value AS status "
+                    "FROM cards, json_each(COALESCE(cards.legalities, '{}')) AS legal "
+                    "WHERE legal.key IS NOT NULL AND legal.key <> '' "
+                    f"AND {scope}", scope_params).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for row in rows:
+            name = str(row["format"] or "")
+            status = str(row["status"] or "").casefold()
+            if not name:
+                continue
+            if status in PLAYABLE_LEGALITY_STATUSES:
+                grouped["playable"].add(name)
+            if status in grouped:
+                grouped[status].add(name)
+        return {
+            state: tuple(sorted(values, key=str.casefold))
+            for state, values in grouped.items()
+        }
+
     def formats(self, content_types=None, paper_only=False):
         """Formats with at least one playable scoped card (legal or restricted)."""
         scope, scope_params = self._scope(content_types, paper_only, prefix="cards.")

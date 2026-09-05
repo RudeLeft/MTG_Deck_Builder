@@ -75,7 +75,7 @@ mtgdb/
     repository.py        #   search DB gateway, narrow projection, suggestions, catalogs
     controller.py        #   query worker lifecycle, generations/invalidation, terminal-event queue, cache
     results.py           #   compact SearchResultStore, pure table semantics, async view/vocabulary preparation
-    catalogs.py          #   bounded trusted-taxonomy snapshots + latest-wins async discovery
+    catalogs.py          #   bounded platform-scoped taxonomy snapshots + latest-wins async discovery
   deck/                  # deck domain (Tk-free, no sqlite)
     model.py             #   Deck: exact-printing entries, quantities, board mutations
     io.py                #   portable TXT serialization, atomic save + section parsing
@@ -193,7 +193,7 @@ only in the module that owns X.
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
 | `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, terminal-event queue, bounded cache |
 | `mtgdb/search/results.py` | Compact immutable Search result rows/store, exact-printing hydration cache, pure table value/filter/sort semantics, complete logical view indexes, generation-protected Results and vocabulary preparation |
-| `mtgdb/search/catalogs.py` | Bounded Content/Paper/Set-Type trusted-taxonomy snapshot caches and latest-wins background catalog discovery |
+| `mtgdb/search/catalogs.py` | Bounded Content/Platform/Paper/Set-Type trusted-taxonomy snapshot caches and latest-wins background catalog discovery |
 | `mtgdb/deck/model.py` | Exact-printing deck state, quantities, board mutations, entry access, compat delegation |
 | `mtgdb/deck/io.py` | Portable TXT serialization, atomic user-selected TXT save, section parsing, printing tags, resolver import |
 | `mtgdb/deck/file_jobs.py` | Tk-free daemon submission wrapper for deck import/save/export file work |
@@ -219,12 +219,12 @@ only in the module that owns X.
 | `mtgdb/ui/tokens.py` | Palette, typography, spacing, control metrics, comparison metrics, icon sizes |
 | `mtgdb/ui/styles.py` | Global ttk theme registration and ttk state appearance |
 | `mtgdb/ui/assets.py` | Bundled-asset path resolution (source and frozen) and shared PIL availability |
-| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, tooltips, shared display vocabulary such as the Mainboard/Sideboard board label |
+| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, tooltips, shared display vocabulary such as the Mainboard/Sideboard board label and format display names |
 | `mtgdb/ui/autocomplete.py` | Hidden-first autocomplete-popup lifecycle/navigation plus the current `AutocompleteEntry` control |
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
 | `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
 | `mtgdb/ui/search.py` | Trusted Search layout/state: primary Card Type/Supertypes/Colors/numeric/Mechanics filters, Advanced Content/Rules Text/Subtype/Format/Rarity/Printings coordination and alignment, validated criteria, exact-name presets, complete Clear, strict workspace restore, summaries |
-| `mtgdb/ui/search_filters.py` | Optional Search filter registry: category, label, and match-explaining tooltip for each on-demand filter, plus catalogue ordering |
+| `mtgdb/ui/search_filters.py` | Search filter registry: category, label, and match-explaining tooltip for each on-demand filter, the pinned filters' tooltips, plus catalogue ordering |
 | `mtgdb/ui/search_printings.py` | Search adaptation of the shared Printings component: Search button/summary wiring, Search-owned callbacks, Search English/content scope |
 | `mtgdb/ui/search_checklist.py` | Hidden-first reusable searchable virtual choice dialog for taxonomy/format/rarity pickers; multi-select uses checkboxes and single-select uses radio controls |
 | `mtgdb/ui/set_filters.py` | Shared `PrintingFilter` controller/popup for Paper-only, English, observed Set Type, cascading Exact Set state/lifecycle, bounded two-column Exact Set virtualization, shared catalog enable/disable state, and set-type rendering/shell primitives; no product grouping/default taxonomy |
@@ -264,7 +264,7 @@ have at least two routing examples.
 | `mtgdb/search/repository.py` | add a card field required by broad Results rows<br>change Search name-suggestion or filter-catalog gateway behavior | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/search/models.py` | Keep SQL in database owners and Tk in UI owners. |
 | `mtgdb/search/controller.py` | change Search cache or unchanged-search behavior<br>change generation invalidation, stale-event rejection, or worker queue lifecycle | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Do not read widgets or construct SQL here. |
 | `mtgdb/search/results.py` | change compact broad-result storage, exact-printing hydration, or logical result indexes<br>change Tk-free Results filter/sort preparation or complete-set column vocabulary generation | `mtgdb/search/repository.py`; `mtgdb/ui/results.py`; `mtgdb/ui/table_filters.py`; `mtgdb/ui/tables.py` | Never import Tk or make one UI row authoritative for logical result data. |
-| `mtgdb/search/catalogs.py` | change trusted Search-taxonomy snapshot cache bounds or scope keys<br>change latest-wins background discovery for Content, Paper, or Set Type scopes | `mtgdb/search/repository.py`; `mtgdb/ui/search.py`; `mtgdb/ui/search_printings.py`; `mtgdb/ui/database_sync.py` | Do not invent vocabulary or touch Tk; repository taxonomy remains authoritative. |
+| `mtgdb/search/catalogs.py` | change trusted Search-taxonomy snapshot cache bounds or scope keys<br>change latest-wins background discovery for Content, Platform, Paper, or Set Type scopes | `mtgdb/search/repository.py`; `mtgdb/ui/search.py`; `mtgdb/ui/search_printings.py`; `mtgdb/ui/database_sync.py` | Do not invent vocabulary or touch Tk; repository taxonomy remains authoritative. |
 | `mtgdb/deck/model.py` | change card quantity or board-move invariants<br>change exact-printing deck entry identity/access behavior | `mtgdb/deck/io.py`; `mtgdb/deck/sessions.py`; `mtgdb/ui/deck.py` | File formats, UI callbacks, and legality rules have separate owners. |
 | `mtgdb/deck/io.py` | change portable TXT syntax or printing tags<br>change atomic TXT save, section parsing, or resolver-driven import | `mtgdb/deck/model.py`; `mtgdb/database/queries.py`; `mtgdb/ui/deck_files.py` | Do not open Tk dialogs or own database ranking here. |
 | `mtgdb/deck/file_jobs.py` | change daemon execution/future completion for deck import/save/export work<br>change background exception propagation for deck file jobs | `mtgdb/core/background_jobs.py`; `mtgdb/ui/deck_files.py` | Never import Tk or own deck format semantics; this is execution plumbing only. |
@@ -295,7 +295,7 @@ have at least two routing examples.
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
 | `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Legality/Rotate/Zoom actions, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
 | `mtgdb/ui/search.py` | add/change trusted primary/Advanced Search controls, criteria capture, or scoped taxonomy refresh<br>change strict workspace restore, filter summaries, complete Clear/reset, callbacks, Rules Text editing semantics, or exact-name presets | `mtgdb/search/models.py`; `mtgdb/search/controller.py`; `mtgdb/search/repository.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/search_queries.py` | Shared printing/set state belongs in `ui/set_filters.py` with Search adaptation in `ui/search_printings.py`; UI MUST consume taxonomy vocabulary, never invent/restore it; missing stored fields route through schema/import first. |
-| `mtgdb/ui/search_filters.py` | add an optional on-demand Search filter or change its category/label<br>change an optional filter's tooltip wording or the catalogue ordering | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
+| `mtgdb/ui/search_filters.py` | add an optional on-demand Search filter or change its category/label<br>change any Search filter's tooltip wording, pinned or optional, or the catalogue ordering | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
 | `mtgdb/ui/search_printings.py` | change how Search opens/summarizes the shared Printings picker<br>change Search-specific content/language callbacks into shared printing state | `mtgdb/ui/set_filters.py`; `mtgdb/ui/search.py`; `mtgdb/database/taxonomy.py` | Paper/Set Type/Exact Set popup behavior belongs in `ui/set_filters.py`; do not duplicate the shared controller here. |
 | `mtgdb/ui/search_checklist.py` | change searchable taxonomy/format/rarity choice behavior<br>change hidden-first fixed-row virtualization, filtering, selection, columns, or dismissal | `mtgdb/ui/search.py`; `mtgdb/ui/components.py` | Keep logical values in Python and the physical choice-widget pool bounded; single-select choices use radio controls; table-column filters use `ui/table_filters.py`. |
 | `mtgdb/ui/set_filters.py` | change shared Paper-only/English/Set Type/Exact Set picker state, cascading scope, popup lifecycle, fixed-row Exact Set virtualization, shared loading enable/disable behavior, or modal/nonmodal behavior<br>change human-readable rendering or flat controls for observed Scryfall `set_type` | `mtgdb/ui/search_printings.py`; `mtgdb/ui/deck_files.py`; `mtgdb/database/taxonomy.py` | Search and Open Deck MUST compose this shared controller; subclass adapters must not duplicate common catalog-control behavior or define set-type membership/default groups. |
@@ -395,7 +395,13 @@ every feature together and is exempt.
   Playable (legal or restricted), Banned, or Restricted. Playable alone cannot
   answer whether a card is banned in the format being built, which is the
   question a deck check asks. Unknown future statuses stay diagnosed under
-  DATA-009 rather than being treated as any of these three.
+  DATA-009 rather than being treated as any of these three. The chosen state
+  MUST also scope the formats the picker offers, to those with at least one
+  scoped card in that state: almost no format restricts anything, so listing
+  all of them under Restricted offered a guaranteed-empty search. Format names
+  MUST be displayed through one shared spelling used by Search, the deck pane
+  and the card preview, because the stored keys are single lowercase words and
+  capitalizing them renders real names as "Paupercommander".
   _Verification:_ **AUTO**.
 - **SRCH-036 — MUST:** Give every Search filter mode control the shared themed
   `ListChoice.TRadiobutton` indicator, so an Any/All or Within/Contains/Exactly
@@ -524,15 +530,27 @@ every feature together and is exempt.
   that states what the filter matches; `ui/search.py` owns its control and
   builds the row when the filter is added, destroys it when removed, and
   resets the state it owned. Removing a filter MUST clear its contribution to
-  the query. `Clear` MUST remove every optional row, and workspace capture
-  MUST record both the active filter set and the values those controls hold so
-  a restored session rebuilds the same panel. _Verification:_ **AUTO**.
-- **SRCH-035 — MUST:** Give every optional filter a tooltip that says what the
+  the query and MUST return the Results viewport to its first row, because one
+  row less is a shorter form and the viewport otherwise stays scrolled to
+  where the taller panel left it. `Clear` MUST empty every optional row
+  without removing any of them: clearing a search is not the same as
+  abandoning the set of questions it was asking, and re-adding each filter by
+  hand after every Clear was the single most repeated action in the panel.
+  Workspace capture MUST record both the active filter set and the values
+  those controls hold so a restored session rebuilds the same panel.
+  _Verification:_ **AUTO**.
+- **SRCH-035 — MUST:** Give every Search filter a tooltip that says what the
   filter matches against rather than naming the control, and distinguish it
   from any neighbouring filter it could be confused with. Produces and Colors
   read different columns and Mechanics and Rules text search different data;
   a user reading only the tooltip MUST be able to tell which one answers their
-  question. _Verification:_ **AUTO**.
+  question. This covers the pinned filters too — Card Name, Card type, Colors
+  and Printings are the four a new user meets first, and leaving them silent
+  made the explained filters look like the exceptional ones. A tooltip MUST
+  NOT name a data source: "Scryfall", "the database" or "the local snapshot"
+  spend the reader's attention on something that cannot change their search.
+  Every filter's wording, pinned or optional, lives in
+  `ui/search_filters.py`. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
   column, never from colour identity or rules text. Colour identity answers a
   different question — Birds of Paradise has identity `G` and produces every
@@ -1626,7 +1644,13 @@ every feature together and is exempt.
   `paper_only` taxonomy scope is derived from that selection rather than set
   directly, so vocabulary scoping stays in step with the visible controls; a
   single boolean could only say "paper" or "everything" and could never name
-  Arena or MTGO. _Verification:_ **AUTO**.
+  Arena or MTGO. The selected platforms MUST also form part of the trusted
+  taxonomy cache key and be passed to the scoped vocabulary queries behind it.
+  Paper, Arena and MTGO print different sets, so a snapshot loaded for one
+  platform describes vocabulary the others do not have; leaving platform out
+  of the key let a paper snapshot arrive after an Arena toggle and silently
+  overwrite the Arena set list the toggle had just produced.
+  _Verification:_ **AUTO**.
 - **DATA-006 — MUST:** Preserve both B.F.M. physical printings and their
   reconstructed type data. _Verification:_ **AUTO**.
 - **DATA-007 — MUST:** Use exact JSON membership (not substring) where stored

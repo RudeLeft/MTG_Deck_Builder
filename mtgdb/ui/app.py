@@ -114,6 +114,7 @@ class DeckBuilderApp(
         self._pending_catalog_filter_state = None
         self._pending_search_request = False
         self._format_catalog = []
+        self._format_catalog_by_status = {}
         self._rarity_catalog = []
         self._card_type_catalog = []
         self._keyword_catalog = []

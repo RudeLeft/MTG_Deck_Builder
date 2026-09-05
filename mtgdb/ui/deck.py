@@ -6,7 +6,7 @@ from tkinter import messagebox, ttk
 from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession
 from mtgdb.ui.components import (
-    AppButton, AppEntry, ClassicButton, deck_board_label)
+    AppButton, AppEntry, ClassicButton, deck_board_label, format_display_name)
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 from mtgdb.ui.tokens import (
@@ -840,7 +840,7 @@ class DeckEditorMixin:
 
     def _refresh_deck_format_button(self):
         value = str(self.deck_format.get() or "").strip()
-        text = value.replace("_", " ").capitalize() if value else "Choose format…"
+        text = format_display_name(value) if value else "Choose format…"
         self._deck_format_btn.configure(text=text)
 
     def _choose_deck_format(self):
@@ -859,7 +859,7 @@ class DeckEditorMixin:
         open_search_checklist(
             self, title="Choose Deck Format",
             values=[
-                (fmt, fmt.replace("_", " ").capitalize())
+                (fmt, format_display_name(fmt))
                 for fmt in self._format_catalog
             ],
             selected=selected, apply_callback=apply,
