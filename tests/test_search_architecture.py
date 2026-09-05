@@ -377,8 +377,8 @@ def main():
         "optional filter order is registry order, not insertion order": (
             ordered_active_filters(["rules_text", "produces"])
             == ("produces", "rules_text")
-            and ordered_active_filters(["artist", "mana_cost"])
-            == ("mana_cost", "artist")
+            and ordered_active_filters(["released", "produces"])
+            == ("produces", "released")
             and ordered_active_filters(()) == ()),
         "pinned filters are never removable and never in the catalogue": (
             all(not is_removable(key) for key in PINNED_FILTERS)
@@ -389,7 +389,10 @@ def main():
             and "any colour" in tooltips["produces"]
             and "rules text" in tooltips["mechanics"]
             and "Oracle text" in tooltips["rules_text"]
-            and "corner" in tooltips["loyalty"]),
+            and "planeswalker" in tooltips["loyalty"]
+            # Loyalty and Defense are separate because no card has both;
+            # the tooltip has to say so or the split looks arbitrary.
+            and "no card has both" in tooltips["defense"]),
         "every card trait has a query clause": (
             trait_keys <= (
                 set(SearchQueryBuilder.TRAIT_CLAUSES)

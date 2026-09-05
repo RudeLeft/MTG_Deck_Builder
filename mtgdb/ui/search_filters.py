@@ -41,16 +41,6 @@ FILTER_DEFINITIONS = (
             "Includes cards whose text only says “any colour”."),
     },
     {
-        "key": "mana_cost",
-        "category": "Mana",
-        "label": "Mana cost",
-        "tooltip": (
-            "Symbols printed in the mana cost itself. Hybrid matches costs "
-            "like {W/U} or {2/G}; Phyrexian matches {R/P}; Has X matches any "
-            "cost containing {X}. Lands and other costless cards match none "
-            "of these."),
-    },
-    {
         "key": "stats",
         "category": "Card",
         "label": "Power / toughness",
@@ -62,11 +52,19 @@ FILTER_DEFINITIONS = (
     {
         "key": "loyalty",
         "category": "Card",
-        "label": "Loyalty / defense",
+        "label": "Loyalty",
         "tooltip": (
-            "Starting loyalty on planeswalkers and defense on battles — the "
-            "number printed in the lower-right corner. Cards without either "
-            "are excluded rather than treated as zero."),
+            "Starting loyalty printed on a planeswalker. Cards without loyalty "
+            "are excluded rather than counted as zero, so this filter always "
+            "narrows to planeswalkers."),
+    },
+    {
+        "key": "defense",
+        "category": "Card",
+        "label": "Defense",
+        "tooltip": (
+            "Defense printed on a battle. Separate from Loyalty because no "
+            "card has both, so combining them would always find nothing."),
     },
     {
         "key": "supertypes",
@@ -154,15 +152,6 @@ FILTER_DEFINITIONS = (
             "Year the printing was released. Bounds are inclusive, so 2015 to "
             "2020 covers both. This is the printing's own date — an old card "
             "in a recent set matches the recent year."),
-    },
-    {
-        "key": "artist",
-        "category": "Printing",
-        "label": "Artist",
-        "tooltip": (
-            "Matches any part of the credited artist name, so “proce” finds "
-            "Vincent Proce. Cards with several artists match if any of them "
-            "matches."),
     },
 )
 

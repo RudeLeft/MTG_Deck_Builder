@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import math
 import logging
 import tkinter as tk
@@ -11,7 +12,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
-    AppButton, AppEntry, AppMenubutton, AppSpinbox, ClassicCheckbutton,
+    AppButton, AppCombobox, AppMenubutton, AppSpinbox, ClassicCheckbutton,
     TokenBubbleEntry,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
@@ -34,6 +35,9 @@ SEARCH_ROW_PADY = 3
 # Keeps every optional filter label on the same x-position as the fixed
 # Advanced rows above them, so the control column does not step in and out.
 OPTIONAL_FILTER_LABEL_WIDTH = 76
+# Magic's first set through a little beyond the current printing horizon.
+RELEASE_YEAR_FIRST = 1993
+RELEASE_YEAR_LAST = datetime.date.today().year + 2
 TRAIT_CHOICES = (
     ("not_universes_beyond", "Not Universes Beyond"),
     ("universes_beyond", "Universes Beyond"),
@@ -124,7 +128,7 @@ class SearchFeatureMixin:
                 "q_toughness_min", "q_toughness_max",
                 "q_loyalty_min", "q_loyalty_max",
                 "q_defense_min", "q_defense_max",
-                "q_released_min", "q_released_max", "q_artist"):
+                "q_released_min", "q_released_max"):
             setattr(self, name, None)
 
     def _build_search_pane(self, parent):
@@ -184,7 +188,6 @@ class SearchFeatureMixin:
         "q_cmc_min", "q_cmc_max", "q_power_min", "q_power_max",
         "q_toughness_min", "q_toughness_max", "q_loyalty_min", "q_loyalty_max",
         "q_defense_min", "q_defense_max", "q_released_min", "q_released_max",
-        "q_artist",
     )
 
     def _bind_search_outside_click_selection_cleanup(self):
@@ -259,6 +262,7 @@ class SearchFeatureMixin:
         for label, value in (("Any", "any"), ("All", "all")):
             radio = ttk.Radiobutton(
                 mode, text=label, variable=self.q_card_type_mode, value=value,
+                style="ListChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, type_mode_help[value], wraplength=390)
@@ -293,6 +297,7 @@ class SearchFeatureMixin:
                              ("Exactly", "exact")):
             radio = ttk.Radiobutton(
                 colormode, text=label, variable=self.q_color_mode, value=value,
+                style="ListChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, color_mode_help[value], wraplength=390)
@@ -332,6 +337,7 @@ class SearchFeatureMixin:
                              ("Exactly", "exact")):
             radio = ttk.Radiobutton(
                 mode, text=label, variable=self.q_produces_mode, value=value,
+                style="ListChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
             radio.pack(side="left", padx=(3, 0))
             self._add_tooltip(radio, help_text[value], wraplength=390)
@@ -377,9 +383,13 @@ class SearchFeatureMixin:
         mode_box = ttk.Frame(rules_box); mode_box.grid(row=1, column=0, sticky="w", pady=(1, 0))
         ttk.Label(mode_box, text="Rules text:").pack(side="left", padx=(0, 4))
         self.q_rules_mode = tk.StringVar(value="all")
-        rules_all = ttk.Radiobutton(mode_box, text="All", variable=self.q_rules_mode, value="all")
+        rules_all = ttk.Radiobutton(
+            mode_box, text="All", variable=self.q_rules_mode, value="all",
+            style="ListChoice.TRadiobutton")
         rules_all.pack(side="left")
-        rules_any = ttk.Radiobutton(mode_box, text="Any", variable=self.q_rules_mode, value="any")
+        rules_any = ttk.Radiobutton(
+            mode_box, text="Any", variable=self.q_rules_mode, value="any",
+            style="ListChoice.TRadiobutton")
         rules_any.pack(side="left", padx=(4, 0))
         self._add_tooltip(
             rules_all, "All: every Rules Text chip must match the card.")
@@ -445,51 +455,49 @@ class SearchFeatureMixin:
             help_text="Choose one or several card traits.")
 
     def _build_filter_loyalty(self, parent):
-        box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="w", pady=2)
-        ttk.Label(box, text="Loyalty", style="Muted.TLabel").pack(
-            side="left", padx=(0, 5))
-        self._numeric_pair(box, "q_loyalty").pack(side="left")
-        ttk.Label(box, text="Defense", style="Muted.TLabel").pack(
-            side="left", padx=(14, 5))
-        self._numeric_pair(box, "q_defense").pack(side="left")
+        self._numeric_pair(parent, "q_loyalty").grid(
+            row=0, column=1, sticky="w", pady=2)
 
     def _reset_filter_loyalty(self):
-        for name in ("q_loyalty_min", "q_loyalty_max",
-                     "q_defense_min", "q_defense_max"):
-            setattr(self, name, None)
+        self.q_loyalty_min = None
+        self.q_loyalty_max = None
+
+    def _build_filter_defense(self, parent):
+        self._numeric_pair(parent, "q_defense").grid(
+            row=0, column=1, sticky="w", pady=2)
+
+    def _reset_filter_defense(self):
+        self.q_defense_min = None
+        self.q_defense_max = None
 
     def _build_filter_released(self, parent):
-        pair = self._numeric_pair(parent, "q_released", width=6)
-        pair.grid(row=0, column=1, sticky="w", pady=2)
+        """Year pickers rather than spinners.
+
+        A release year is chosen from a known list, not dialled to; a spinner
+        invites holding an arrow through thirty years of Magic.
+        """
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        years = [""] + [str(year) for year in
+                        range(RELEASE_YEAR_LAST, RELEASE_YEAR_FIRST - 1, -1)]
+        self.q_released_min = AppCombobox(
+            box, values=years, width=7, state="readonly")
+        self.q_released_min.set("")
+        self.q_released_min.pack(side="left")
+        ttk.Label(box, text="to", style="Muted.TLabel").pack(
+            side="left", padx=5)
+        self.q_released_max = AppCombobox(
+            box, values=years, width=7, state="readonly")
+        self.q_released_max.set("")
+        self.q_released_max.pack(side="left")
+        for widget in (self.q_released_min, self.q_released_max):
+            widget.bind(
+                "<<ComboboxSelected>>",
+                lambda _event: self._update_search_filter_summary(), add="+")
 
     def _reset_filter_released(self):
         self.q_released_min = None
         self.q_released_max = None
-
-    def _build_filter_artist(self, parent):
-        self.q_artist = AppEntry(parent)
-        self.q_artist.grid(row=0, column=1, sticky="ew", pady=2)
-
-    def _reset_filter_artist(self):
-        self.q_artist = None
-
-    def _build_filter_mana_cost(self, parent):
-        box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="w", pady=2)
-        self.cost_feature_vars = {}
-        for key, label in (("hybrid_mana", "Hybrid"),
-                           ("phyrexian_mana", "Phyrexian"),
-                           ("has_x_cost", "Has X")):
-            variable = tk.BooleanVar(value=False)
-            self.cost_feature_vars[key] = variable
-            ttk.Checkbutton(
-                box, text=" " + label, variable=variable,
-                command=self._update_search_filter_summary).pack(
-                    side="left", padx=(0, 10))
-
-    def _reset_filter_mana_cost(self):
-        self.cost_feature_vars = {}
 
     @staticmethod
     def _set_picker_text(button, text):
@@ -535,7 +543,7 @@ class SearchFeatureMixin:
 
     OPTIONAL_TEXT_FIELDS = (
         "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
-        "q_released_min", "q_released_max", "q_artist",
+        "q_released_min", "q_released_max",
     )
 
     def _capture_optional_filter_values(self):
@@ -552,25 +560,26 @@ class SearchFeatureMixin:
         return {name: value for name, value in values.items() if value}
 
     def _restore_optional_filter_values(self, values):
-        """Refill optional controls after their rows have been rebuilt."""
+        """Refill optional controls after their rows have been rebuilt.
+
+        A readonly combobox rejects delete/insert, so anything offering set()
+        is restored through it and only entry-style widgets are edited.
+        """
         for name, value in dict(values or {}).items():
             widget = getattr(self, name, None)
             if widget is None or name not in self.OPTIONAL_TEXT_FIELDS:
                 continue
             try:
-                widget.delete(0, "end")
-                widget.insert(0, str(value))
+                if isinstance(widget, ttk.Combobox):
+                    widget.set(str(value))
+                else:
+                    widget.delete(0, "end")
+                    widget.insert(0, str(value))
             except tk.TclError:
                 continue
 
     def _selected_trait_keys(self):
         keys = set(getattr(self, "_selected_traits", set()) or ())
-        for key, variable in (getattr(self, "cost_feature_vars", {}) or {}).items():
-            try:
-                if variable.get():
-                    keys.add(key)
-            except tk.TclError:
-                continue
         return tuple(sorted(keys))
 
     # ------------------------------------------------------------------
@@ -1436,10 +1445,6 @@ class SearchFeatureMixin:
             bounds = [value for value in bounds if value]
             if bounds:
                 parts.append(f"{label}: " + "-".join(bounds))
-        artist = (str(self.q_artist.get()).strip()
-                  if getattr(self, "q_artist", None) is not None else "")
-        if artist:
-            parts.append(f"Artist: {artist}")
         if self._selected_keywords:
             parts.append("Mechanics: " + ", ".join(sorted(self._selected_keywords)))
         rules = self._rules_text_values(commit_pending=False)
@@ -1529,10 +1534,6 @@ class SearchFeatureMixin:
             "produces_mode": self.q_produces_mode.get(),
             "optional_filters": list(self._active_optional_filters()),
             "optional_values": self._capture_optional_filter_values(),
-            "cost_features": sorted(
-                key for key, variable
-                in (getattr(self, "cost_feature_vars", {}) or {}).items()
-                if variable.get()),
             "traits": sorted(
                 getattr(self, "_selected_traits", set()) or ()),
             "card_types": card_types,
@@ -1661,9 +1662,6 @@ class SearchFeatureMixin:
                 {TRAIT_LABELS[key] for key in self._selected_traits},
                 "Any", "traits", max_visible=10, single_line=True))
         self._restore_optional_filter_values(state.get("optional_values", {}))
-        wanted_costs = {str(value) for value in state.get("cost_features", []) or ()}
-        for key, variable in (getattr(self, "cost_feature_vars", {}) or {}).items():
-            variable.set(key in wanted_costs)
 
         for widget, key in (
             (self.q_cmc_min, "cmc_min"), (self.q_cmc_max, "cmc_max"),
@@ -1795,8 +1793,6 @@ class SearchFeatureMixin:
             defense_max=self._optional_numeric(getattr(self, "q_defense_max", None)),
             released_from=self._optional_numeric(getattr(self, "q_released_min", None)),
             released_to=self._optional_numeric(getattr(self, "q_released_max", None)),
-            artist=(str(self.q_artist.get()).strip()
-                    if getattr(self, "q_artist", None) is not None else ""),
             cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
             power_min=numeric["power_min"], power_max=numeric["power_max"],
             toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],

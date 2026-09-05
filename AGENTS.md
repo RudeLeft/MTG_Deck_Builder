@@ -384,6 +384,13 @@ every feature together and is exempt.
   `mtgdb.ui.*` imports remain unrestricted. `mtgdb/ui/app.py` is exempt as the
   composition root, and the empty `mtgdb/ui/__init__.py` holds no imports to
   place. _Verification:_ **AUTO**.
+- **SRCH-036 — MUST:** Give every Search filter mode control the shared themed
+  `ListChoice.TRadiobutton` indicator, so an Any/All or Within/Contains/Exactly
+  choice reads the same as the deck format picker: hollow when unselected and
+  gold when selected. The clam default draws a sunken square that matches
+  nothing else in the application. Keep a filter whose bounds cannot coexist on
+  one card in separate rows — Loyalty and Defense share no card, so combining
+  them in one filter always returned nothing. _Verification:_ **AUTO**.
 
 ## Naming and placement
 
