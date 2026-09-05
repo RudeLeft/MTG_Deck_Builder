@@ -384,6 +384,19 @@ every feature together and is exempt.
   `mtgdb.ui.*` imports remain unrestricted. `mtgdb/ui/app.py` is exempt as the
   composition root, and the empty `mtgdb/ui/__init__.py` holds no imports to
   place. _Verification:_ **AUTO**.
+- **SRCH-037 — MUST:** Offer `None` beside `Any`/`All` on every multi-select
+  Search picker, excluding each card matching any selected value. Without it no
+  filter can be inverted: a green non-creature or a creature without flying was
+  unreachable, and the only negations available were hand-built trait pairs
+  such as `Not Universes Beyond`, added one at a time because the general form
+  did not exist. `None` MUST be the exact complement of `Any` over the same
+  selection. _Verification:_ **AUTO**.
+- **SRCH-038 — MUST:** Let the Format filter choose its legality state:
+  Playable (legal or restricted), Banned, or Restricted. Playable alone cannot
+  answer whether a card is banned in the format being built, which is the
+  question a deck check asks. Unknown future statuses stay diagnosed under
+  DATA-009 rather than being treated as any of these three.
+  _Verification:_ **AUTO**.
 - **SRCH-036 — MUST:** Give every Search filter mode control the shared themed
   `ListChoice.TRadiobutton` indicator, so an Any/All or Within/Contains/Exactly
   choice reads the same as the deck format picker: hollow when unselected and

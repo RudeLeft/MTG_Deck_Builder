@@ -212,6 +212,28 @@ def main():
             len(_opt(traits=["reserved", "single_faced"], trait_mode="any"))
             >= len(_opt(traits=["reserved", "single_faced"], trait_mode="all")))
 
+        # SRCH-037. Negation was the largest remaining gap: nothing could ask
+        # for a green non-creature, which is why hand-built negative traits
+        # existed. "none" must be the exact complement of "any".
+        creatures = _opt(card_types=["Creature"], card_type_mode="any")
+        non_creatures = _opt(card_types=["Creature"], card_type_mode="none")
+        negation_is_complementary = (
+            creatures and non_creatures
+            and not (creatures & non_creatures)
+            and creatures | non_creatures == _opt())
+        keyword_negation = (
+            "Second Bird" in _opt(keywords=["Flying"], keyword_mode="none")
+            and "First Bird" not in _opt(keywords=["Flying"], keyword_mode="none"))
+        trait_negation = (
+            _opt(traits=["single_faced"], trait_mode="none") == set())
+
+        # SRCH-038. Playable is legal-or-restricted; banned and restricted are
+        # the states a deck check asks about.
+        legality_states_are_distinct = (
+            "First Bird" in _opt(fmt="modern", fmt_status="playable")
+            and _opt(fmt="modern", fmt_status="banned") == set()
+            and _opt(fmt="modern", fmt_status="restricted") == set())
+
         def _produces(values, mode):
             return {row["name"] for row in db.search(
                 produces=list(values), produces_mode=mode,
@@ -381,6 +403,12 @@ def main():
             search_source, "_set_search_entry_text"))
 
     checks = {
+        "none mode is the exact complement of any": (
+            negation_is_complementary),
+        "mechanics and traits can be negated too": (
+            keyword_negation and trait_negation),
+        "format legality states are separately reachable": (
+            legality_states_are_distinct),
         "printing type re-scopes the set vocabulary": (
             platform_scopes_the_vocabulary),
         "card traits combine with Any by default": (

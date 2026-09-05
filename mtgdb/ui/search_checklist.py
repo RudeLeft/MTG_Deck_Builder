@@ -321,8 +321,11 @@ class SearchChecklistDialog:
 
     ROW_POOL = VirtualChecklistView.ROW_POOL
 
+    MODE_CHOICES = (("Any", "any"), ("All", "all"), ("None", "none"))
+
     def __init__(self, owner, *, title, values, selected, apply_callback,
                  mode_var=None, mode_default="any", mode_label="Selected values:",
+                 mode_choices=None,
                  help_text="Type to narrow the list.", single_select=False):
         self.owner = owner
         self.title = title
@@ -357,15 +360,22 @@ class SearchChecklistDialog:
                 font=FONT_HELPER)
             self._mode_label.pack(side="left")
             scope = mode_label.rstrip(":").lower()
-            for label, value in (("Any", "any"), ("All", "all")):
+            meanings = {
+                "any": f"Any: a card only needs to match one of the selected {scope}.",
+                "all": f"All: a card must match every selected {scope}.",
+                "none": f"None: exclude every card matching any of the selected {scope}.",
+                "playable": "Playable: legal or restricted in the chosen format.",
+                "banned": "Banned: explicitly banned in the chosen format.",
+                "restricted": "Restricted: limited to one copy in the chosen format.",
+            }
+            for label, value in (mode_choices or self.MODE_CHOICES):
                 radio = ttk.Radiobutton(
                     mode, text=label, variable=self.popup_mode, value=value,
                     style="ListChoice.TRadiobutton")
                 radio.pack(side="left", padx=(7, 0))
-                meaning = (f"Any: a card only needs to match one of the selected {scope}."
-                           if value == "any" else
-                           f"All: a card must match every selected {scope}.")
-                owner._add_tooltip(radio, meaning)
+                meaning = meanings.get(value)
+                if meaning:
+                    owner._add_tooltip(radio, meaning)
 
         self.find_var = tk.StringVar(master=owner)
         self.find = ClassicEntry(outer, textvariable=self.find_var)

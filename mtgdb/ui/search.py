@@ -35,6 +35,10 @@ SEARCH_ROW_PADY = 3
 # Keeps every optional filter label on the same x-position as the fixed
 # Advanced rows above them, so the control column does not step in and out.
 OPTIONAL_FILTER_LABEL_WIDTH = 76
+FORMAT_STATUS_CHOICES = (
+    ("Playable", "playable"), ("Banned", "banned"),
+    ("Restricted", "restricted"),
+)
 # Magic's first set through a little beyond the current printing horizon.
 RELEASE_YEAR_FIRST = 1993
 RELEASE_YEAR_LAST = datetime.date.today().year + 2
@@ -112,6 +116,9 @@ class SearchFeatureMixin:
         self.q_subtype_mode = tk.StringVar(value="any")
         self._selected_rarities = set()
         self.q_format = tk.StringVar(value="")
+        # Playable is legal-or-restricted. Banned and restricted are the
+        # states a deck check asks about and nothing could previously reach.
+        self.q_format_status = tk.StringVar(value="playable")
         self.q_rules_mode = tk.StringVar(value="all")
         self._selected_traits = set()
         # Traits combine with Any by default, like Subtype and Mechanics.
@@ -737,6 +744,7 @@ class SearchFeatureMixin:
 
     def _reset_filter_format(self):
         self.q_format.set("")
+        self.q_format_status.set("playable")
         self._format_btn = None
 
     def _build_filter_rarity(self, parent):
@@ -1104,13 +1112,14 @@ class SearchFeatureMixin:
                                   mode_var=None, mode_default="any",
                                   mode_label="Selected values:",
                                   help_text="Type to narrow the list.",
-                                  single_select=False):
+                                  single_select=False, mode_choices=None):
         """Open the reusable hidden-first, batch-rendered search picker."""
         return open_search_checklist(
             self, title=title, values=values, selected=selected,
             apply_callback=apply_callback, mode_var=mode_var,
             mode_default=mode_default, mode_label=mode_label,
-            help_text=help_text, single_select=single_select)
+            help_text=help_text, single_select=single_select,
+            mode_choices=mode_choices)
 
 
     def _choose_subtypes(self):
@@ -1176,7 +1185,10 @@ class SearchFeatureMixin:
             selected,
             apply,
             help_text="Choose the format cards must be legal in.",
-            single_select=True)
+            single_select=True,
+            mode_var=self.q_format_status,
+            mode_label="Legality:",
+            mode_choices=FORMAT_STATUS_CHOICES)
 
     def _choose_rarities(self):
         def apply(chosen):
@@ -1527,6 +1539,7 @@ class SearchFeatureMixin:
             "color_mode": self.q_color_mode.get(),
             "produces_mode": self.q_produces_mode.get(),
             "trait_mode": self.q_trait_mode.get(),
+            "format_status": self.q_format_status.get(),
             "optional_filters": list(self._active_optional_filters()),
             "optional_values": self._capture_optional_filter_values(),
             "traits": sorted(
@@ -1630,15 +1643,21 @@ class SearchFeatureMixin:
 
         safe_modes = (
             (self.q_rules_mode, state.get("rules_mode"), {"all", "any"}, "all"),
-            (self.q_card_type_mode, state.get("card_type_mode"), {"all", "any"}, "any"),
+            (self.q_card_type_mode, state.get("card_type_mode"),
+             {"all", "any", "none"}, "any"),
             (self.q_supertype_mode, state.get("supertype_mode", state.get("characteristic_mode")),
-             {"all", "any"}, "all"),
-            (self.q_subtype_mode, state.get("subtype_mode"), {"all", "any"}, "any"),
-            (self.q_keyword_mode, state.get("keyword_mode"), {"all", "any"}, "any"),
+             {"all", "any", "none"}, "all"),
+            (self.q_subtype_mode, state.get("subtype_mode"),
+             {"all", "any", "none"}, "any"),
+            (self.q_keyword_mode, state.get("keyword_mode"),
+             {"all", "any", "none"}, "any"),
             (self.q_color_mode, state.get("color_mode"), {"within", "includes", "exact"}, "within"),
             (self.q_produces_mode, state.get("produces_mode"),
              {"within", "includes", "exact"}, "includes"),
-            (self.q_trait_mode, state.get("trait_mode"), {"any", "all"}, "any"),
+            (self.q_trait_mode, state.get("trait_mode"),
+             {"any", "all", "none"}, "any"),
+            (self.q_format_status, state.get("format_status"),
+             {"playable", "banned", "restricted"}, "playable"),
         )
         for variable, value, allowed, default in safe_modes:
             variable.set(value if value in allowed else default)
@@ -1802,6 +1821,7 @@ class SearchFeatureMixin:
             toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],
             rarities=sorted(self._selected_rarities),
             fmt=self.q_format.get().strip(),
+            fmt_status=self.q_format_status.get(),
             set_codes=sorted(self._search_printings.selected_set_codes()) or None,
             set_types=sorted(self._search_printings.selected_set_types()) or None,
             lang=("en" if self.english_only.get() else ""),

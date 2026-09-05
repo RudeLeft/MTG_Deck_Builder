@@ -56,6 +56,7 @@ class SearchCriteria:
     games: tuple[str, ...] = ()
     rarities: tuple[str, ...] = ()
     fmt: str = ""
+    fmt_status: str = "playable"
     set_codes: tuple[str, ...] | None = None
     set_types: tuple[str, ...] | None = None
     lang: str = ""

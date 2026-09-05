@@ -127,11 +127,14 @@ class SearchQueryBuilder:
             str(value).strip() for value in (keywords or []) if str(value).strip()
         ]
         if keyword_values:
-            joiner = " OR " if str(keyword_mode).casefold() == "any" else " AND "
-            self.clauses.append("(" + joiner.join(
+            normalized = str(keyword_mode).casefold()
+            joiner = " OR " if normalized in ("any", "none") else " AND "
+            group = "(" + joiner.join(
                 "EXISTS (SELECT 1 FROM json_each(COALESCE(keywords, '[]')) "
                 "AS keyword_value WHERE keyword_value.value = ? COLLATE NOCASE)"
-                for _ in keyword_values) + ")")
+                for _ in keyword_values) + ")"
+            self.clauses.append(
+                f"NOT {group}" if normalized == "none" else group)
             self.params.extend(keyword_values)
 
         if type_line:
@@ -143,8 +146,12 @@ class SearchQueryBuilder:
                  if str(value).strip()]
         if not clean:
             return
-        joiner = " OR " if str(mode).casefold() == "any" else " AND "
-        self.clauses.append("(" + joiner.join(sql_expr for _ in clean) + ")")
+        normalized = str(mode).casefold()
+        group = "(" + (" OR " if normalized in ("any", "none") else " AND ").join(
+            sql_expr for _ in clean) + ")"
+        # "none" excludes every card matching any selected value, which is the
+        # only way to ask for a green non-creature or a creature without flying.
+        self.clauses.append(f"NOT {group}" if normalized == "none" else group)
         self.params.extend(clean)
 
     def _add_color_set_filter(self, column, selected, mode, members):
@@ -309,8 +316,10 @@ class SearchQueryBuilder:
                 fragments.append(f"({clause})")
         if not fragments:
             return
-        joiner = " OR " if str(trait_mode).casefold() == "any" else " AND "
-        self.clauses.append("(" + joiner.join(fragments) + ")")
+        normalized = str(trait_mode).casefold()
+        joiner = " OR " if normalized in ("any", "none") else " AND "
+        group = "(" + joiner.join(fragments) + ")"
+        self.clauses.append(f"NOT {group}" if normalized == "none" else group)
         self.params.extend(values)
 
     GAME_PLATFORMS = ("paper", "mtgo", "arena")
@@ -353,7 +362,7 @@ class SearchQueryBuilder:
             self.clauses.append("artist LIKE ? ESCAPE '\\'")
             self.params.append(f"%{_escape_like(value)}%")
 
-    def add_rarity_and_format(self, rarities, fmt):
+    def add_rarity_and_format(self, rarities, fmt, fmt_status="playable"):
         rarity_values = sorted({
             str(value).strip() for value in (rarities or []) if str(value).strip()
         })
@@ -364,7 +373,15 @@ class SearchQueryBuilder:
         if not fmt:
             return
         fmt_value = str(fmt).strip()
-        statuses = tuple(sorted(PLAYABLE_LEGALITY_STATUSES))
+        # Playable is legal-or-restricted. Banned and restricted are the states
+        # a deck check actually asks about and nothing could previously reach.
+        chosen_status = str(fmt_status or "playable").casefold()
+        if chosen_status == "banned":
+            statuses = ("banned",)
+        elif chosen_status == "restricted":
+            statuses = ("restricted",)
+        else:
+            statuses = tuple(sorted(PLAYABLE_LEGALITY_STATUSES))
         placeholders = ",".join("?" * len(statuses))
         if re.fullmatch(r"[A-Za-z0-9_]+", fmt_value):
             self.clauses.append(
@@ -445,7 +462,8 @@ class CardSearchQueryMixin:
                released_to=None, artist="", games=None,
                cmc_min=None, cmc_max=None, power_min=None,
                power_max=None, toughness_min=None, toughness_max=None, rarity="",
-               rarities=None, fmt="", set_code="", set_codes=None, set_types=None,
+               rarities=None, fmt="", fmt_status="playable", set_code="",
+               set_codes=None, set_types=None,
                lang="", paper_only=False, limit=None, exclude_art=True, show_tokens=True,
                content_types=None, connection=None, columns=None):
         """Search the local DB and return card dictionaries.
@@ -489,7 +507,7 @@ class CardSearchQueryMixin:
         builder.add_artist_filter(artist)
         builder.add_numeric_filters(
             cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
-        builder.add_rarity_and_format(rarities, fmt)
+        builder.add_rarity_and_format(rarities, fmt, fmt_status)
         if not builder.add_printing_filters(
                 set_types, set_codes, set_code, lang, paper_only=paper_only):
             return []
