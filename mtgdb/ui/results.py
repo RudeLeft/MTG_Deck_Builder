@@ -105,6 +105,19 @@ class SearchResultsMixin:
         self.results_tv.bind("<Configure>", self._on_result_tree_configure, add="+")
         self._update_result_scrollbar()
 
+    def _reset_results_viewport(self):
+        """Scroll Results back to its first row without touching the data.
+
+        Search Clear leaves the logical result set alone but shortens the form
+        above it, so the viewport has to be told to return to the top.
+        """
+        self._result_top = 0
+        self._result_window_start = 0
+        try:
+            self._render_results()
+        except (AttributeError, tk.TclError):
+            pass
+
     def _set_result_store(self, store, signature=None):
         """Atomically replace the complete logical result set."""
         if not isinstance(store, SearchResultStore):

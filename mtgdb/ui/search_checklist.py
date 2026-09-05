@@ -358,8 +358,9 @@ class SearchChecklistDialog:
             self._mode_label.pack(side="left")
             scope = mode_label.rstrip(":").lower()
             for label, value in (("Any", "any"), ("All", "all")):
-                radio = ClassicRadiobutton(
-                    mode, text=label, variable=self.popup_mode, value=value)
+                radio = ttk.Radiobutton(
+                    mode, text=label, variable=self.popup_mode, value=value,
+                    style="ListChoice.TRadiobutton")
                 radio.pack(side="left", padx=(7, 0))
                 meaning = (f"Any: a card only needs to match one of the selected {scope}."
                            if value == "any" else

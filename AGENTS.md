@@ -1293,8 +1293,10 @@ every feature together and is exempt.
   palette, and leaves selected and unselected rows visually identical, so every
   row reads as selected. A palette contrast assertion on `selectcolor` does not
   detect that failure; the style's own selected/unselected indicator colours
-  MUST differ and MUST be asserted. `ClassicRadiobutton` stays correct for the
-  dialog's own `Any`/`All` mode rows, which are not list rows.
+  MUST differ and MUST be asserted. Every `Any`/`All` and
+  Within/Contains/Exactly mode row MUST carry the same style, in the picker
+  dialogs and in the Search form alike: sitting beside themed controls, a
+  classic radio reads as a different widget family.
   _Verification:_ **AUTO**.
 - **UI-011 — MUST:** Derive the Mainboard/Sideboard display name from the single
   `deck_board_label` helper in `ui/components.py`. The wording previously existed

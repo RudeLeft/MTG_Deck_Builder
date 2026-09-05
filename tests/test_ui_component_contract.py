@@ -234,10 +234,12 @@ def main():
             and "if self.single_select:" in checklist_source
             and "ClassicRadiobutton(" not in checklist_source.split(
                 "def set_values", 1)[0]),
-        "the dialog Any/All mode rows keep the classic radio": (
-            "ClassicRadiobutton(" in checklist_source
-            and _indicator_contrast(
-                _radio_defaults["selectcolor"], _radio_defaults["bg"]) >= 40),
+        "every Any/All mode row uses the themed indicator": (
+            # UI-010 originally kept these classic. They sit beside themed
+            # controls and read as a different widget family, so they now carry
+            # the same hollow-then-gold indicator as the deck format picker.
+            'style="ListChoice.TRadiobutton"' in checklist_source
+            and "ClassicRadiobutton(\n                    mode" not in checklist_source),
         "scrolling filter rows fill the viewport while short catalogs stay compact": (
             'scrolling = len(self._visible) > self._capacity' in checklist_source
             and 'minsize = 0' in checklist_source

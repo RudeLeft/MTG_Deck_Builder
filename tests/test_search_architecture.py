@@ -148,6 +148,10 @@ def main():
             # can tell the two colour columns apart.
             dict(_card("9", "Ghostfire Owl"), colors=[],
                  color_identity=["R"], type_line="Instant"),
+            # A digital-only printing in its own set, so platform scoping has
+            # something to tell apart from the paper vocabulary.
+            dict(_card("10", "Alchemy Owl"), games=["arena"], set="ana",
+                 set_name="Arena Set", set_type="alchemy"),
         ])
 
         # SRCH-033/034 query coverage for the optional filters.
@@ -186,11 +190,27 @@ def main():
         # the old paper boolean could not express.
         games_select_platforms = (
             _opt(games=["paper"]) >= {"First Bird"}
-            and _opt(games=["arena"]) == set()
+            and _opt(games=["arena"]) == {"Alchemy Owl"}
             and _opt(games=["paper", "arena"]) >= {"First Bird"}
             # Selecting every platform, or none, is no restriction.
             and _opt(games=["paper", "mtgo", "arena"]) == _opt()
             and _opt(games=[]) == _opt())
+
+        # DATA-010: picking a platform must re-scope the Printings vocabulary,
+        # not merely the result rows. Paper and Arena sets differ.
+        paper_types = {value for value, _c in db.set_types(("card",), False, games=("paper",))}
+        arena_types = {value for value, _c in db.set_types(("card",), False, games=("arena",))}
+        paper_sets = {code for code, _c in db.sets(None, content_types=("card",), games=("paper",))}
+        arena_sets = {code for code, _c in db.sets(None, content_types=("card",), games=("arena",))}
+        platform_scopes_the_vocabulary = (
+            paper_sets and arena_sets and paper_sets != arena_sets
+            and paper_types != arena_types)
+
+        # Traits combine with Any by default: requiring all of them made two
+        # selections return nothing.
+        trait_mode_widens = (
+            len(_opt(traits=["reserved", "single_faced"], trait_mode="any"))
+            >= len(_opt(traits=["reserved", "single_faced"], trait_mode="all")))
 
         def _produces(values, mode):
             return {row["name"] for row in db.search(
@@ -210,7 +230,7 @@ def main():
         produces_treats_colorless_as_a_member = (
             _produces(("C",), "includes") == {"Sol Ring"})
         empty_produces_filters_nothing = (
-            len(_produces((), "includes")) == 9)
+            len(_produces((), "includes")) == 10)
         # The same helper serves colour identity, where an exact multi-colour
         # request previously built "W,U" against stored "U,W" and matched none.
         identity_exact_multicolor = {row["name"] for row in db.search(
@@ -361,6 +381,14 @@ def main():
             search_source, "_set_search_entry_text"))
 
     checks = {
+        "printing type re-scopes the set vocabulary": (
+            platform_scopes_the_vocabulary),
+        "card traits combine with Any by default": (
+            trait_mode_widens
+            and 'self.q_trait_mode = tk.StringVar(value="any")' in search_source),
+        "Search Clear returns Results to the first row": (
+            "self._reset_results_viewport()" in _method_body(
+                search_source, "_clear_search")),
         "printing type selects platforms rather than a paper flag": (
             games_select_platforms),
         "content kinds come from traits and add no clause": (

@@ -284,7 +284,7 @@ class SearchQueryBuilder:
             "AND CAST(power AS REAL) > CAST(toughness AS REAL)"),
     }
 
-    def add_trait_filters(self, traits):
+    def add_trait_filters(self, traits, trait_mode="any"):
         """Filter by stable boolean card properties.
 
         These are application semantics rather than upstream vocabulary
@@ -293,22 +293,25 @@ class SearchQueryBuilder:
         restored workspace from a newer build cannot widen a query.
         """
         placeholders = ",".join("?" * len(self.MULTI_FACE_LAYOUTS))
+        fragments = []
+        values = []
         for key in sorted({str(value) for value in (traits or [])}):
-            if key == "multi_faced":
-                self.clauses.append(
-                    f"COALESCE(layout, '') IN ({placeholders})")
-                self.params.extend(self.MULTI_FACE_LAYOUTS)
-                continue
-            if key == "single_faced":
+            if key in ("multi_faced", "single_faced"):
                 # NOT IN against a NULL layout yields NULL, which would drop a
                 # row that simply has no recorded layout rather than keeping it.
-                self.clauses.append(
-                    f"COALESCE(layout, '') NOT IN ({placeholders})")
-                self.params.extend(self.MULTI_FACE_LAYOUTS)
+                operator = "IN" if key == "multi_faced" else "NOT IN"
+                fragments.append(
+                    f"COALESCE(layout, '') {operator} ({placeholders})")
+                values.extend(self.MULTI_FACE_LAYOUTS)
                 continue
             clause = self.TRAIT_CLAUSES.get(key)
             if clause:
-                self.clauses.append(f"({clause})")
+                fragments.append(f"({clause})")
+        if not fragments:
+            return
+        joiner = " OR " if str(trait_mode).casefold() == "any" else " AND "
+        self.clauses.append("(" + joiner.join(fragments) + ")")
+        self.params.extend(values)
 
     GAME_PLATFORMS = ("paper", "mtgo", "arena")
 
@@ -437,7 +440,7 @@ class CardSearchQueryMixin:
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
                color_mode="within", color_scope="identity",
                produces=None, produces_mode="includes",
-               traits=None, loyalty_min=None, loyalty_max=None,
+               traits=None, trait_mode="any", loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
                released_to=None, artist="", games=None,
                cmc_min=None, cmc_max=None, power_min=None,
@@ -478,7 +481,7 @@ class CardSearchQueryMixin:
             subtypes, subtype_mode, keywords, keyword_mode, type_line)
         builder.add_color_filter(colors, color_mode, color_scope)
         builder.add_produces_filter(produces, produces_mode)
-        builder.add_trait_filters(traits)
+        builder.add_trait_filters(traits, trait_mode)
         builder.add_stat_filters(
             loyalty_min, loyalty_max, defense_min, defense_max)
         builder.add_release_filters(released_from, released_to)

@@ -114,6 +114,9 @@ class SearchFeatureMixin:
         self.q_format = tk.StringVar(value="")
         self.q_rules_mode = tk.StringVar(value="all")
         self._selected_traits = set()
+        # Traits combine with Any by default, like Subtype and Mechanics.
+        # Requiring all of them made two selections return nothing.
+        self.q_trait_mode = tk.StringVar(value="any")
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
         # Widget handles for optional rows. They must exist as None from the
@@ -455,6 +458,7 @@ class SearchFeatureMixin:
         self._open_search_multi_picker(
             "Card Traits", [label for _key, label in TRAIT_CHOICES],
             selected, apply,
+            mode_var=self.q_trait_mode,
             mode_label="Selected traits:",
             help_text="Choose one or several card traits.")
 
@@ -1038,6 +1042,7 @@ class SearchFeatureMixin:
         self.q_card_type_mode.set("any")
         self.q_color_mode.set("within")
         self.q_produces_mode.set("includes")
+        self.q_trait_mode.set("any")
         for variable in self.card_type_vars.values():
             variable.set(False)
         for variable in self.color_vars.values():
@@ -1050,6 +1055,10 @@ class SearchFeatureMixin:
             "rarities": set(), "keywords": set(), "subtypes": set(),
         }
         self._search_printings.clear()
+        # Removing optional rows shortens the form, so the Results viewport
+        # would otherwise stay scrolled to wherever the taller panel had left
+        # it. Return it to the first row along with the criteria.
+        self._reset_results_viewport()
         self._update_search_filter_summary()
 
 
@@ -1124,7 +1133,8 @@ class SearchFeatureMixin:
             self._selected_keywords = set(chosen)
             if self._keyword_btn is not None:
                 self._keyword_btn.configure(text=self._picker_button_text(
-                self._selected_keywords, "Any", "mechanics", max_visible=10))
+                    self._selected_keywords, "Any", "mechanics",
+                    max_visible=10, single_line=True))
             self._update_search_filter_summary()
         self._open_search_multi_picker(
             "Choose Mechanics", self._keyword_catalog, self._selected_keywords, apply,
@@ -1341,7 +1351,8 @@ class SearchFeatureMixin:
         valid_keywords = {value for value, _display in self._keyword_catalog}
         self._selected_keywords = set(pending["keywords"]).intersection(valid_keywords)
         self._set_picker_text(self._keyword_btn, self._picker_button_text(
-            self._selected_keywords, "Any", "mechanics", max_visible=10))
+            self._selected_keywords, "Any", "mechanics",
+            max_visible=10, single_line=True))
 
         self._subtype_catalog = [
             (value, f"{category} · {value}") for value, category in snapshot.subtypes
@@ -1515,6 +1526,7 @@ class SearchFeatureMixin:
             "keyword_mode": self.q_keyword_mode.get(),
             "color_mode": self.q_color_mode.get(),
             "produces_mode": self.q_produces_mode.get(),
+            "trait_mode": self.q_trait_mode.get(),
             "optional_filters": list(self._active_optional_filters()),
             "optional_values": self._capture_optional_filter_values(),
             "traits": sorted(
@@ -1626,6 +1638,7 @@ class SearchFeatureMixin:
             (self.q_color_mode, state.get("color_mode"), {"within", "includes", "exact"}, "within"),
             (self.q_produces_mode, state.get("produces_mode"),
              {"within", "includes", "exact"}, "includes"),
+            (self.q_trait_mode, state.get("trait_mode"), {"any", "all"}, "any"),
         )
         for variable, value, allowed, default in safe_modes:
             variable.set(value if value in allowed else default)
@@ -1777,6 +1790,7 @@ class SearchFeatureMixin:
                       if variable.get()],
             produces_mode=self.q_produces_mode.get(),
             traits=self._selected_trait_keys(),
+            trait_mode=self.q_trait_mode.get(),
             loyalty_min=self._optional_numeric(getattr(self, "q_loyalty_min", None)),
             loyalty_max=self._optional_numeric(getattr(self, "q_loyalty_max", None)),
             defense_min=self._optional_numeric(getattr(self, "q_defense_min", None)),

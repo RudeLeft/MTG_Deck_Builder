@@ -159,12 +159,13 @@ class PrintingFilter:
         """Refresh trusted printing vocabulary in place for the current scope."""
         content = self._content_types()
         paper_only = bool(self.paper_only.get())
+        games = self.selected_games()
         selected_types = self.selected_set_types()
         selected_codes = self.selected_set_codes() if self._set_vars else set()
         try:
             present = [
                 value for value, _count
-                in self.repository.set_types(content, paper_only)
+                in self.repository.set_types(content, paper_only, games=games)
             ]
         except Exception:
             log.exception("Could not load observed set-type catalog")
@@ -172,7 +173,7 @@ class PrintingFilter:
         try:
             sets = self.repository.sets(
                 sorted(selected_types) or None,
-                content_types=content, paper_only=paper_only)
+                content_types=content, paper_only=paper_only, games=games)
         except Exception:
             log.exception("Could not load observed exact-set catalog")
             sets = []
@@ -210,12 +211,14 @@ class PrintingFilter:
         """Cascade Exact Set vocabulary from Content/Paper/selected Set Types."""
         content = self._content_types()
         paper_only = bool(self.paper_only.get())
+        games = self.selected_games()
         allowed_types = sorted(self.selected_set_types()) or None
         if selected_codes is None:
             selected_codes = self.selected_set_codes() if self._set_vars else set()
         try:
             sets = self.repository.sets(
-                allowed_types, content_types=content, paper_only=paper_only)
+                allowed_types, content_types=content, paper_only=paper_only,
+                games=games)
         except Exception:
             log.exception("Could not load observed exact-set catalog")
             sets = []

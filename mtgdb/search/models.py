@@ -39,6 +39,7 @@ class SearchCriteria:
     produces: tuple[str, ...] = ()
     produces_mode: str = "includes"
     traits: tuple[str, ...] = ()
+    trait_mode: str = "any"
     cmc_min: float | None = None
     cmc_max: float | None = None
     power_min: float | None = None

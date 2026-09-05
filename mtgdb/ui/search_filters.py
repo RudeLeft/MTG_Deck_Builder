@@ -43,7 +43,7 @@ FILTER_DEFINITIONS = (
     {
         "key": "stats",
         "category": "Card",
-        "label": "Power / toughness",
+        "label": "Power / Toughness",
         "tooltip": (
             "Printed power and toughness as numbers. Cards with variable "
             "stats such as */* are excluded, because there is no number to "

@@ -39,11 +39,12 @@ class SearchRepository:
     def name_suggestions(self, query, limit=20):
         return self._db.name_suggestions(query, limit=limit)
 
-    def set_types(self, content_types=None, paper_only=False):
-        return self._db.set_types(content_types, paper_only)
+    def set_types(self, content_types=None, paper_only=False, games=None):
+        return self._db.set_types(content_types, paper_only, games=games)
 
-    def sets(self, allowed_types=None, content_types=None, paper_only=False):
-        return self._db.sets(allowed_types, content_types, paper_only)
+    def sets(self, allowed_types=None, content_types=None, paper_only=False,
+             games=None):
+        return self._db.sets(allowed_types, content_types, paper_only, games=games)
 
     def card_types(self, content_types=None, paper_only=False):
         return self._db.card_types(content_types, paper_only)

@@ -35,6 +35,7 @@ class _DeckImportPrintingFilter(PrintingFilter):
         generation = self._catalog_generation
         content = tuple(self._content_types())
         paper_only = bool(self.paper_only.get())
+        games = self.selected_games()
         selected_types = set(self.selected_set_types())
         if selected_codes is None:
             selected_codes = set(self.selected_set_codes())
@@ -47,11 +48,11 @@ class _DeckImportPrintingFilter(PrintingFilter):
         def prepare():
             present = [
                 value for value, _count
-                in repository.set_types(content, paper_only)
+                in repository.set_types(content, paper_only, games=games)
             ]
             sets = repository.sets(
                 sorted(selected_types) or None,
-                content_types=content, paper_only=paper_only)
+                content_types=content, paper_only=paper_only, games=games)
             return present, sets
 
         future = submit_deck_file_job(

@@ -32,7 +32,7 @@ class CardTaxonomyMixin:
     """
 
     @staticmethod
-    def _scope(content_types=None, paper_only=False, *, prefix=""):
+    def _scope(content_types=None, paper_only=False, *, prefix="", games=None):
         field = lambda name: f"{prefix}{name}"
         clauses = []
         params = []
@@ -54,13 +54,23 @@ class CardTaxonomyMixin:
                 f"CARD_CONTENT_KIND({field('layout')}, {field('type_line')}) "
                 f"IN ({placeholders})")
             params.extend(sorted(chosen))
-        if paper_only:
+        platforms = [
+            value for value in ("paper", "mtgo", "arena")
+            if value in {str(item).casefold() for item in (games or ())}]
+        if platforms and len(platforms) < 3:
+            # Vocabulary must follow the visible PRINTING TYPE choice: picking
+            # Arena alone should offer Arena's sets, not every digital set.
+            clauses.append("(" + " OR ".join(
+                f"{field('games')} LIKE ?" for _ in platforms) + ")")
+            params.extend(f"%{value}%" for value in platforms)
+        elif paper_only:
             clauses.append(f"{field('paper')} = 1")
         return " AND ".join(clauses) if clauses else "1", params
 
-    def sets(self, allowed_types=None, content_types=None, paper_only=False):
+    def sets(self, allowed_types=None, content_types=None, paper_only=False,
+             games=None):
         """Distinct Scryfall sets present locally, newest first."""
-        scope, params = self._scope(content_types, paper_only)
+        scope, params = self._scope(content_types, paper_only, games=games)
         clauses = ["set_code IS NOT NULL", scope]
         if allowed_types is not None:
             allowed = sorted({str(value) for value in allowed_types if str(value)})
@@ -78,9 +88,9 @@ class CardTaxonomyMixin:
             ).fetchall()
         return [(row["set_code"], row["set_name"] or row["set_code"]) for row in rows]
 
-    def set_types(self, content_types=None, paper_only=False):
+    def set_types(self, content_types=None, paper_only=False, games=None):
         """Observed Scryfall ``set_type`` values with local set counts."""
-        scope, params = self._scope(content_types, paper_only)
+        scope, params = self._scope(content_types, paper_only, games=games)
         with self._lock:
             rows = self.conn.execute(
                 "SELECT set_type, COUNT(DISTINCT set_code) AS n FROM cards "
