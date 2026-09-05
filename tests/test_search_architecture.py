@@ -503,6 +503,9 @@ def main():
             # and a multi-word one is spaced rather than only capitalized.
             and format_display_name("neoformat") == "Neoformat"
             and format_display_name("neo_format") == "Neo Format"
+            # An abbreviated key is spelled out too: "Tlr" reads as a typo and
+            # "TLR" tells the reader nothing about what the format is.
+            and format_display_name("tlr") == "Tarkir Dragonstorm Limited"
             and "capitalize()" not in _method_body(
                 search_source, "_set_format_filter")),
         "the Format list follows the chosen legality": (

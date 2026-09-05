@@ -39,9 +39,7 @@ _FORMAT_WORD_LABELS = {
     "competitivebrawl": "Competitive Brawl",
     "duel": "Duel Commander",
     "future": "Future Standard",
-    # A short all-consonant key is an acronym, and title-casing one reads as a
-    # typo. Spell out only the expansions this build is sure of.
-    "tlr": "TLR",
+    "tlr": "Tarkir Dragonstorm Limited",
     "penny": "Penny Dreadful",
     "oathbreaker": "Oathbreaker",
     "oldschool": "Old School",
