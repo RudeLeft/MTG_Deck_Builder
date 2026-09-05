@@ -12,7 +12,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
-    AppButton, AppCombobox, AppMenubutton, AppSpinbox, ClassicCheckbutton,
+    AppButton, AppCombobox, AppSpinbox, ClassicCheckbutton,
     TokenBubbleEntry, format_display_name,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
@@ -887,8 +887,14 @@ class SearchFeatureMixin:
             return
         self._advanced_expanded = expanded
         if expanded:
-            self._advanced_host.pack(
-                fill="x", before=self._search_actions_frame)
+            # Advanced is built before the actions row, so the anchor it packs
+            # above may not exist yet. A missing anchor must not be the kind of
+            # AttributeError that only a real window reveals.
+            anchor = getattr(self, "_search_actions_frame", None)
+            if anchor is not None and anchor.winfo_exists():
+                self._advanced_host.pack(fill="x", before=anchor)
+            else:
+                self._advanced_host.pack(fill="x")
         else:
             self._advanced_host.pack_forget()
         if self._advanced_btn is not None:
@@ -908,8 +914,15 @@ class SearchFeatureMixin:
                 continue
             reset()
             for child in frame.winfo_children():
-                if child.winfo_manager() == "grid" and child.grid_info().get(
-                        "column") == 1:
+                if child.winfo_manager() != "grid":
+                    continue
+                try:
+                    column = int(child.grid_info().get("column", -1))
+                except (TypeError, ValueError):
+                    continue
+                # Column 0 is the label the row keeps; column 1 is the control
+                # the builder is about to make again.
+                if column == 1:
                     child.destroy()
             builder = getattr(self, f"_build_filter_{key}", None)
             if builder is not None:

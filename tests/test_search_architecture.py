@@ -627,6 +627,17 @@ def main():
                 search_source, "_build_advanced_filter_zone")
             and "_build_advanced_filter_rows" not in _method_body(
                 search_source, "_toggle_advanced_filters")),
+        "the advanced panel does not depend on a frame built after it": (
+            # The zone is built before the actions row it packs above, so a
+            # missing anchor must not be an AttributeError only a real window
+            # can reveal -- the class of bug that shipped as _rarity_btn.
+            'getattr(self, "_search_actions_frame", None)' in _method_body(
+                search_source, "_toggle_advanced_filters")),
+        "the row rebuild reads the grid column as a number": (
+            # grid_info() returns Tcl values; comparing one to 1 by identity
+            # silently destroys nothing and stacks a second control on the row.
+            'int(child.grid_info().get("column", -1))' in _method_body(
+                search_source, "_reset_advanced_filter_values")),
         "collapsing advanced returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
                 search_source, "_toggle_advanced_filters")),
