@@ -1814,6 +1814,13 @@ every feature together and is exempt.
 - **BLD-006 — MUST:** Require Python 3.11 or newer in `pyproject.toml` and local
   build instructions, and keep CI on a Python version satisfying that minimum.
   _Verification:_ **AUTO**.
+- **BLD-010 — MUST:** Rebuild `build-venv` from scratch on every local build, and
+  stop the build when it cannot be removed rather than continuing against the
+  environment that survived. `rmdir` prints "Access is denied" and carries on
+  when a file is locked — usually a `python.exe` started from that folder and
+  still running — which left the previous environment in place and built
+  against it silently, defeating the reason it is removed at all. The failure
+  message MUST name what is holding the folder. _Verification:_ **AUTO**.
 
 ## Verification and release enforcement
 

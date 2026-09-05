@@ -1200,7 +1200,12 @@ def main():
             and P.unauthorized_directories({Path("nope/x.py")})
             and not P.unauthorized_directories({Path("mtgdb/main.py")})),
         "local build rebuilds the dependency environment": (
-            'rmdir /s /q "build-venv"' in build_script),
+            'rmdir /s /q "build-venv"' in build_script
+            # rmdir reports "Access is denied" and carries on when a file is
+            # locked, which left the old environment in place and built
+            # against it silently -- exactly what removing it was for.
+            and build_script.count('if exist "build-venv"') >= 2
+            and "Could not remove build-venv" in build_script),
         "VER-011 tests clean up every temporary directory they create": (
             _unmanaged_temp_directories() == []),
         "source archive uses stable root and exact membership validation": (

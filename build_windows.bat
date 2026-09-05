@@ -53,6 +53,26 @@ REM Rebuild the dependency environment too. A reused build-venv silently keeps
 REM whatever Pillow/ReportLab/PyInstaller versions it was first created with,
 REM so two builds of the same source could ship different libraries.
 if exist "build-venv" rmdir /s /q "build-venv"
+REM rmdir reports "Access is denied" and carries on when something still holds a
+REM file, which used to leave the old environment in place and build against it
+REM without a word. Stop instead: a build that cannot guarantee its own
+REM dependencies is worse than no build.
+if exist "build-venv" (
+    echo.
+    echo *** Could not remove build-venv, so this build would reuse the old
+    echo     dependency environment instead of rebuilding it.
+    echo.
+    echo     Something is still using that folder. Usually it is a python.exe
+    echo     started from build-venv that is still running, or a terminal or
+    echo     editor sitting inside the folder. These are using it now:
+    echo.
+    powershell -NoProfile -Command "Get-Process python,pythonw -ErrorAction SilentlyContinue ^| Where-Object { $_.Path -like '*build-venv*' } ^| Select-Object Id,Path ^| Format-Table -AutoSize"
+    echo.
+    echo     Close them and run this again.
+    echo.
+    pause
+    exit /b 1
+)
 
 set "BUILD_STAGE=[2/7] Creating isolated build environment"
 echo === [2/7] Creating an isolated build environment ===
