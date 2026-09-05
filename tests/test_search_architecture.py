@@ -697,6 +697,9 @@ def main():
             # is there: Colors grew a second row, Rules text grew a third
             # mode, and Card traits carries the only route to tokens.
             and "Look at" in filter_tooltip("colors")
+            # 58 paper cards carry Legendary only on the back face and are
+            # matched, which the wording has to admit.
+            and "either face" in tooltips["supertypes"]
             and "none of them" in tooltips["rules_text"]
             and "tokens" in tooltips["traits"]
             # The labels on the controls are American; the tooltips beside

@@ -84,7 +84,8 @@ FILTER_DEFINITIONS = (
         "tooltip": (
             "The words in front of the card type, such as Legendary, Basic "
             "or Snow. Most cards have none, so this filter narrows a search "
-            "sharply."),
+            "sharply. A two-faced card matches when either face carries the "
+            "word, so a Legendary back face is found too."),
     },
     {
         "key": "subtype",
