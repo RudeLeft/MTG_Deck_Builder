@@ -638,6 +638,14 @@ every feature together and is exempt.
   MUST select the last row, not the whole list, and MUST NOT leave the
   selection count larger than the store.
   _Verification:_ **AUTO**.
+- **SRCH-044 — MUST:** Give every table column one display value, produced by
+  `search/results.table_value`, and filter on that same value. Every column
+  heading opens a filter, so a column with no value has a filter that cannot
+  work: Cost fell through to `""` while the filter layer held a second
+  spelling of its own, so its popup listed the printed costs while matching
+  compared them against nothing — the Cost filter emptied Results and both
+  deck boards, and its inverse kept every row. A filter layer MUST NOT carry a
+  display rule the matcher does not share. _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.

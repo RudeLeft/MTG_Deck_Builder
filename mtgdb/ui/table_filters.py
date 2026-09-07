@@ -41,9 +41,12 @@ class TableFilterMixin:
         return "text"
 
     def _filter_display_value(self, card, key, qty=None):
-        """Stable display value used by checklist/text filters."""
-        if key == "cost":
-            return card.get("mana_cost") or ""
+        """Stable display value used by checklist/text filters.
+
+        One lookup, shared with the matching in row_passes_filters. Holding a
+        special case for Cost here while the matcher used table_value is what
+        let the popup list costs the filter could never match.
+        """
         return table_value(card, key, qty=qty)
 
     def _row_passes_table_filters(self, view, card, qty=None, skip_col=None):

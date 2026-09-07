@@ -507,6 +507,12 @@ def table_value(card, key, qty=None):
     """Tk-free display value shared by Results preparation and table UI."""
     if key == "qty":
         return "" if qty is None else str(qty)
+    if key == "cost":
+        # The Cost column is drawn as mana symbols, but a filter still has to
+        # compare against something. Without this the column's own filter
+        # matched every row against "" and emptied the table, while its popup
+        # cheerfully listed the costs it was refusing to find.
+        return card.get("mana_cost") or ""
     if key == "name":
         return card.get("name", "")
     if key == "type":

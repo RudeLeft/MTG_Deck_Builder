@@ -13,10 +13,11 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.preferences.repository import TABLE_COLUMNS_VERSION, UIPreferencesRepository
 from mtgdb.search.repository import SEARCH_RESULT_COLUMNS
 from mtgdb.ui.tables import (
-    TABLE_COLUMNS, TABLE_DEFAULTS, TableInfrastructureMixin,
+    TABLE_COLUMNS, TABLE_COLUMN_ORDER, TABLE_DEFAULTS, TableInfrastructureMixin,
     available_columns, column_popup_position, normalized_visible_columns,
     table_sort_key, table_value,
 )
+from mtgdb.search.results import row_passes_filters
 
 
 
@@ -278,7 +279,37 @@ def main():
         and _passes(_probe_card,
                     {"cmc": {"kind": "numeric", "min": 1.0, "max": 5.0}}) is True)
 
+    # Every column heading opens a filter, so every column needs a value to
+    # match against. Cost had none: table_value fell through to "" while the
+    # popup listed mana costs from a special case of its own, so filtering the
+    # Cost column emptied the table and its inverse kept everything.
+    filterable_card = {
+        "id": "x", "name": "Llanowar Elves", "mana_cost": "{G}", "cmc": 1,
+        "type_line": "Creature — Elf Druid", "rarity": "common",
+        "set_code": "m19", "set_name": "Core 2019", "collector_number": "314",
+        "released_at": "2018-07-13", "keywords": '["Flying"]', "colors": "G",
+        "power": "1", "toughness": "1", "oracle_text": "Add {G}.",
+    }
+    numeric_columns = {"qty", "cmc", "power", "toughness", "year"}
+    every_column_has_a_filter_value = all(
+        str(table_value(filterable_card, key, qty=2))
+        for key in TABLE_COLUMN_ORDER if key not in numeric_columns)
+    cost_filters_on_the_printed_cost = (
+        table_value(filterable_card, "cost") == "{G}"
+        and row_passes_filters(
+            filterable_card,
+            {"cost": {"kind": "text", "mode": "Contains", "value": "{G}"}})
+        and not row_passes_filters(
+            filterable_card,
+            {"cost": {"kind": "text", "mode": "Contains", "value": "{W}"}})
+        # One lookup for both: a second spelling in the filter layer is how
+        # the popup and the matcher disagreed in the first place.
+        and 'if key == "cost"' not in filter_source)
+
     checks = {
+        "every column can be filtered by what its popup shows": (
+            every_column_has_a_filter_value
+            and cost_filters_on_the_printed_cost),
         "table numeric filters refuse non-finite bounds": finite_filter_bounds,
         "column drag reorder lands on the dropped slot, including the last": (
             _column_reorder_matches_oracle()),
