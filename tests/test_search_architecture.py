@@ -67,6 +67,125 @@ class _ResultOwner(SearchResultsMixin):
         self._result_store = SearchResultStore.from_rows(rows)
 
 
+class _FakeTree:
+    """Enough of a Treeview to watch which pooled row shows which card."""
+
+    def __init__(self):
+        self.order = []
+        self.values = {}
+
+    def insert(self, _parent, _index, iid=None, text="", values=(), **_kw):
+        self.order.append(iid)
+        self.values[iid] = tuple(values)
+
+    def item(self, iid, **kwargs):
+        if "values" in kwargs:
+            self.values[iid] = tuple(kwargs["values"])
+        return {"values": self.values.get(iid, ())}
+
+    def move(self, iid, _parent, index):
+        # Tk moves by removing and re-inserting, and takes "end" as a position.
+        self.order.remove(iid)
+        if index == "end":
+            self.order.append(iid)
+        else:
+            self.order.insert(int(index), iid)
+
+    def delete(self, iid):
+        if iid in self.order:
+            self.order.remove(iid)
+        self.values.pop(iid, None)
+
+    def exists(self, iid):
+        return iid in self.values
+
+    def get_children(self, _parent=""):
+        return tuple(self.order)
+
+    def yview_moveto(self, _fraction):
+        return None
+
+    def selection_set(self, *_args):
+        return None
+
+    def selection(self):
+        return ()
+
+
+class _ScrollOwner(SearchResultsMixin):
+    """A Results table driven without Tk, to watch the row pool rotate."""
+
+    CAPACITY = 20
+
+    def __init__(self, rows):
+        self.results_tv = _FakeTree()
+        self._initialize_search_results()
+        self._result_store = SearchResultStore.from_rows(rows)
+        self._result_selected_ids = set()
+        self._table_filters = {"results": {}}
+        self._sort_col = None
+        self._sort_desc = False
+        self._results_vsb = None
+
+    # Tk-dependent pieces the ring does not need to be tested.
+    def _result_visible_capacity(self):
+        return self.CAPACITY
+
+    def _cost_image(self, _cost, height=18):
+        return None
+
+    def _table_value(self, card, key, qty=None):
+        return card.get(key, "")
+
+    def _begin_result_selection_sync(self):
+        return None
+
+    def _end_result_selection_sync_later(self):
+        return None
+
+    def _apply_result_native_selection(self):
+        return None
+
+    def _update_result_scrollbar(self):
+        return None
+
+    # What a user would see, top row first.
+    def visible_names(self):
+        column = self._result_ordinary_columns().index("name")
+        return [self.results_tv.values[iid][column]
+                for iid in self.results_tv.order[:self.CAPACITY]]
+
+    def expected_names(self):
+        store = self._result_store
+        names = []
+        for offset in range(self.CAPACITY):
+            position = self._result_top + offset
+            if position >= store.visible_count:
+                break
+            names.append(store.row_at_source(
+                store.source_index_at_view(position)).get("name"))
+        return names
+
+    def pool_is_consistent(self):
+        """Every pooled row shows its ring position, or shows nothing.
+
+        The pool is bigger than the viewport, so this covers the rows waiting
+        below the fold as well. A row that keeps an old card down there is one
+        rotation away from being at the top.
+        """
+        store = self._result_store
+        column = self._result_ordinary_columns().index("name")
+        for index, slot in enumerate(self._result_live_slots):
+            position = self._result_top + index
+            expected = ""
+            if position < store.visible_count:
+                expected = store.row_at_source(
+                    store.source_index_at_view(position)).get("name")
+            if self.results_tv.values[slot][column] != expected:
+                return False
+        return list(self.results_tv.order) == self._result_live_slots
+
+
 class _FakeLabel:
     def __init__(self):
         self.text = ""
@@ -423,6 +542,41 @@ def main():
         and _edit(_batch, _display, "") == ((), "")
         # With no batch active there is nothing to clear.
         and _edit((), "", "Forest") == ((), ""))
+
+    # SRCH-042. Scroll a pool of rows across a result set and compare every
+    # visible row against the store at every stop. The pool is larger than the
+    # viewport, so near the end some slots have no row to show; leaving those
+    # alone let the ring carry stale rows back to the top, and the rows nearest
+    # the end of a long result set stopped moving while the rest scrolled.
+    scroll_owner = _ScrollOwner([
+        {"id": str(index), "name": "Card %04d" % index, "mana_cost": ""}
+        for index in range(400)
+    ])
+    scroll_owner._populate_result_window(force=True)
+    scroll_stops = []
+
+    def _record_scroll_stop():
+        scroll_stops.append(
+            scroll_owner.visible_names() == scroll_owner.expected_names()
+            and scroll_owner.pool_is_consistent())
+
+    for _step in range(60):
+        scroll_owner._result_scroll(3, "units")
+        _record_scroll_stop()
+    for _step in range(40):
+        scroll_owner._result_scroll(-5, "units")
+        _record_scroll_stop()
+    scroll_owner._set_result_top(10 ** 6)
+    _record_scroll_stop()
+    for _step in range(20):
+        scroll_owner._result_scroll(-1, "units")
+        _record_scroll_stop()
+    for _step in range(30):
+        scroll_owner._result_scroll(1, "units")
+        _record_scroll_stop()
+    every_scroll_stop_matches_the_store = all(scroll_stops)
+    pool_order_follows_the_ring = (
+        list(scroll_owner.results_tv.order) == scroll_owner._result_live_slots)
 
     # SRCH-034/035 registry contracts. These hold without Tk, because the
     # registry is deliberately data rather than widgets.
@@ -939,6 +1093,11 @@ def main():
             'self._pending_search_request = False' in search_source
             and 'set_count = getattr(self, "_set_result_count", None)' in search_source
             and 'text="RESULTS | Trusted filters unavailable"' in search_source),
+        "every scroll shows the rows the store says it should": (
+            every_scroll_stop_matches_the_store
+            # The physical order has to keep following the ring, or the next
+            # rotation moves the wrong rows.
+            and pool_order_follows_the_ring),
         "the standard core is built and every other filter is in Advanced": (
             'text="Active Filters"' not in search_source
             and "self._build_name_filter(form)" in search_source

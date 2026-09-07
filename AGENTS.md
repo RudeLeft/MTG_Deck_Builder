@@ -617,6 +617,18 @@ every feature together and is exempt.
   forbids one layer down, and it costs every import and every row. Printed in
   was built on a stored `print_sets` column, was not wanted, and left neither
   behind. _Verification:_ **AUTO**.
+- **SRCH-042 — MUST:** Keep the Results row pool in step with the store on
+  every scroll: each pooled row shows the store's row for its ring position,
+  or shows nothing, and the Treeview's physical order matches the ring. Two
+  faults broke this and both surfaced as rows that sat still while the rest of
+  the list scrolled past them. A slot with no row to show — the pool is larger
+  than the viewport, so the last ones are past the end of any result set — was
+  left holding its previous card and was not moved, and rows leaving the top
+  were each moved to their final index while the ones ahead of them had not
+  moved yet, which interleaved the pool below the fold until enough scrolling
+  brought the damage back into view. Rows rotating to the bottom MUST be moved
+  to the end rather than to a computed index, because each move is a remove
+  and an insert. _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.

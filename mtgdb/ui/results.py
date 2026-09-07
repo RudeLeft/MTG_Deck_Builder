@@ -244,9 +244,23 @@ class SearchResultsMixin:
         ]
 
     def _bind_result_slot(self, slot, view_position, ordinary):
+        """Show one result in one pooled row, or empty the row past the end.
+
+        The pool is larger than the viewport, so near the end of a result set
+        some slots have no row to show. Returning early and leaving those
+        slots as they were made the ring carry stale rows back to the top of
+        the viewport on the next scroll: the rows nearest the end of a long
+        result set stopped moving while the rest scrolled past them.
+        """
         store = self._result_store
         if view_position < 0 or view_position >= store.visible_count:
             self._result_slot_sources.pop(slot, None)
+            try:
+                self.results_tv.item(
+                    slot, text="", image="",
+                    values=tuple("" for _ in ordinary), tags=())
+            except tk.TclError:
+                pass
             return False
         source = store.source_index_at_view(view_position)
         row = store.row_at_source(source)
@@ -308,36 +322,44 @@ class SearchResultsMixin:
                 if delta > 0:
                     moved = self._result_live_slots[:delta]
                     self._result_live_slots[:] = self._result_live_slots[delta:] + moved
-                    for offset, slot in enumerate(moved, start=desired - delta):
-                        view_position = start + offset
-                        if self._bind_result_slot(slot, view_position, ordinary):
-                            try:
-                                tv.move(slot, "", offset)
-                            except tk.TclError:
-                                return
+                    # Rows leaving the top go to the bottom, and they go there
+                    # one at a time. Moving each to its final index instead --
+                    # 72, then 73, then 74 of 75 -- lands every one of them
+                    # ahead of rows that had not moved yet, because each move
+                    # is a remove and an insert into a list that is one short.
+                    # The pool came out interleaved, and the damage stayed
+                    # below the viewport until enough scrolling brought it back
+                    # to the top as rows that repeated or sat still.
+                    rotated = [(slot, "end", desired - delta + index)
+                               for index, slot in enumerate(moved)]
                 else:
                     count = -delta
                     moved = self._result_live_slots[-count:]
                     self._result_live_slots[:] = moved + self._result_live_slots[:-count]
-                    for offset, slot in enumerate(moved):
-                        view_position = start + offset
-                        if self._bind_result_slot(slot, view_position, ordinary):
-                            try:
-                                tv.move(slot, "", offset)
-                            except tk.TclError:
-                                return
+                    # Rows entering at the top do land on their final index:
+                    # each is removed from behind the ones already placed.
+                    rotated = [(slot, index, index)
+                               for index, slot in enumerate(moved)]
+                for slot, target, offset in rotated:
+                    # The move happens whether or not the slot had a row to
+                    # show: the ring has already been rotated, so a slot left
+                    # where it was puts the tree out of step with the order the
+                    # next scroll assumes.
+                    self._bind_result_slot(slot, start + offset, ordinary)
+                    try:
+                        tv.move(slot, "", target)
+                    except tk.TclError:
+                        self._result_window_start = -1
+                        return
             else:
                 self._result_diagnostics["full_refills"] = self._result_diagnostics.get("full_refills", 0) + 1
                 self._result_slot_sources.clear()
                 for offset, slot in enumerate(self._result_live_slots):
-                    view_position = start + offset
-                    if view_position >= visible_total:
-                        break
-                    if not self._bind_result_slot(slot, view_position, ordinary):
-                        return
+                    self._bind_result_slot(slot, start + offset, ordinary)
                     try:
                         tv.move(slot, "", offset)
                     except tk.TclError:
+                        self._result_window_start = -1
                         return
             try:
                 tv.yview_moveto(0)
