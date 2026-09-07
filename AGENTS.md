@@ -629,6 +629,15 @@ every feature together and is exempt.
   brought the damage back into view. Rows rotating to the bottom MUST be moved
   to the end rather than to a computed index, because each move is a remove
   and an insert. _Verification:_ **AUTO**.
+- **SRCH-043 — MUST:** Clamp each end of a Results selection range into the
+  visible list on its own before ordering the pair. Clamping the smaller end
+  against zero and the larger against the last row leaves a range that begins
+  past the end inverted — 20..30 of ten rows became 9..20 — which the identity
+  path filled from the top of the list and wrote off the end of the bitset,
+  raising IndexError inside a Tk callback. A range that starts past the end
+  MUST select the last row, not the whole list, and MUST NOT leave the
+  selection count larger than the store.
+  _Verification:_ **AUTO**.
 - **SRCH-010 — MUST NOT:** Define `_do_search`, `_render_results`,
   `_show_table_filter`, or `_open_search_multi_picker` on `DeckBuilderApp`.
   _Verification:_ **AUTO**.

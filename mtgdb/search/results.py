@@ -201,11 +201,18 @@ class CompactResultSelection:
         store = self._store
         if store is None or not store.visible_count:
             return
-        lo = max(0, min(int(first), int(last)))
-        hi = min(store.visible_count - 1, max(int(first), int(last)))
+        # Each end is clamped on its own before they are ordered. Clamping the
+        # smaller against zero and the larger against the end left a range that
+        # began past the end inverted -- 20..30 of ten rows became 9..20 --
+        # which the identity path then filled from the top of the list and
+        # wrote off the end of the bitset.
+        last_position = store.visible_count - 1
+        lo = max(0, min(int(first), last_position))
+        hi = max(0, min(int(last), last_position))
+        if lo > hi:
+            lo, hi = hi, lo
         if not additive:
             self.clear()
-        before = self._count
         if store.view_index is None:
             self._select_identity_range(lo, hi)
         else:
@@ -213,12 +220,12 @@ class CompactResultSelection:
                 self._set_source(int(source))
         # Identity-range byte filling bypasses _set_source, so recompute only
         # for that fast path.  bytearray.bit_count is unavailable; int.from_bytes
-        # performs the population count in optimized C.
+        # performs the population count in optimized C. The indexed path goes
+        # through _set_source, which keeps the count itself: it only ever adds,
+        # so there was nothing for a second recount to correct.
         if store.view_index is None:
             self._count = int.from_bytes(self._bits, "little").bit_count()
             self._rebuild_sparse_if_small()
-        elif additive and self._count < before:
-            self._count = int.from_bytes(self._bits, "little").bit_count()
 
     def visible_count(self):
         store = self._store

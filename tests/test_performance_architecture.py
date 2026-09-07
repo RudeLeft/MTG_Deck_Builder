@@ -198,11 +198,23 @@ class _TaxonomyRepository:
     def subtype_catalog(self, _content, _paper):
         return [(f"{self.version}-subtype", "Creature")]
 
-    def set_types(self, _content, _paper):
+    def set_types(self, _content, _paper, games=None):
         return [(f"{self.version}-set-type", 1)]
 
-    def sets(self, _allowed=None, *, content_types=None, paper_only=False):
+    def sets(self, _allowed=None, *, content_types=None, paper_only=False,
+             games=None):
         return [(f"{self.version}-set", f"{self.version} Set")]
+
+    # Platform scoping, the per-legality format lists and card shapes joined
+    # the repository later. Without them here the loader caught an
+    # AttributeError per scope and fell back to empty vocabulary, so this test
+    # stopped exercising the path it is about.
+    def formats_by_status(self, _content, _paper, games=None):
+        return {"playable": (f"{self.version}-format",),
+                "banned": (), "restricted": ()}
+
+    def layouts(self, _content, _paper, games=None):
+        return [(f"{self.version}-layout", 1)]
 
 
 class _BlockingWorkspaceRepository:
@@ -287,6 +299,64 @@ def main():
     compact_selection.select_view_range(0, store.logical_count - 1)
     dense_selection_info = compact_selection.diagnostics()
     compact_selection.clear()
+
+    # A range that starts past the end used to invert: the low end was clamped
+    # against zero and the high end against the last row, so 20..30 of ten rows
+    # became 9..20, which the identity path filled from the top of the list and
+    # wrote off the end of the bitset. Both ends are clamped on their own now.
+    small_store = SearchResultStore.from_rows(
+        [{"id": "s-%d" % index, "name": "Small %d" % index} for index in range(10)])
+    small_selection = CompactResultSelection(small_store)
+    range_errors = []
+    range_counts = {}
+    for label, (first, last) in (
+            ("inside", (2, 5)),
+            ("crossing the end", (8, 30)),
+            ("wholly past the end", (20, 30)),
+            ("backwards", (7, 3)),
+            ("negative", (-5, 4)),
+            ("both negative", (-9, -2)),
+    ):
+        small_selection.clear()
+        try:
+            small_selection.select_view_range(first, last)
+        except Exception as exc:                       # noqa: BLE001 - the point
+            range_errors.append("%s: %s" % (label, type(exc).__name__))
+            continue
+        range_counts[label] = len(small_selection)
+    # The same ranges again with a view index in place: there the ends are
+    # sliced out of the index, and a backwards pair slices nothing at all, so
+    # ordering them is load-bearing in a way the identity path hides.
+    small_store.swap_view_index(range(small_store.logical_count))
+    indexed_counts = {}
+    for label, (first, last) in (
+            ("inside", (2, 5)),
+            ("backwards", (7, 3)),
+            ("crossing the end", (8, 30)),
+            ("wholly past the end", (20, 30)),
+    ):
+        small_selection.clear()
+        try:
+            small_selection.select_view_range(first, last)
+        except Exception as exc:                       # noqa: BLE001 - the point
+            range_errors.append("indexed %s: %s" % (label, type(exc).__name__))
+            continue
+        indexed_counts[label] = len(small_selection)
+    small_store.reset_view()
+    small_selection.clear()
+    ranges_stay_inside_the_store = (
+        not range_errors
+        and range_counts == {
+            "inside": 4, "crossing the end": 2, "wholly past the end": 1,
+            "backwards": 5, "negative": 5, "both negative": 1,
+        }
+        and indexed_counts == {
+            "inside": 4, "backwards": 5, "crossing the end": 2,
+            "wholly past the end": 1,
+        }
+        # Every selected source has to be a real row, not a padding bit.
+        and all(small_store.view_position_for_source(source) is not None
+                for source in range(small_store.logical_count)))
 
     view_worker = ResultPreparationWorker("performance-result-test")
     first_generation = view_worker.submit_view(store, {}, sort_col="name", sort_desc=False)
@@ -481,6 +551,8 @@ def main():
             and "prepare_view_index" in sources["mtgdb/search/results.py"]
             and "prepare_vocabulary" in sources["mtgdb/search/results.py"]
             and "_build_async_result_values_filter" in sources["mtgdb/ui/table_filters.py"]),
+        "a selection range stays inside the store it is bound to": (
+            ranges_stay_inside_the_store),
         "internal performance diagnostics expose logical rows caches and workers": (
             # These aggregate per-instance state that no lower object holds.
             "def result_performance_info(" in sources["mtgdb/ui/results.py"]
