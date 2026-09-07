@@ -11,6 +11,9 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.core import cache_names
 from mtgdb.database import schema
 from mtgdb.deck.model import Deck
+from mtgdb.core.atomic_files import TEMP_SUFFIX, sweep_abandoned_writes
+from mtgdb.deck.io import save_deck_text
+from mtgdb.preferences.repository import UIPreferencesRepository
 from mtgdb.workspace.repository import WORKSPACE_VERSION, WorkspaceRepository
 
 
@@ -139,6 +142,63 @@ def _cache_identity_check(tmp):
     return result
 
 
+def _abandoned_temporary_checks(root):
+    """Every durable writer cleans up after a process killed mid-write.
+
+    The atomic write shape -- temporary file, fsync, replace -- cannot clean up
+    after itself when the process is killed between the two steps, and autosave
+    enters that window constantly. Bulk downloads learned this first; these are
+    the same sweep for the three writers that persist the user's own work.
+    """
+    def temporaries(folder):
+        return sorted(path.name for path in Path(folder).iterdir()
+                      if path.name.endswith(TEMP_SUFFIX))
+
+    workspace_dir = Path(root) / "swept-workspace"
+    (workspace_dir / "workspace_recovery").mkdir(parents=True)
+    (workspace_dir / ".session.json.dead.tmp").write_text("half", encoding="utf-8")
+    (workspace_dir / "workspace_recovery"
+     / ".session_20260101_000000_000.json.dead.tmp").write_text(
+        "half", encoding="utf-8")
+    WorkspaceRepository(workspace_dir)
+    workspace_clean = (
+        not temporaries(workspace_dir)
+        and not temporaries(workspace_dir / "workspace_recovery"))
+
+    preferences_dir = Path(root) / "swept-preferences"
+    preferences_dir.mkdir()
+    (preferences_dir / ".ui_preferences.json.dead.tmp").write_text(
+        "half", encoding="utf-8")
+    UIPreferencesRepository(preferences_dir / "ui_preferences.json")
+    preferences_clean = not temporaries(preferences_dir)
+
+    deck_dir = Path(root) / "swept-decks"
+    deck_dir.mkdir()
+    (deck_dir / ".My Deck.txt.dead.tmp").write_text("half", encoding="utf-8")
+    (deck_dir / ".Another Deck.txt.dead.tmp").write_text("half", encoding="utf-8")
+    save_deck_text(deck_dir / "My Deck.txt", Deck(name="My Deck"))
+    deck_clean = (
+        ".My Deck.txt.dead.tmp" not in temporaries(deck_dir)
+        # Writing one deck must not delete a different deck's temporary.
+        and ".Another Deck.txt.dead.tmp" in temporaries(deck_dir))
+
+    narrow_dir = Path(root) / "swept-narrow"
+    narrow_dir.mkdir()
+    (narrow_dir / ".session.json.aaa.tmp").write_text("ours", encoding="utf-8")
+    (narrow_dir / ".other-app.dat.bbb.tmp").write_text("theirs", encoding="utf-8")
+    (narrow_dir / "notes.tmp").write_text("a real file", encoding="utf-8")
+    removed = sweep_abandoned_writes(narrow_dir, "session.json")
+    remaining = set(temporaries(narrow_dir))
+    narrow = (
+        removed == 1
+        and remaining == {".other-app.dat.bbb.tmp", "notes.tmp"}
+        # Naming no prefix must never mean "everything in this folder".
+        and sweep_abandoned_writes(narrow_dir) == 0
+        and sweep_abandoned_writes(narrow_dir / "missing", "session.json") == 0)
+
+    return (workspace_clean and preferences_clean and deck_clean), narrow
+
+
 def main():
     (invalid_move_safe, invalid_quantity_safe, quantity_integer,
      invalid_board_safe, same_board_noop) = _deck_mutation_checks()
@@ -147,8 +207,11 @@ def main():
         tmp = Path(directory)
         workspace_version_safe, snapshot_collision_safe = _workspace_checks(tmp)
         cache_identity_safe = _cache_identity_check(tmp)
+        abandoned_swept, sweep_is_narrow = _abandoned_temporary_checks(tmp)
 
     checks = {
+        "an interrupted write leaves nothing behind for good": abandoned_swept,
+        "a sweep only removes this application's own temporaries": sweep_is_narrow,
         "invalid deck move preserves source state": invalid_move_safe,
         "deck rejects non-positive additions": invalid_quantity_safe,
         "deck stores quantities as integers": quantity_integer,

@@ -11,6 +11,9 @@ import tempfile
 import threading
 import time
 
+from mtgdb.core.atomic_files import (
+    TEMP_SUFFIX, sweep_abandoned_writes, temp_prefix,
+)
 from mtgdb.core.background_jobs import spawn_daemon
 
 from mtgdb.deck.model import Deck
@@ -61,6 +64,11 @@ class WorkspaceRepository:
         self._clock = clock
         self._last_signature = None
         self._last_recovery = 0.0
+        # Autosave runs constantly, so the window between writing a temporary
+        # file and replacing the target is entered often. A process killed
+        # inside it leaves the temporary behind for good; sweep those now.
+        sweep_abandoned_writes(root, self.session_path.name)
+        sweep_abandoned_writes(self.recovery_dir, "session_")
 
     @staticmethod
     def json_safe(value):
@@ -240,7 +248,7 @@ class WorkspaceRepository:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            prefix=temp_prefix(path.name), suffix=TEMP_SUFFIX, dir=path.parent)
         temporary_path = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

@@ -7,6 +7,10 @@ from pathlib import Path
 import re
 import tempfile
 
+from mtgdb.core.atomic_files import (
+    TEMP_SUFFIX, sweep_abandoned_writes, temp_prefix,
+)
+
 
 
 _LINE_RE = re.compile(r"^\s*(\d+)\s*[xX]?\s+(.+?)\s*$")
@@ -49,8 +53,11 @@ def save_deck_text(path, deck):
     """Atomically save a TXT decklist so a failed overwrite preserves the old file."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Deck files land in folders the user chooses, so only this deck's own
+    # abandoned temporaries are swept, and only when writing here anyway.
+    sweep_abandoned_writes(target.parent, target.name)
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        prefix=temp_prefix(target.name), suffix=TEMP_SUFFIX, dir=target.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

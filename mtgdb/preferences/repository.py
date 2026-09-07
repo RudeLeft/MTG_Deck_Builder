@@ -7,6 +7,10 @@ import os
 from pathlib import Path
 import tempfile
 
+from mtgdb.core.atomic_files import (
+    TEMP_SUFFIX, sweep_abandoned_writes, temp_prefix,
+)
+
 
 TABLE_COLUMNS_VERSION = 3
 
@@ -16,6 +20,9 @@ class UIPreferencesRepository:
 
     def __init__(self, path):
         self.path = Path(path)
+        # Same reasoning as the workspace writer: a killed process leaves its
+        # temporary file in the portable folder with nothing to remove it.
+        sweep_abandoned_writes(self.path.parent, self.path.name)
 
     def load(self):
         """Return a preference mapping, tolerating absent or invalid files."""
@@ -42,7 +49,8 @@ class UIPreferencesRepository:
         # empty preferences file, which load() silently reads back as {} --
         # resetting every saved table layout.
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent)
+            prefix=temp_prefix(self.path.name), suffix=TEMP_SUFFIX,
+            dir=self.path.parent)
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as target:

@@ -70,6 +70,7 @@ mtgdb/
     scryfall_json.py     #   parse Scryfall JSON list columns stored as text
     net.py               #   Scryfall HTTP transport (headers, throttling, retries, length-checked downloads)
     background_jobs.py   #   JobCancelled, check_cancel, spawn_daemon, GenerationalWorker
+    atomic_files.py      #   atomic-write temp naming + abandoned-temp sweep
   search/                # interactive search domain (Tk-free)
     models.py            #   SearchCriteria, worker events, result contracts
     repository.py        #   search DB gateway, narrow projection, suggestions, catalogs
@@ -189,6 +190,7 @@ only in the module that owns X.
 | `mtgdb/core/scryfall_json.py` | Shared parsing of Scryfall JSON list columns (notably `card_faces`) that bulk import stores as text |
 | `mtgdb/core/net.py` | Scryfall HTTP behavior, headers, throttling, transient retries, declared-length verification, partial cleanup |
 | `mtgdb/core/background_jobs.py` | Shared cancellation exception, cooperative cancel check, daemon-thread factory, and generation-tagged single-worker controller for printing and syncing |
+| `mtgdb/core/atomic_files.py` | Shared temporary-file naming for atomic writes and the sweep that removes temporaries a killed process left behind |
 | `mtgdb/search/models.py` | Immutable search criteria, signatures, worker events, result contracts |
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
 | `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, terminal-event queue, bounded cache |
@@ -260,6 +262,7 @@ have at least two routing examples.
 | `mtgdb/core/scryfall_json.py` | change how stored Scryfall JSON list columns are parsed<br>change well-formed card-face extraction shared by legality, images, and comparison | `mtgdb/deck/legality.py`; `mtgdb/images/service.py`; `mtgdb/comparison/models.py` | Parse only. Card semantics, image selection, and display formatting stay with their owners. |
 | `mtgdb/core/net.py` | change shared HTTP headers, Scryfall API throttling, timeout, or retry policy<br>change streaming download length verification or partial-file cleanup | `mtgdb/database/sync.py`; `mtgdb/images/service.py`; `mtgdb/printing/service.py` | Keep domain interpretation, SQL, and Tk out of transport code. |
 | `mtgdb/core/background_jobs.py` | change cooperative cancellation behavior<br>change shared daemon/generation worker lifecycle used by sync or printing | `mtgdb/database/sync.py`; `mtgdb/printing/service.py` | Do not add feature-specific progress or payload semantics. |
+| `mtgdb/core/atomic_files.py` | change atomic-write temporary naming<br>change which abandoned temporaries a writer sweeps | `mtgdb/workspace/repository.py`; `mtgdb/preferences/repository.py`; `mtgdb/deck/io.py` | Naming and cleanup only: the writers keep their own payload semantics, and a sweep never removes a file this application did not name. |
 | `mtgdb/search/models.py` | add/change semantic Search criteria such as Supertypes, Content, or Paper-only<br>change Search worker-event or result-contract dataclasses/signatures | `mtgdb/ui/search.py`; `mtgdb/search/controller.py`; `mtgdb/database/search_queries.py` | No Tk state, taxonomy discovery, or SQL construction belongs here. |
 | `mtgdb/search/repository.py` | add a card field required by broad Results rows<br>change Search name-suggestion or filter-catalog gateway behavior | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/search/models.py` | Keep SQL in database owners and Tk in UI owners. |
 | `mtgdb/search/controller.py` | change Search cache or unchanged-search behavior<br>change generation invalidation, stale-event rejection, or worker queue lifecycle | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Do not read widgets or construct SQL here. |
@@ -338,12 +341,13 @@ rows override broader rows.
 | `mtgdb/database/{schema,queries,search_queries,taxonomy,semantics,bulk_import}.py` | `sqlite3`; `mtgdb.database.{constants,semantics,schema}` | `tkinter`; `mtgdb.core.net`; `mtgdb.search.*`; `mtgdb.ui.*`; `mtgdb.database.db` |
 | `mtgdb/database/sync.py` | `mtgdb.core.{net,background_jobs}`; `mtgdb.database.{bulk_import,schema}` | `tkinter`; `mtgdb.search.*`; `mtgdb.ui.*`; `mtgdb.database.db` |
 | `mtgdb/core/scryfall_json.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
+| `mtgdb/core/atomic_files.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/comparison/models.py` | stdlib; `mtgdb.core.scryfall_json` | `tkinter`; `sqlite3`; `mtgdb.core.net`; any `mtgdb.ui.*` |
 | `mtgdb/images/service.py` | `mtgdb.core.{net,cache_names,background_jobs,scryfall_json}`; `PIL` | `tkinter`; `mtgdb.ui.*` |
 | `mtgdb/printing/renderer.py` | `reportlab`; stdlib | `PIL`; `tkinter`; `mtgdb.core.net`; `mtgdb.core.cache_names`; deck state; worker management |
 | `mtgdb/printing/service.py` | `mtgdb.core.{net,cache_names,background_jobs}`; `mtgdb.printing.renderer`; `PIL` | `tkinter`; `mtgdb.ui.*` |
-| `mtgdb/workspace/repository.py` | stdlib; `mtgdb.core.background_jobs`; `mtgdb.deck.{model,sessions}` | `tkinter`; `sqlite3`; `mtgdb.ui.*`; `mtgdb.database.*` |
-| `mtgdb/preferences/repository.py` | stdlib | `tkinter`; `sqlite3`; `mtgdb.ui.*` |
+| `mtgdb/workspace/repository.py` | stdlib; `mtgdb.core.{background_jobs,atomic_files}`; `mtgdb.deck.{model,sessions}` | `tkinter`; `sqlite3`; `mtgdb.ui.*`; `mtgdb.database.*` |
+| `mtgdb/preferences/repository.py` | stdlib; `mtgdb.core.atomic_files` | `tkinter`; `sqlite3`; `mtgdb.ui.*` |
 
 ### UI feature clusters
 
@@ -1338,6 +1342,17 @@ every feature together and is exempt.
   (`spawn_daemon`), and the generation-tagged single-worker controller
   (`GenerationalWorker`) in `core/background_jobs.py`; route print and database-sync
   cooperative cancellation checks through `check_cancel`. _Verification:_ **AUTO**.
+- **DUR-001 — MUST:** Sweep the temporary files an interrupted atomic write
+  leaves behind. Every durable writer creates a temporary beside its target,
+  fsyncs it, and replaces the target in one step, so no reader ever sees a
+  half-written file. That shape cannot clean up after a process killed
+  between the two steps: the `finally` never runs and the temporary stays in
+  the portable folder the user is told to copy between machines. Bulk
+  downloads sweep their own; the workspace, preferences and deck-file
+  writers MUST sweep theirs through `core/atomic_files.py`. A sweep MUST
+  name the prefixes it removes: a folder can hold another application's
+  temporaries, and deleting those is worse than the litter this prevents.
+  _Verification:_ **AUTO**.
 - **BGJ-002 — MUST:** Keep `core/background_jobs.py` Tk-free and free of feature
   imports; it is the shared base. _Verification:_ **AUTO**.
 - **BGJ-003 — MUST:** Derive `PrintController` and `DatabaseSyncController` from

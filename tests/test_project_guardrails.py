@@ -156,13 +156,16 @@ def _internal_import_allowed(module, imported):
         return False
     if module == "mtgdb/workspace/repository.py":
         return imported in {
-            "mtgdb.core.background_jobs", "mtgdb.deck.model", "mtgdb.deck.sessions"}
+            "mtgdb.core.background_jobs", "mtgdb.core.atomic_files",
+            "mtgdb.deck.model", "mtgdb.deck.sessions"}
     if module == "mtgdb/deck/sessions.py":
         return imported == "mtgdb.deck.model"
     if module.startswith("mtgdb/comparison/"):
         return imported == "mtgdb.core.scryfall_json"
     if module.startswith("mtgdb/preferences/"):
-        return False
+        # The shared atomic-write helper is the one dependency: preferences
+        # writes the same way every other durable writer does.
+        return imported == "mtgdb.core.atomic_files"
     # Package __init__ files are intentionally empty and have no internal deps.
     if module.endswith("/__init__.py") or module == "mtgdb/__init__.py":
         return False
@@ -1146,7 +1149,7 @@ def main():
                     "mtgdb/workspace/repository.py"]
                  if path.startswith("mtgdb.")}
             <= {
-                "mtgdb.core.background_jobs",
+                "mtgdb.core.background_jobs", "mtgdb.core.atomic_files",
                 "mtgdb.deck.model", "mtgdb.deck.sessions"}),
         "print renderer has no Pillow network cache or Tk dependency": all(
             not _imports_prefix(
