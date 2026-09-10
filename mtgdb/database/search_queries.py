@@ -463,6 +463,35 @@ class SearchQueryBuilder:
         where, params = self.where_sql()
         return f"SELECT COUNT(*) AS match_count FROM cards{where}", params
 
+    def build_group_count(self, column):
+        """Count matches per distinct value of one stored column.
+
+        The same WHERE clause as the result query, aggregated in the engine
+        with GROUP BY so a single-valued facet's contextual counts never
+        require materializing rows in Python. The column is validated
+        against the real schema to keep this injection-safe.
+        """
+        if column not in _CARD_COLUMN_NAMES:
+            raise ValueError(f"Invalid group-count column: {column!r}")
+        where, params = self.where_sql()
+        return (
+            f"SELECT {column} AS value, COUNT(*) AS n FROM cards{where} "
+            f"GROUP BY {column}", params)
+
+    def build_platform_counts(self):
+        """Count matches available on each Scryfall game platform.
+
+        ``games`` is a comma-joined member list, so per-platform counts use
+        exact bounded membership rather than GROUP BY on the whole string.
+        """
+        where, params = self.where_sql()
+        sums = ", ".join(
+            "SUM(CASE WHEN ',' || COALESCE(games, '') || ',' LIKE ? "
+            "THEN 1 ELSE 0 END) AS " + name
+            for name in ("paper", "arena", "mtgo"))
+        like_params = ["%," + name + ",%" for name in ("paper", "arena", "mtgo")]
+        return f"SELECT {sums} FROM cards{where}", [*like_params, *params]
+
     def build(self, *, set_codes, columns, ordered=True):
         where, params = self.where_sql()
         one_selected_set = (
@@ -585,6 +614,39 @@ class CardSearchQueryMixin:
         else:
             rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+    def group_count_search(self, *, connection=None, column, **criteria):
+        """Return {value: count} for one column under canonical criteria."""
+        builder = _configured_search_builder(**criteria)
+        if builder is None:
+            return {}
+        sql, params = builder.build_group_count(column)
+        if connection is None:
+            with self._lock:
+                rows = self.conn.execute(sql, params).fetchall()
+        else:
+            rows = connection.execute(sql, params).fetchall()
+        counts = {}
+        for row in rows:
+            value = row[0]
+            if value is not None and str(value) != "":
+                counts[str(value)] = int(row[1])
+        return counts
+
+    def platform_count_search(self, *, connection=None, **criteria):
+        """Return {platform: count} for paper/arena/mtgo under criteria."""
+        builder = _configured_search_builder(**criteria)
+        if builder is None:
+            return {"paper": 0, "arena": 0, "mtgo": 0}
+        sql, params = builder.build_platform_counts()
+        if connection is None:
+            with self._lock:
+                row = self.conn.execute(sql, params).fetchone()
+        else:
+            row = connection.execute(sql, params).fetchone()
+        keys = ("paper", "arena", "mtgo")
+        return {key: int((row[index] if row is not None else 0) or 0)
+                for index, key in enumerate(keys)}
 
     def count_search(self, *, connection=None, **criteria):
         """Count Search matches using SQL COUNT(*) and canonical criteria clauses."""

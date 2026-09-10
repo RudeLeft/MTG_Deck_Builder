@@ -586,6 +586,61 @@ def main():
                 and latest_event.signature == latest_criteria.signature()
                 and latest_event.kind == "done"
                 and latest_event.payload.result_count == 1)
+            # Flat single-column facets are answered by an in-engine GROUP BY
+            # whenever the user has that dimension filtered (which otherwise
+            # forces a dedicated row pull just to count the facet). The
+            # aggregate path MUST return exactly what applying each value
+            # returns; a chosen set type and rarity route set_type, rarity,
+            # set_code and games through SQL here.
+            flat_criteria = SearchCriteria.from_mapping({
+                "set_types": ["expansion"], "rarities": ["common"],
+                "games": ["paper"], "content_types": ["card"],
+            })
+            flat_generation = context_controller.request(
+                flat_criteria,
+                rarities=["common", "uncommon", "rare"],
+                set_types=["expansion", "alchemy"],
+                sets=[("tst", "Test Set"), ("ana", "Arena Set"),
+                      ("tst2", "Second Test Set")])
+            deadline = time.monotonic() + 5.0
+            flat_event = None
+            while time.monotonic() < deadline and flat_event is None:
+                flat_event = context_controller.poll_latest()
+                if flat_event is None:
+                    time.sleep(0.01)
+
+            def _flat_truth(field, value, **extra):
+                base = {"rarities": ["common"], "set_types": ["expansion"],
+                        "games": ["paper"], "content_types": ["card"],
+                        "columns": ("id",)}
+                base.pop(field, None)
+                base.update(extra)
+                base[field] = [value]
+                return len(db.search(**base))
+
+            flat_sql_matches_reality = (
+                flat_event is not None
+                and flat_event.generation == flat_generation
+                and flat_event.kind == "done"
+                # set_type: relaxing it drops set_types, so each value's count
+                # is that value applied against the rest (rarity=common).
+                and all(
+                    flat_event.payload.set_type_counts.get(value, 0)
+                    == _flat_truth("set_types", value)
+                    for value in ("expansion", "alchemy"))
+                and all(
+                    flat_event.payload.rarity_counts.get(value, 0)
+                    == _flat_truth("rarities", value)
+                    for value in ("common", "uncommon", "rare"))
+                # set_code counts come from the GROUP BY path too.
+                and all(
+                    flat_event.payload.set_counts.get(value, 0)
+                    == _flat_truth("set_codes", value)
+                    for value in ("tst", "ana", "tst2"))
+                and all(
+                    flat_event.payload.game_counts.get(value, 0)
+                    == _flat_truth("games", value)
+                    for value in ("paper", "arena", "mtgo")))
         finally:
             context_controller.shutdown(timeout=2.0)
         db.close()
@@ -1172,6 +1227,8 @@ def main():
             and cached.kind == "unchanged"),
         "context worker prepares data-derived facets off the Search path": (
             context_worker_prepares_facets),
+        "context answers flat facets in SQL without changing counts": (
+            flat_sql_matches_reality),
         "Any facet compatibility does not let a selected OR peer revive zero options": (
             any_peer_does_not_inflate_zero),
         "union-style facets do not let selected peers revive zero options": (

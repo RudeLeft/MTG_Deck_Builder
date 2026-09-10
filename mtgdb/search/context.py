@@ -549,6 +549,18 @@ def _relaxed(criteria, facet):
     return criteria
 
 
+# Flat facets whose count is a single-valued GROUP BY over one column.
+# They are answered in the engine only when relaxing them would otherwise
+# force a dedicated row pull (i.e. the user has that dimension filtered);
+# otherwise they ride a shared row scan the complex facets already need.
+_FLAT_GROUP_COLUMNS = {
+    "rarities": "rarity",
+    "set_types": "set_type",
+    "set_codes": "set_code",
+    "layouts": "layout",
+}
+
+
 _FACET_COLUMNS = {
     "card_types": ("type_line",),
     "supertypes": ("type_line",),
@@ -682,9 +694,12 @@ class SearchContextController:
         with self._condition:
             return generation == self._generation and not self._closed
 
-    def _rows_by_facet(self, generation, reader, criteria):
+    def _rows_by_facet(self, generation, reader, criteria, skip=()):
         grouped = defaultdict(lambda: {"criteria": None, "facets": [], "columns": set()})
+        skip = set(skip)
         for facet, columns in _FACET_COLUMNS.items():
+            if facet in skip:
+                continue
             relaxed = _relaxed(criteria, facet)
             bucket = grouped[relaxed.signature()]
             bucket["criteria"] = relaxed
@@ -730,7 +745,43 @@ class SearchContextController:
                 "all_language_count": 0,
             }
 
-            for facets, rows in self._rows_by_facet(generation, reader, criteria):
+            layout_any = str(criteria.layout_mode or "any").casefold() == "any"
+            flat_eligible = {"rarities", "set_types", "set_codes", "games"}
+            if layout_any:
+                flat_eligible.add("layouts")
+            complex_sigs = {
+                _relaxed(criteria, facet).signature()
+                for facet in _FACET_COLUMNS if facet not in flat_eligible
+            }
+            sql_facets = {
+                facet for facet in flat_eligible
+                if _relaxed(criteria, facet).signature() not in complex_sigs
+            }
+
+            flat_outputs = {
+                "rarities": (rarities, "rarity_counts"),
+                "set_types": (set_types, "set_type_counts"),
+                "set_codes": (set_codes, "set_counts"),
+                "layouts": (layouts, "layout_counts"),
+            }
+            for facet in sql_facets:
+                if not self._is_current(generation):
+                    return None
+                if facet == "games":
+                    output["game_counts"] = self.repository.platform_counts(
+                        _relaxed(criteria, "games"), reader)
+                    continue
+                vocab = _catalog_values(flat_outputs[facet][0])
+                if not vocab:
+                    continue
+                counts = self.repository.group_counts(
+                    _relaxed(criteria, facet), reader,
+                    _FLAT_GROUP_COLUMNS[facet])
+                output[flat_outputs[facet][1]] = {
+                    value: int(counts.get(value, 0)) for value in vocab}
+
+            for facets, rows in self._rows_by_facet(
+                    generation, reader, criteria, skip=sql_facets):
                 facets = set(facets)
                 if not self._is_current(generation):
                     return None
