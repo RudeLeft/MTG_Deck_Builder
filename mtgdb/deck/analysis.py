@@ -68,7 +68,7 @@ def analyze_deck(deck):
             for color in _COLOR_LETTERS:
                 if color in produced:
                     sources[color] += quantity
-        if "Land" in type_line:
+        if is_land(card):
             lands += quantity
             continue
         mana_value = float(card.get("cmc") or 0)
@@ -102,6 +102,29 @@ def analyze_deck(deck):
         opening_land_stats=(main_total, lands, land_average, land_probability),
     )
 
+def front_face(type_line):
+    """Return the type line of the face a card is played from.
+
+    A double-faced card stores both faces in one string, so a card whose back
+    is a land reads as "Sorcery // Land" or "Legendary Enchantment //
+    Legendary Land". Deck statistics ask what a card is while it sits in your
+    hand, and only the front face answers that: Growing Rites of Itlimoc is a
+    three-mana enchantment that can never be played as a land, however its
+    back face reads. Matching the whole string counted 82 cards -- every
+    transforming permanent with a land back, and every Zendikar Rising modal
+    card -- as lands, which removed them from the curve and inflated the
+    opening-hand land figures.
+    """
+    value = type_line or ""
+    head, separator, _back = value.partition("//")
+    return head.strip() if separator else value
+
+
+def is_land(card):
+    """Return whether a card occupies a land slot in deck statistics."""
+    return "Land" in front_face(card.get("type_line"))
+
+
 def color_identity(card):
     value = card.get("color_identity") or ""
     if isinstance(value, list):
@@ -110,7 +133,7 @@ def color_identity(card):
 
 
 def classify_type(type_line):
-    value = type_line or ""
+    value = front_face(type_line)
     for needle, label in _TYPE_ORDER:
         if needle in value:
             return label
@@ -125,13 +148,15 @@ def deck_stats(deck):
     types = {}
     for entry in deck.iter_entries("main"):
         card, quantity = entry["card"], entry["qty"]
-        type_line = card.get("type_line", "")
+        type_line = card.get("type_line") or ""
         label = classify_type(type_line)
         types[label] = types.get(label, 0) + quantity
-        if "Land" in type_line:
+        if is_land(card):
             continue
-        mana_value = int(card.get("cmc") or 0)
-        curve[min(mana_value, 7)] += quantity
+        # float() first: a mana value may arrive as "3.0" from a JSON round
+        # trip, and int("3.0") raises where int(float("3.0")) does not.
+        mana_value = float(card.get("cmc") or 0)
+        curve[min(int(mana_value), 7)] += quantity
         identity = color_identity(card)
         if identity:
             for color in identity:
@@ -156,7 +181,7 @@ def average_mana_value(deck):
     spell_count = 0
     for entry in deck.iter_entries("main"):
         card = entry["card"]
-        if "Land" in (card.get("type_line") or ""):
+        if is_land(card):
             continue
         total_mana_value += float(card.get("cmc") or 0) * entry["qty"]
         spell_count += entry["qty"]
@@ -215,7 +240,10 @@ def hyper_at_least(deck_size, copies, draws, want=1):
     total = math.comb(deck_size, draws)
     misses = 0
     for count in range(0, min(want, copies + 1)):
-        if copies >= count and deck_size - copies >= draws - count:
+        # count may exceed draws when a caller asks for more successes than it
+        # draws; math.comb rejects the negative second term, so skip it here.
+        if (count <= draws and copies >= count
+                and deck_size - copies >= draws - count):
             misses += (
                 math.comb(copies, count)
                 * math.comb(deck_size - copies, draws - count))
@@ -230,7 +258,7 @@ def hyper_between(deck_size, copies, draws, lower, upper):
     total = math.comb(deck_size, draws)
     favorable = 0
     for count in range(lower, upper + 1):
-        if (count <= copies and draws - count <= deck_size - copies
+        if (0 <= count <= copies and draws - count <= deck_size - copies
                 and count <= draws):
             favorable += (
                 math.comb(copies, count)
@@ -243,7 +271,7 @@ def opening_land_stats(deck):
     deck_size = deck.total("main")
     lands = sum(
         entry["qty"] for entry in deck.iter_entries("main")
-        if "Land" in (entry["card"].get("type_line") or ""))
+        if is_land(entry["card"]))
     if deck_size == 0:
         return 0, 0, 0.0, 0.0
     draws = min(7, deck_size)
@@ -286,8 +314,8 @@ def curve_breakdown(deck, mode):
     buckets = [{label: 0 for label in labels} for _ in range(8)]
     for entry in deck.iter_entries("main"):
         card = entry["card"]
-        if "Land" in (card.get("type_line") or ""):
+        if is_land(card):
             continue
-        bucket = min(int(card.get("cmc") or 0), 7)
+        bucket = min(int(float(card.get("cmc") or 0)), 7)
         buckets[bucket][segment(card)] += entry["qty"]
     return labels, buckets

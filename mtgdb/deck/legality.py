@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 import re
 
+from mtgdb.core.format_names import format_display_name
 from mtgdb.core.scryfall_json import card_faces as scryfall_card_faces
 
 
@@ -190,8 +191,21 @@ def _card_copy_limit(card, default_limit):
     return default_limit
 
 
+def _deck_format_key(deck):
+    """Return the Scryfall lookup key for a deck's chosen format.
+
+    Always derived from the stored format, never from the display name: the
+    readable name for "duel" is "Duel Commander", and normalizing that would
+    produce "duelcommander", which matches no rule and would silently fail
+    every construction check closed.
+    """
+    return _format_key(getattr(deck, "fmt", "") or "")
+
+
 def _format_display(deck):
-    return str(deck.fmt or "Selected Format").strip() or "Selected Format"
+    """Return the format's readable name, as the pickers and preview show it."""
+    name = format_display_name(getattr(deck, "fmt", "") or "")
+    return name or "Selected Format"
 
 
 def legality_problems(deck):
@@ -203,7 +217,7 @@ def legality_problems(deck):
     rather than silently inheriting generic Constructed assumptions.
     """
     format_display = _format_display(deck)
-    deck_format = _format_key(format_display)
+    deck_format = _deck_format_key(deck)
     problems = []
     main_total = deck.total("main")
     side_total = deck.total("side")
@@ -223,7 +237,8 @@ def legality_problems(deck):
             )
         elif rule.min_main is not None and main_total < rule.min_main:
             problems.append(
-                f"Mainboard is {main_total} cards; minimum is {rule.min_main}."
+                f"Mainboard is {main_total} cards; {format_display} requires "
+                f"at least {rule.min_main}."
             )
 
         if rule.max_sideboard == 0 and side_total:
@@ -234,8 +249,8 @@ def legality_problems(deck):
         elif (rule.max_sideboard is not None
               and side_total > rule.max_sideboard):
             problems.append(
-                f"Sideboard is {side_total} cards; "
-                f"maximum is {rule.max_sideboard}."
+                f"Sideboard is {side_total} cards; {format_display} allows "
+                f"at most {rule.max_sideboard}."
             )
 
     groups = {}

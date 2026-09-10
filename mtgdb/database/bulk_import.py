@@ -143,6 +143,38 @@ def _extract_row(card):
     )
 
 
+# Bumped whenever the classification below changes, so a database built by an
+# older rule can be repaired in place instead of re-downloaded.
+UNIVERSES_BEYOND_RULE = "2"
+
+# Scryfall marks a crossover printing with the "universesbeyond" promo type.
+# The triangle security stamp used to imply the same thing and no longer does:
+# The Hobbit, Avatar, Marvel and Teenage Mutant Ninja Turtles carry the
+# ordinary oval stamp or none at all, so a stamp-only rule left 4,289 cards
+# unclassified -- visible in Search when excluding Universes Beyond, and
+# decisive during import, where five of those sets are typed "expansion" and
+# therefore compete with main Magic releases on release date.
+#
+# The marker is read set-wide for the same reason the stamp was: commons and
+# uncommons in a crossover set frequently carry no marker of their own.
+_UNIVERSES_BEYOND_SQL = """
+UPDATE cards SET universes_beyond = 1
+WHERE set_code IN (
+    SELECT DISTINCT set_code FROM cards
+    WHERE set_code IS NOT NULL
+      AND (security_stamp = 'triangle'
+           OR promo_types LIKE '%universesbeyond%')
+)
+"""
+
+
+def classify_universes_beyond(cursor):
+    """Mark every crossover set, returning how many rows changed."""
+    cursor.execute("UPDATE cards SET universes_beyond = 0")
+    cursor.execute(_UNIVERSES_BEYOND_SQL)
+    return cursor.rowcount
+
+
 _INSERT = """
 INSERT OR REPLACE INTO cards (
     id, oracle_id, name, mana_cost, cmc, type_line, raw_type_line,
@@ -215,9 +247,18 @@ def iter_card_objects(path, progress_cb=None):
         buffer = ""
         eof = False
         started = False
+        # A decode that ran out of input MUST force another read even when the
+        # buffer is already large. Reading only while the buffer is small
+        # cannot finish an object bigger than the read size: the decode fails
+        # for want of input, the recovery slice removes nothing because
+        # nothing was consumed, and the loop spins forever without raising or
+        # reporting progress. Scryfall's Treasure token is the realistic case
+        # -- its all_parts array names every card that makes a Treasure and
+        # grows with every set.
+        need_more_data = False
 
         while True:
-            if not eof and len(buffer) < 65536:
+            if not eof and (need_more_data or len(buffer) < 65536):
                 chunk = fh.read(65536)
                 if chunk:
                     buffer += chunk
@@ -231,6 +272,7 @@ def iter_card_objects(path, progress_cb=None):
                     if progress_cb:
                         progress_cb(consumed_units, total_units)
 
+            need_more_data = False
             pos = 0
             length = len(buffer)
 
@@ -271,6 +313,7 @@ def iter_card_objects(path, progress_cb=None):
                     buffer = buffer[pos:]
                     if eof:
                         raise
+                    need_more_data = True
                     break
                 yield obj
                 pos = end_pos
@@ -290,6 +333,27 @@ class ScryfallBulkImporter:
 
     def __init__(self, path):
         self.path = path
+
+    def reclassify_universes_beyond(self):
+        """Re-run only the crossover classification over stored rows.
+
+        Every input this needs is already in the database, so a rule change
+        does not justify making the user download the whole card snapshot
+        again.
+        """
+        writer = open_writer_connection(self.path)
+        try:
+            cur = writer.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            try:
+                changed = classify_universes_beyond(cur)
+                writer.commit()
+            except Exception:
+                writer.rollback()
+                raise
+        finally:
+            writer.close()
+        return changed
 
     def load_cards(self, objects, progress_cb=None, replace=True,
                    maintenance_cb=None, minimum_count=1):
@@ -346,14 +410,7 @@ class ScryfallBulkImporter:
 
                 if maintenance_cb:
                     maintenance_cb("classify", 0, 1)
-                cur.execute("UPDATE cards SET universes_beyond = 0")
-                cur.execute(
-                    "UPDATE cards SET universes_beyond = 1 "
-                    "WHERE set_code IN ("
-                    "SELECT DISTINCT set_code FROM cards "
-                    "WHERE security_stamp = 'triangle' AND set_code IS NOT NULL"
-                    ")"
-                )
+                classify_universes_beyond(cur)
                 if maintenance_cb:
                     maintenance_cb("classify", 1, 1)
 

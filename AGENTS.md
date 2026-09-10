@@ -71,6 +71,7 @@ mtgdb/
     net.py               #   Scryfall HTTP transport (headers, throttling, retries, length-checked downloads)
     background_jobs.py   #   JobCancelled, check_cancel, spawn_daemon, GenerationalWorker
     atomic_files.py      #   atomic-write temp naming + abandoned-temp sweep
+    format_names.py      #   readable names for Scryfall format keys
   search/                # interactive search domain (Tk-free)
     models.py            #   SearchCriteria, worker events, result contracts
     repository.py        #   search DB gateway, narrow projection, suggestions, catalogs
@@ -191,6 +192,7 @@ only in the module that owns X.
 | `mtgdb/core/net.py` | Scryfall HTTP behavior, headers, throttling, transient retries, declared-length verification, partial cleanup |
 | `mtgdb/core/background_jobs.py` | Shared cancellation exception, cooperative cancel check, daemon-thread factory, and generation-tagged single-worker controller for printing and syncing |
 | `mtgdb/core/atomic_files.py` | Shared temporary-file naming for atomic writes and the sweep that removes temporaries a killed process left behind |
+| `mtgdb/core/format_names.py` | The single mapping from Scryfall format key to readable format name, shared by the Format picker, the card preview, and the deck legality report |
 | `mtgdb/search/models.py` | Immutable search criteria, signatures, worker events, result contracts |
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
 | `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, terminal-event queue, bounded cache |
@@ -262,6 +264,7 @@ have at least two routing examples.
 | `mtgdb/core/scryfall_json.py` | change how stored Scryfall JSON list columns are parsed<br>change well-formed card-face extraction shared by legality, images, and comparison | `mtgdb/deck/legality.py`; `mtgdb/images/service.py`; `mtgdb/comparison/models.py` | Parse only. Card semantics, image selection, and display formatting stay with their owners. |
 | `mtgdb/core/net.py` | change shared HTTP headers, Scryfall API throttling, timeout, or retry policy<br>change streaming download length verification or partial-file cleanup | `mtgdb/database/sync.py`; `mtgdb/images/service.py`; `mtgdb/printing/service.py` | Keep domain interpretation, SQL, and Tk out of transport code. |
 | `mtgdb/core/background_jobs.py` | change cooperative cancellation behavior<br>change shared daemon/generation worker lifecycle used by sync or printing | `mtgdb/database/sync.py`; `mtgdb/printing/service.py` | Do not add feature-specific progress or payload semantics. |
+| `mtgdb/core/format_names.py` | change how a Scryfall format key is displayed<br>add a readable name for a format key | `mtgdb/ui/components.py`; `mtgdb/deck/legality.py`; `mtgdb/ui/search.py`; `mtgdb/ui/card_detail.py` | Presentation only: this mapping never authorizes Format vocabulary, and an unmapped key MUST still display and stay selectable. |
 | `mtgdb/core/atomic_files.py` | change atomic-write temporary naming<br>change which abandoned temporaries a writer sweeps | `mtgdb/workspace/repository.py`; `mtgdb/preferences/repository.py`; `mtgdb/deck/io.py` | Naming and cleanup only: the writers keep their own payload semantics, and a sweep never removes a file this application did not name. |
 | `mtgdb/search/models.py` | add/change semantic Search criteria such as Supertypes, Content, or Paper-only<br>change Search worker-event or result-contract dataclasses/signatures | `mtgdb/ui/search.py`; `mtgdb/search/controller.py`; `mtgdb/database/search_queries.py` | No Tk state, taxonomy discovery, or SQL construction belongs here. |
 | `mtgdb/search/repository.py` | add a card field required by broad Results rows<br>change Search name-suggestion or filter-catalog gateway behavior | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/search/models.py` | Keep SQL in database owners and Tk in UI owners. |
@@ -342,6 +345,7 @@ rows override broader rows.
 | `mtgdb/database/sync.py` | `mtgdb.core.{net,background_jobs}`; `mtgdb.database.{bulk_import,schema}` | `tkinter`; `mtgdb.search.*`; `mtgdb.ui.*`; `mtgdb.database.db` |
 | `mtgdb/core/scryfall_json.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/atomic_files.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
+| `mtgdb/core/format_names.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/comparison/models.py` | stdlib; `mtgdb.core.scryfall_json` | `tkinter`; `sqlite3`; `mtgdb.core.net`; any `mtgdb.ui.*` |
 | `mtgdb/images/service.py` | `mtgdb.core.{net,cache_names,background_jobs,scryfall_json}`; `PIL` | `tkinter`; `mtgdb.ui.*` |
 | `mtgdb/printing/renderer.py` | `reportlab`; stdlib | `PIL`; `tkinter`; `mtgdb.core.net`; `mtgdb.core.cache_names`; deck state; worker management |
@@ -827,7 +831,22 @@ every feature together and is exempt.
   isolated replacement transactions, distinct committed-card threshold
   protection, and index rebuild in `database/bulk_import.py`; malformed JSONL,
   trailing JSON garbage, unterminated arrays, non-card records, and missing card
-  identity MUST abort replacement. _Verification:_ **AUTO**.
+  identity MUST abort replacement. The streaming array parser MUST keep reading
+  while a decode is starved of input, never only while its buffer is small: a
+  single card object larger than the read size otherwise never completes, and
+  the import spins forever with no error and no progress. Scryfall's Treasure
+  token already exceeds 95,000 characters because its `all_parts` names every
+  card that makes a Treasure, and it grows with every set. Every parse failure
+  MUST surface as an exception rather than as a hang. Universes Beyond
+  classification MUST come from Scryfall's own `universesbeyond` promo type as
+  well as the legacy triangle security stamp, applied set-wide: the stamp alone
+  stopped identifying crossover sets once The Hobbit, Avatar, Marvel and
+  Teenage Mutant Ninja Turtles shipped with the ordinary oval stamp, which both
+  leaked them into Search when excluding Universes Beyond and let them win deck
+  import, several being typed `expansion` and so competing with main Magic
+  releases on release date. A change to that rule MUST be repairable in place
+  from stored rows, never by requiring the user to download the card snapshot
+  again. _Verification:_ **AUTO**.
 - **DBI-004 — MUST:** Keep rules normalization, type-line repair, and type/subtype
   matching functions in `database/semantics.py` without SQLite connections or UI
   dependencies. _Verification:_ **AUTO**.
@@ -835,6 +854,13 @@ every feature together and is exempt.
   suggestions in `database/queries.py`; keep canonical search construction,
   parameter ordering, projection validation, `SearchQueryBuilder`, and the stable
   `CardDB.search()` mixin implementation in `database/search_queries.py`.
+  A printing whose collector number carries another set's prefix is a booster
+  insert, not a release of its own, and MUST NOT rank as a main Magic release:
+  The List is typed `masters` and updated continuously, so without this it wins
+  import for every card it has ever carried. The demotion MUST apply only where
+  a printing would otherwise rank as a main release, leaving Secret Lair and
+  promo printings at the tier they already hold, and MUST stay metadata-driven
+  rather than becoming a maintained set-code list.
   _Verification:_ **AUTO**.
 - **DBI-006 — MUST:** Keep set/format/rarity/type/subtype/keyword/catalog
   classification queries in `mtgdb/database/taxonomy.py`. _Verification:_ **AUTO**.
@@ -889,8 +915,20 @@ every feature together and is exempt.
   and stop Tk polling before destroying the root. _Verification:_ **AUTO**.
 - **DBS-012 — MUST:** Verify HTTP `Content-Length` when supplied, reject premature
   EOF, remove partial downloads on every failed final attempt, and use bounded
-  transient retries for both bulk files and raw image bytes.
+  transient retries for both bulk files and raw image bytes. Cleanup MUST remove
+  only a file the failing attempt itself opened: a request that fails before any
+  transfer begins MUST leave whatever was already at the destination alone.
   _Verification:_ **AUTO**.
+- **DBS-015 — MUST:** Retrieve only `https` URLs in `core/net.py`, and reject any
+  other scheme before opening it. `urlopen` is installed with `file`, `ftp` and
+  `data` handlers, so an unchecked URL is not merely a failed download: on
+  Windows a `file://host/share` URL is an SMB connection that offers the
+  machine's credentials to whoever answers, and Python's redirect handler
+  permits `ftp` even when the original URL was `https`. Every URL this
+  application retrieves originates in a Scryfall response or the card database
+  and is already `https`. The URL guards in this module MUST also stay total,
+  returning or raising a clear result for a non-string rather than escaping as
+  `AttributeError`. _Verification:_ **AUTO**.
 - **DBS-013 — MUST:** Treat any missing trusted Scryfall catalog or missing
   verified Wizards Supertype taxonomy as refresh-due metadata. Refresh both
   taxonomy sources on upgrade/startup and, when the bulk revision is already
@@ -923,9 +961,16 @@ every feature together and is exempt.
   positive integers, validate board/card identity before mutation, and leave deck
   state unchanged when a mutation raises. _Verification:_ **AUTO**.
 - **DECK-002 — MUST:** Keep TXT serialization, atomic temp-file/replace saving,
-  section parsing, printing tags, and resolver calls in `deck/io.py`; a failed
-  overwrite MUST preserve the prior user-selected deck file.
-  _Verification:_ **AUTO**.
+  section parsing, printing tags, resolver calls, and decklist decoding in
+  `deck/io.py`; a failed overwrite MUST preserve the prior user-selected deck
+  file. Opening a decklist MUST NOT assume the file is plain UTF-8: decks
+  arrive from other builders and editors as UTF-8 with a byte-order mark, as
+  UTF-16, and as Windows-1252, and MUST all open. A byte-order mark MUST be
+  removed rather than left in the text, because an invisible character in front
+  of the `// Name (format)` header hides that header, silently drops the saved
+  format, and judges the deck by the wrong format's construction rules.
+  Encodings MUST be selected from the raw byte-order mark, never guessed from
+  content. _Verification:_ **AUTO**.
 - **DECK-003 — MUST:** Keep statistics, type classification, mana pips/sources,
   probability, curves, and sample hands in `deck/analysis.py`.
   _Verification:_ **AUTO**.
@@ -934,7 +979,14 @@ every feature together and is exempt.
   and missing-status checks in `deck/legality.py`; UI text MUST describe these as
   available/basic checks rather than a complete rules engine or definitive
   legality certification. Construction profiles MUST NOT authorize or populate
-  Search Format vocabulary. _Verification:_ **AUTO**.
+  Search Format vocabulary. Every format this application names to the user --
+  in the Format picker, the card preview's legality list, and each legality
+  problem sentence -- MUST use the shared readable name from
+  `core/format_names.py`, never the bare Scryfall key: the key reads wrong in
+  prose ("commander decks have no sideboard") and makes one format look like
+  two different things across panels. The rule-lookup key MUST still come from
+  the stored format value, never from that display name.
+  _Verification:_ **AUTO**.
 - **DECK-005 — MUST NOT:** Import `tkinter`, `sqlite3`, or a UI module from any
   deck module. _Verification:_ **AUTO**.
 - **DECK-006 — MUST:** Preserve entries by exact Scryfall printing ID and
@@ -948,7 +1000,12 @@ every feature together and is exempt.
   _Verification:_ **AUTO**.
 - **DECK-008 — MUST:** Preserve quantity-weighted statistics, hybrid pip
   counting, produced-mana source counting, eight curve buckets, and draw
-  formulas. _Verification:_ **AUTO**.
+  formulas. Deck statistics MUST classify a double-faced card by its front
+  face: a stored type line holds both faces ("Sorcery // Land"), and the face
+  a card is played from is the one that decides whether it fills a land slot,
+  which curve bucket it occupies, and which type it is counted under. Matching
+  the whole string counts every transforming permanent with a land back as a
+  land. _Verification:_ **AUTO**.
 - **DECK-009 — MUST:** Keep `Deck.stats`, `Deck.to_text`, and `Deck.from_text`
   as delegation-only compatibility methods in `deck/model.py`.
   _Verification:_ **AUTO**.
@@ -1092,7 +1149,11 @@ every feature together and is exempt.
 - **WSP-007 — MUST:** Maintain at least one session and exactly one valid active
   index after init/append/activate/remove/restore. _Verification:_ **AUTO**.
 - **WSP-008 — MUST:** Preserve each session's deck, optional path, dirty state,
-  selected row, and independent Mainboard/Sideboard filters and sorts.
+  selected row, and independent Mainboard/Sideboard filters and sorts. Deck
+  column sorts and table filters are written directly to the live UI state and
+  are not stored in a session until a capture runs, so any operation that ends
+  by reloading a session over those widgets MUST capture the active session
+  first — including when the deck being closed is not the active one.
   _Verification:_ **AUTO**.
 - **WSP-009 — MUST:** Preserve workspace schema version 1, exact printing IDs,
   names, formats, quantities, boards, active-tab index, search state, and the

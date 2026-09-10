@@ -27,6 +27,8 @@ WIZARDS_PAGE_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
 WIZARDS_TEXT_ACCEPT = "text/plain;q=0.9,*/*;q=0.8"
 _WIZARDS_HOSTS = {"magic.wizards.com", "www.magic.wizards.com", "media.wizards.com"}
 
+ALLOWED_SCHEMES = ("https",)
+
 _API_HOST = "api.scryfall.com"
 _MIN_API_INTERVAL = 0.1  # seconds
 _last_api_call = 0.0
@@ -37,8 +39,38 @@ def _is_api_url(url):
     """Return True only for requests sent to Scryfall's API hostname."""
     try:
         return urllib.parse.urlsplit(url).hostname == _API_HOST
-    except (TypeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
+        # urlsplit raises AttributeError for a non-string that is not None,
+        # such as a Path a caller forgot to str(). This guard exists so no
+        # caller has to pre-validate a URL, so it must be total.
         return False
+
+
+def _verify_scheme(url):
+    """Reject any URL this application is not meant to retrieve.
+
+    urlopen is installed with handlers for file, ftp and data as well as
+    http/https, so an unchecked URL is not merely a bad download: on Windows
+    a "file://host/share/x" URL is an SMB connection to that host, which
+    offers the machine's credentials to whoever answers. Every URL this
+    application fetches comes from a Scryfall response or the card database,
+    so all of them are https already; requiring it here means a hostile or
+    corrupted upstream value fails loudly instead of reaching a handler that
+    was never intended to be part of this transport.
+
+    Python's redirect handler also permits ftp, so a legitimate https URL can
+    still be redirected onto it; that redirect ends in this same check because
+    the handler re-enters the opener.
+    """
+    try:
+        # urlsplit normalizes the scheme to lower case already.
+        scheme = urllib.parse.urlsplit(url).scheme
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError(f"Unsupported download URL: {url!r}") from None
+    if scheme not in ALLOWED_SCHEMES:
+        raise ValueError(
+            f"Refusing to retrieve a {scheme or 'scheme-less'} URL; "
+            f"this application retrieves {'/'.join(ALLOWED_SCHEMES)} only")
 
 
 def _throttle_api(url):
@@ -68,7 +100,7 @@ def _request(url):
         parsed = urllib.parse.urlsplit(url)
         host = (parsed.hostname or "").casefold()
         path = parsed.path.casefold()
-    except (TypeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
         host, path = "", ""
     if host in _WIZARDS_HOSTS:
         req.add_header("User-Agent", WIZARDS_USER_AGENT)
@@ -84,7 +116,8 @@ def _request(url):
 
 
 def _open(url, timeout):
-    """Open a URL after applying API-only pacing when appropriate."""
+    """Open a supported URL after applying API-only pacing when appropriate."""
+    _verify_scheme(url)
     _throttle_api(url)
     return urllib.request.urlopen(_request(url), timeout=timeout)
 
@@ -163,6 +196,16 @@ def fetch_bytes(url, retries=2):
     raise RuntimeError("unreachable")
 
 
+def _discard_partial(dest, opened):
+    """Remove a partial download, but only one this attempt actually began."""
+    if not opened:
+        return
+    try:
+        os.remove(dest)
+    except OSError:
+        pass
+
+
 def download(url, dest, progress_cb=None, retries=2):
     """
     Stream a URL to disk with bounded transient retries.
@@ -174,6 +217,11 @@ def download(url, dest, progress_cb=None, retries=2):
     """
     attempts = max(1, int(retries) + 1)
     for attempt in range(attempts):
+        # Cleanup removes a partial file this attempt wrote. It must not
+        # remove a file that was already at the destination when a request
+        # failed before any transfer began: deleting something this call never
+        # opened turns a failed refresh into data loss.
+        opened = False
         try:
             with _open(url, timeout=120) as resp:
                 total = _declared_length(resp)
@@ -184,6 +232,10 @@ def download(url, dest, progress_cb=None, retries=2):
                 if progress_cb:
                     progress_cb(0, total)
                 with open(dest, "wb") as f:
+                    # Set only once the destination is genuinely this call's
+                    # to delete; a failing open() may be a file that was
+                    # already there and could not be replaced.
+                    opened = True
                     while True:
                         buf = resp.read(chunk_size)
                         if not buf:
@@ -205,17 +257,11 @@ def download(url, dest, progress_cb=None, retries=2):
                     progress_cb(read, total)
                 return dest
         except urllib.error.HTTPError as exc:
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
+            _discard_partial(dest, opened)
             if exc.code < 500 or attempt >= attempts - 1:
                 raise
         except (urllib.error.URLError, TimeoutError, OSError):
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
+            _discard_partial(dest, opened)
             if attempt >= attempts - 1:
                 raise
         time.sleep(0.8 * (2 ** attempt))

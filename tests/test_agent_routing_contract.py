@@ -17,6 +17,8 @@ SOURCE_MARKERS = {
     "mtgdb/core/cache_names.py": ("def cache_path(", "def readable_stem("),
     "mtgdb/core/net.py": ("def fetch_bytes(", "def download("),
     "mtgdb/core/scryfall_json.py": ("def json_list(", "def card_faces("),
+    "mtgdb/core/format_names.py": (
+        "FORMAT_WORD_LABELS = {", "def format_display_name("),
     "mtgdb/core/background_jobs.py": ("class GenerationalWorker", "def check_cancel("),
     "mtgdb/core/atomic_files.py": (
         "def sweep_abandoned_writes(", "def temp_prefix("),

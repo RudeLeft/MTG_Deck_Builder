@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from mtgdb.deck.file_jobs import submit_deck_file_job
-from mtgdb.deck.io import deck_from_text, save_deck_text
+from mtgdb.deck.io import deck_from_text, read_deck_text, save_deck_text
 from mtgdb.deck.model import Deck
 from mtgdb.ui.set_filters import PrintingFilter
 
@@ -208,8 +208,9 @@ class DeckFileWorkflowMixin:
         (allowed_set_types, allowed_set_codes, paper_only, lang) = import_sets
 
         def load_and_resolve():
-            with open(path, encoding="utf-8") as handle:
-                raw = handle.read()
+            # Decoding belongs with the rest of the decklist file format, not
+            # here: decks arrive from other tools in several encodings.
+            raw = read_deck_text(path)
             return deck_from_text(
                 raw, self.db,
                 name=os.path.splitext(os.path.basename(path))[0],

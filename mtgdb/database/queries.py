@@ -31,6 +31,17 @@ _SUPPLEMENTAL_MAGIC_SET_TYPES = (
     "commander", "starter", "duel_deck", "premium_deck", "arsenal",
     "from_the_vault", "spellbook", "box", "planechase", "archenemy",
 )
+# A collector number carrying another set's prefix ("CLB-187", "OTC-280")
+# marks a booster insert: physically a reprint of that other set's card,
+# packaged into a different product. The List is the whole of this in practice
+# -- 5,584 cards, every one prefixed, continuously updated, and typed by
+# Scryfall as "masters", which would otherwise make it a main Magic release
+# that wins on recency for anything it has ever carried. Among paper printings
+# the marker is 99.8% The List; the remainder are Secret Lair and promo cards
+# that this rule deliberately leaves alone, because it only ever demotes a
+# printing that would otherwise rank as a main release.
+_BOOSTER_INSERT_COLLECTOR = "collector_number GLOB '*[A-Z]*-*'"
+
 _SPECIAL_SET_TYPES = (
     "promo", "masterpiece", "funny", "memorabilia", "token", "alchemy",
     "treasure_chest", "minigame", "vanguard",
@@ -161,6 +172,8 @@ class CardQueryMixin:
         product_tier = (
             "CASE "
             "WHEN universes_beyond = 1 THEN 4 "
+            f"WHEN promo = 0 AND set_type IN ({primary}) "
+            f"AND {_BOOSTER_INSERT_COLLECTOR} THEN 1 "
             f"WHEN promo = 0 AND set_type IN ({primary}) THEN 0 "
             f"WHEN promo = 0 AND set_type IN ({supplemental}) THEN 1 "
             f"WHEN set_type IN ({special}) OR promo = 1 THEN 3 "

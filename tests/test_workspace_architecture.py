@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession, DeckSessionManager
 from mtgdb.search.results import SearchResultStore
+from mtgdb.ui.deck import DeckEditorMixin
 from mtgdb.ui.search import SearchFeatureMixin
 from mtgdb.workspace.repository import (
     DEFAULT_RECOVERY_KEEP, WorkspaceRepository)
@@ -57,6 +58,56 @@ class _Value:
 
     def get(self):
         return self.value
+
+
+class _Entry:
+    """The two Entry/StringVar calls the session loader makes."""
+
+    def __init__(self, value=""):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+
+    def delete(self, *_args):
+        self._value = ""
+
+    def insert(self, _index, value):
+        self._value = value
+
+
+class _SessionCloseOwner(DeckEditorMixin):
+    """The deck-pane state that closing a tab reads back over.
+
+    Column sorts and table filters live only here until a capture stores them
+    in the active session, so this owner is enough to prove that closing any
+    tab -- not just the active one -- captures before it reloads.
+    """
+
+    def __init__(self, sessions, active_index=0):
+        self.deck_sessions = DeckSessionManager(sessions, active_index=active_index)
+        self.deck = self.deck_sessions.active.deck
+        self.deck_name = _Entry(self.deck.name)
+        self.deck_format = _Entry(self.deck.fmt or "commander")
+        self._selected_deck = None
+        self._table_filters = {"main": {}, "side": {}}
+        self._deck_sorts = {"main": [None, False], "side": [None, False]}
+        self.refreshed = 0
+
+    def _sync_deck_meta(self):
+        self.deck.name = self.deck_name.get().strip() or "Untitled Deck"
+
+    def _refresh_deck_format_button(self):
+        pass
+
+    def _render_deck_tabs(self):
+        pass
+
+    def _refresh_deck_views(self):
+        self.refreshed += 1
 
 
 class _PendingSelectionOwner:
@@ -104,6 +155,40 @@ def main():
         len(manager) == 1 and manager.active_index == 0
         and manager.active.deck.name == "Untitled Deck")
 
+
+    # WSP-008: closing a deck tab reloads the surviving session over the live
+    # widgets, so the live column sort and table filters must be captured
+    # first. Closing a tab that is not the active one used to skip that
+    # capture and silently revert the sort and filters on the deck the user
+    # was still working in.
+    close_owner = _SessionCloseOwner(
+        [DeckSession(Deck("Kept", "modern")),
+         DeckSession(Deck("Other", "modern")),
+         DeckSession(Deck("Third", "modern"))])
+    close_owner._deck_sorts["main"] = ["name", True]
+    close_owner._table_filters["main"]["name"] = {"kind": "text", "text": "goblin"}
+    close_owner._selected_deck = ("printing-a", "main")
+    close_owner._close_deck_session(2)
+    live_state_survives_other_close = (
+        close_owner._deck_sorts["main"] == ["name", True]
+        and close_owner._table_filters["main"] == {
+            "name": {"kind": "text", "text": "goblin"}}
+        and close_owner._selected_deck == ("printing-a", "main")
+        and len(close_owner.deck_sessions) == 2
+        and close_owner.deck_sessions.active.deck.name == "Kept")
+
+    # The same view state must still be per-deck: switching to another tab
+    # shows that deck's own sorts and filters, not the previous one's.
+    close_owner._switch_deck_session(1)
+    switched_away = (
+        close_owner._deck_sorts["main"] == [None, False]
+        and close_owner._table_filters["main"] == {})
+    close_owner._switch_deck_session(0)
+    switched_back = (
+        close_owner._deck_sorts["main"] == ["name", True]
+        and close_owner._table_filters["main"] == {
+            "name": {"kind": "text", "text": "goblin"}})
+    per_deck_view_state = switched_away and switched_back
 
     pending_owner = _PendingSelectionOwner()
     SearchFeatureMixin._restore_pending_result_selection(pending_owner)
@@ -196,6 +281,9 @@ def main():
         for path in ROOT.glob("*.py")
     }
     checks = {
+        "closing another deck keeps the active deck's sort and filters":
+            live_state_survives_other_close,
+        "each deck still carries its own sorts and filters": per_deck_view_state,
         "session manager owns active-index lifecycle": (
             activated_first and appended_index == 2
             and removed is session_b and default_after_last_close),

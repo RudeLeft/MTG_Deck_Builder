@@ -24,6 +24,11 @@ RULES_SUPERTYPES_ATTEMPT_META_KEY = "rules:supertypes_last_attempt_epoch"
 # Card Types use Scryfall's first-class catalog as their authority. Persist
 # refresh diagnostics separately so an empty valid scope is distinguishable
 # from an unavailable catalog.
+# Which crossover-classification rule produced the stored universes_beyond
+# flags. A rule change is repaired in place from data already present rather
+# than by re-downloading the card snapshot.
+UNIVERSES_BEYOND_META_KEY = "classification:universes_beyond_rule"
+
 CARD_TYPES_ERROR_META_KEY = "catalog:card-types_last_error"
 CARD_TYPES_ATTEMPT_META_KEY = "catalog:card-types_last_attempt_epoch"
 

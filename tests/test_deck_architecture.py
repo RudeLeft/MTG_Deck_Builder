@@ -1,9 +1,12 @@
 """Deck model, TXT I/O, analysis, legality, and facade contracts."""
 
 import ast
+import atexit
 import json
 import math
 from pathlib import Path
+import shutil
+import tempfile
 
 import sys
 
@@ -11,7 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mtgdb.deck.analysis import (
-    average_mana_value, card_draw_odds, classify_type, color_pips,
+    analyze_deck, average_mana_value, card_draw_odds, classify_type,
+    color_pips,
     color_sources, curve_breakdown, deck_stats, hyper_at_least, hyper_between,
     opening_land_stats, sample_hand,
 )
@@ -21,6 +25,9 @@ from mtgdb.deck.legality import (
     _oracle_text as _legality_oracle_text,
 )
 from mtgdb.deck.legality import legality_problems
+from mtgdb.core.format_names import FORMAT_WORD_LABELS, format_display_name
+from mtgdb.deck.analysis import front_face, is_land
+from mtgdb.deck.io import read_deck_text
 from mtgdb.deck.model import BOARDS, Deck
 
 
@@ -62,6 +69,203 @@ class Resolver:
                 card for card in candidates
                 if card.get("collector_number") in collectors]
         return candidates[0] if candidates else None
+
+
+def _decklist_encoding_check():
+    """A decklist this app did not write still opens, and keeps its format.
+
+    Decks arrive from other builders and editors. A byte-order mark is the
+    dangerous one: it is invisible, so the cards still import and nothing looks
+    wrong, but it sits in front of the "// Name (format)" line and stops that
+    line being read as the header. The deck then falls back to the Commander
+    default, and a 60-card Modern deck is reported as needing 100 cards with
+    every playset over the singleton limit. UTF-16 and Windows-1252 do not
+    import at all without this.
+    """
+    body = "// Burn (modern)\n\n4 Test Card\n"
+    folder = Path(tempfile.mkdtemp(prefix="mtgdb-encodings-"))
+    atexit.register(shutil.rmtree, str(folder), True)
+
+    resolver = Resolver([_card("printing-a", "Test Card")])
+    outcomes = {}
+    for label, encoding in (("utf-8", "utf-8"), ("bom", "utf-8-sig"),
+                            ("utf-16", "utf-16"), ("cp1252", "cp1252")):
+        path = folder / ("deck-%s.txt" % label)
+        path.write_bytes(body.encode(encoding))
+        try:
+            deck, missing = deck_from_text(read_deck_text(path), resolver,
+                                           name="Fallback Name")
+            outcomes[label] = (deck.name, deck.fmt, deck.total("main"),
+                               tuple(missing))
+        except Exception as exc:                            # noqa: BLE001
+            outcomes[label] = type(exc).__name__
+
+    # A name only Windows-1252 can spell must survive that fallback.
+    latin = folder / "latin.txt"
+    latin.write_text("4 Lim-D\u00fbl's Vault\n", encoding="cp1252")
+    latin_text = read_deck_text(latin)
+
+    # A tool that re-saves an already-marked file writes the mark twice, and
+    # utf-8-sig strips only one. The second is still enough to hide the header,
+    # so removing it is the reader's job rather than the codec's.
+    doubled = folder / "doubled-bom.txt"
+    doubled.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8-sig"))
+    doubled_deck, doubled_missing = deck_from_text(
+        read_deck_text(doubled), resolver, name="Fallback Name")
+
+    expected = ("Burn", "modern", 4, ())
+    return (
+        all(outcomes[label] == expected for label in outcomes)
+        and "Lim-D\u00fbl" in latin_text
+        and (doubled_deck.name, doubled_deck.fmt, doubled_deck.total("main"),
+             tuple(doubled_missing)) == expected
+        # The mark itself is removed, not merely decoded around.
+        and not read_deck_text(
+            folder / "deck-bom.txt").startswith("\ufeff")
+        and not read_deck_text(doubled).startswith("\ufeff"))
+
+
+def _oversized_sideboard_deck():
+    """A legal-sized Modern deck whose sideboard is one card too many."""
+    deck = Deck("Sideboarded", "modern")
+    deck.add(_card("main-card", "Main Card"), "main", 60)
+    deck.add(_card("side-card", "Side Card"), "side", 16)
+    return deck
+
+
+def _format_naming_check():
+    """One format is named the same way everywhere the user can see it.
+
+    Scryfall identifies a format by a bare key. Those keys read wrong in prose
+    -- "commander decks have no sideboard" -- and made the legality report call
+    a format something different from the Format picker and the card preview:
+    "paupercommander" against "Pauper Commander". The readable name is shared,
+    and the rule lookup still uses the stored key, because normalizing the
+    display name would turn "duel" into "duelcommander" and silently fail every
+    construction check closed.
+    """
+    ui_source = (ROOT / "mtgdb/ui/components.py").read_text(encoding="utf-8")
+    legality_source = (ROOT / "mtgdb/deck/legality.py").read_text(
+        encoding="utf-8")
+
+    commander = Deck("Sideboarded", "commander")
+    commander.add(_card("side-card", "Side Card"), "side", 1)
+    commander_problems = legality_problems(commander)
+
+    duel = Deck("Duel", "duel")
+    duel_problems = legality_problems(duel)
+
+    unverified = Deck("Pauper EDH", "paupercommander")
+    unverified_problems = legality_problems(unverified)
+
+    unknown = Deck("Future", "timewalkcube")
+    unknown_problems = legality_problems(unknown)
+
+    return (
+        # Every problem sentence names the format the readable way.
+        any("Commander decks have no sideboard" in problem
+            for problem in commander_problems)
+        and not any("commander decks have no sideboard" in problem
+                    for problem in commander_problems)
+        and any("Duel Commander requires exactly 100" in problem
+                for problem in duel_problems)
+        and any("not verified for Pauper Commander" in problem
+                for problem in unverified_problems)
+        # All four construction sentences name the format, not just the two
+        # that happened to already: a minimum and a sideboard cap read as
+        # anonymous numbers otherwise.
+        and any("Modern requires at least 60" in problem
+                for problem in legality_problems(Deck("Short", "modern")))
+        and any("Modern allows at most 15" in problem
+                for problem in legality_problems(_oversized_sideboard_deck()))
+        # The lookup key still comes from the stored format, so a format whose
+        # display name differs from its key keeps its construction rules.
+        and any("exactly 100" in problem for problem in duel_problems)
+        and not any("not verified" in problem for problem in duel_problems)
+        # A format with no readable name still names itself and stays usable.
+        and any("Timewalkcube" in problem for problem in unknown_problems)
+        # One mapping, shared: the UI does not keep a second copy.
+        and format_display_name("paupercommander") == "Pauper Commander"
+        and "from mtgdb.core.format_names import" in ui_source
+        and ui_source.count('"paupercommander":') == 0
+        and "from mtgdb.core.format_names import" in legality_source
+        and set(FORMAT_WORD_LABELS) >= {"duel", "paupercommander"})
+
+
+def _double_faced_statistics_check():
+    """A card is classified by the face it is played from, not both faces.
+
+    A stored type line holds every face at once, so a transforming permanent
+    with a land back reads "Legendary Enchantment // Legendary Land" and a
+    whole-string land test counted it -- and 81 other real cards -- as a land.
+    That removed the card from the mana curve, took it out of the average mana
+    value, moved it from its real type row into Lands, and inflated both
+    opening-hand land figures, all for a three-mana enchantment that can never
+    be played as a land.
+    """
+    growing_rites = _card(
+        "rites", "Growing Rites of Itlimoc", cmc=3, mana_cost="{2}{G}",
+        type_line="Legendary Enchantment // Legendary Land")
+    mammoth = _card(
+        "mammoth", "Kazandu Mammoth", cmc=3, mana_cost="{2}{G}",
+        type_line="Creature — Elephant // Land")
+    abbey = _card(
+        "abbey", "Westvale Abbey", cmc=0, mana_cost="", identity="",
+        produced="C", type_line="Land // Legendary Creature — Demon")
+    forest = _card(
+        "forest", "Forest", cmc=0, mana_cost="", identity="", produced="G",
+        type_line="Basic Land — Forest")
+
+    deck = Deck("Faces", "modern")
+    deck.add(growing_rites, "main", 4)
+    deck.add(mammoth, "main", 4)
+    deck.add(abbey, "main", 4)
+    deck.add(forest, "main", 8)
+
+    snapshot = analyze_deck(deck)
+    legacy = deck_stats(deck)
+    _labels, buckets = curve_breakdown(deck, "type")
+
+    return (
+        # The helper reports the played face, and tolerates a missing one.
+        front_face("Sorcery // Land") == "Sorcery"
+        and front_face("Basic Land — Forest") == "Basic Land — Forest"
+        and front_face(None) == ""
+        and not is_land({"type_line": "Sorcery // Land"})
+        and is_land({"type_line": "Land // Artifact Creature"})
+        # A land back does not make a spell a land: only the 4 Abbeys and the
+        # 8 Forests fill land slots, and the other 8 cards stay spells.
+        and snapshot.stats["types"] == {
+            "Lands": 12, "Creatures": 4, "Enchantments": 4}
+        and snapshot.stats["curve"][3] == 8
+        and snapshot.opening_land_stats[:2] == (20, 12)
+        and snapshot.average_mana_value == 3.0
+        # A card kept out of the curve must be kept out of its breakdown too.
+        and buckets[3] == {
+            "Creatures": 4, "Instants": 0, "Sorceries": 0, "Artifacts": 0,
+            "Enchantments": 4, "Planeswalkers": 0, "Battles": 0, "Other": 0}
+        # The one-pass analysis and the legacy aggregate never disagree.
+        and legacy["curve"] == snapshot.stats["curve"]
+        and legacy["types"] == snapshot.stats["types"])
+
+
+def _probability_guard_check():
+    """Every probability call returns a number instead of raising.
+
+    Both summations index math.comb with a term that goes negative once a
+    caller asks for more successes than it draws, or names a lower bound below
+    zero. hyper_between guarded one of the three terms and hyper_at_least
+    guarded neither, so a future "chance of two or more copies" figure would
+    have crashed the stats panel rather than reading 0%.
+    """
+    return (
+        hyper_at_least(60, 4, 1, want=3) == 0.0
+        and hyper_at_least(60, 4, 7, want=9) == 0.0
+        and hyper_between(60, 4, 7, -2, 1) == hyper_between(60, 4, 7, 0, 1)
+        and hyper_between(60, 4, 7, 3, 99) == hyper_between(60, 4, 7, 3, 4)
+        # Asking for at least one copy is still the ordinary calculation.
+        and math.isclose(hyper_at_least(60, 4, 7, want=1),
+                         1 - math.comb(56, 7) / math.comb(60, 7)))
 
 
 def _import_roots(source):
@@ -306,6 +510,14 @@ def main():
     }
 
     checks = {
+        "a decklist opens whatever encoding it arrived in":
+            _decklist_encoding_check(),
+        "one format is named the same way on every surface":
+            _format_naming_check(),
+        "statistics classify a card by the face it is played from":
+            _double_faced_statistics_check(),
+        "probability calculations never index a negative combination":
+            _probability_guard_check(),
         "every deck mutation rejects an unknown board": (
             board_guard and card_never_swallowed),
         "face rules text reaches the copy-limit engine through JSON columns": (
@@ -404,7 +616,8 @@ def main():
         "legality aggregates printings and checks sideboard-only cards": (
             any("5 copies" in problem for problem in illegal_problems)
             and any("BANNED" in problem for problem in illegal_problems)
-            and any("minimum is 60" in problem for problem in illegal_problems)),
+            and any("requires at least 60" in problem
+                    for problem in illegal_problems)),
         "singleton size, copies, and sideboard rules are preserved": (
             any("exactly 100" in problem for problem in commander_problems)
             and any("limit 1" in problem for problem in commander_problems)
@@ -418,7 +631,7 @@ def main():
         "unknown formats fail closed instead of guessing Constructed rules": (
             len(unknown_format_problems) == 1
             and "construction rules are not verified" in unknown_format_problems[0]
-            and not any("minimum is 60" in problem
+            and not any("requires at least" in problem
                         for problem in unknown_format_problems)
             and not any("copies" in problem for problem in unknown_format_problems)),
         "missing Scryfall statuses are reported as unverified": (
@@ -440,7 +653,8 @@ def main():
             not ({"re", "json", "math", "random"} & imports["mtgdb/deck/model.py"])),
         "production UI imports each deck responsibility from its owner": (
             "from mtgdb.deck.model import Deck" in sources_by_name["mtgdb/ui/app.py"]
-            and "from mtgdb.deck.io import deck_from_text, save_deck_text"
+            and ("from mtgdb.deck.io import deck_from_text, "
+                 "read_deck_text, save_deck_text")
             in sources_by_name["mtgdb/ui/deck_files.py"]
             and "from mtgdb.deck.model import Deck" in sources_by_name["mtgdb/ui/deck.py"]
             and "from mtgdb.deck.analysis import" in sources_by_name["mtgdb/ui/deck_stats.py"]

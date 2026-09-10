@@ -13,6 +13,9 @@ from mtgdb.core.atomic_files import (
 
 
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
+
 _LINE_RE = re.compile(r"^\s*(\d+)\s*[xX]?\s+(.+?)\s*$")
 _HEADER_RE = re.compile(r"^//\s*(.+?)\s*\(([^()]+)\)\s*$")
 _SET_TAG_RE = re.compile(
@@ -36,6 +39,42 @@ def _line_for(entry):
     else:
         suffix = f" [{set_code.upper()}]" if set_code else ""
     return f"{entry['qty']} {name}{suffix}"
+
+
+def read_deck_text(path):
+    """Return the text of a decklist this application may not have written.
+
+    A decklist arrives from another builder, an exporter or a text editor, so
+    its encoding is not ours to assume. Three real cases have to work:
+
+    * A byte-order mark, which Notepad and many exporters add. Left in place it
+      is worse than a decoding nuisance: an invisible character in front of
+      ``// Name (format)`` stops that line being recognised as the header, so
+      the deck silently loses its saved format, falls back to Commander, and a
+      60-card Modern deck is then reported as needing 100 cards with every
+      playset over the singleton limit.
+    * UTF-16, which older Windows editors write when asked for "Unicode".
+    * Windows-1252, which older exports still use, and which only fails once a
+      name like Lim-Dûl's Vault or Jötun Grunt appears.
+
+    Marks are matched on the raw bytes so an encoding is never guessed from
+    content: ``utf-16`` without a mark would happily decode UTF-8 into
+    nonsense. cp1252 is the last resort because it decodes any byte, so a
+    decklist never reaches the user as a raw codec error.
+    """
+    data = Path(path).read_bytes()
+    if data.startswith(_UTF8_BOM):
+        text = data.decode("utf-8-sig")
+    elif data.startswith(_UTF16_BOMS):
+        text = data.decode("utf-16")
+    else:
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("cp1252")
+    # A mark can also survive re-encoding by an intermediate tool; the header
+    # must not be hidden behind one however it arrived.
+    return text.lstrip("\ufeff")
 
 
 def deck_to_text(deck):

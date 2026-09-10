@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import tomllib
+import urllib.error
 from unittest import mock
 import zipfile
 import sys
@@ -178,9 +179,92 @@ def _network_checks(tmp):
     byte_length_verified = (
         short_fetch_rejected and exact_accepted and malformed_tolerated
         and encoded_tolerated and identity_still_verified)
+    # DBS-012: cleanup removes a partial file this attempt wrote, never a file
+    # that was already sitting at the destination when the request failed
+    # before any transfer began.
+    survivor = tmp / "already-downloaded.bin"
+    survivor.write_bytes(b"the previous good download")
+    with mock.patch.object(
+            net, "_open",
+            side_effect=urllib.error.HTTPError(
+                "https://example.invalid/f", 404, "gone", {}, None)):
+        _raises(urllib.error.HTTPError,
+                lambda: net.download("https://example.invalid/f", survivor,
+                                     retries=0))
+    existing_file_kept = (
+        survivor.exists()
+        and survivor.read_bytes() == b"the previous good download")
+
+    # The same rule when the destination itself cannot be opened. On Windows a
+    # file that refuses open() refuses remove() too, which hides the mistake;
+    # on POSIX removal depends on the directory, not the file, so a destination
+    # that cannot be written can still be deleted. Simulating the refusal keeps
+    # the check honest on both.
+    guarded = tmp / "unwritable.bin"
+    guarded.write_bytes(b"the previous good download")
+    real_open = open
+
+    def refusing_open(file, *args, **kwargs):
+        if str(file) == str(guarded):
+            raise PermissionError(13, "permission denied")
+        return real_open(file, *args, **kwargs)
+
+    with mock.patch.object(net, "_open", return_value=_Response(b"payload")),             mock.patch("builtins.open", side_effect=refusing_open):
+        _raises(PermissionError,
+                lambda: net.download("https://example.invalid/f", guarded,
+                                     retries=0))
+    existing_file_kept = (
+        existing_file_kept and guarded.exists()
+        and guarded.read_bytes() == b"the previous good download")
+
+    # DBS-015: urlopen carries file/ftp/data handlers, so an unchecked URL is
+    # not merely a failed download. On Windows "file://host/share" is an SMB
+    # connection that offers the machine's credentials to whoever answers.
+    local = tmp / "local-secret.txt"
+    local.write_bytes(b"local file contents")
+    refused_schemes = all(
+        _raises(ValueError, call)
+        for call in (
+            lambda: net.fetch_bytes(local.as_uri(), retries=0),
+            lambda: net.download(local.as_uri(), tmp / "copied.bin", retries=0),
+            lambda: net.get_json(local.as_uri(), retries=0),
+            lambda: net.fetch_bytes("file://198.51.100.7/share/x.txt", retries=0),
+            lambda: net.fetch_bytes("ftp://198.51.100.7/x.txt", retries=0),
+            lambda: net.fetch_bytes("http://cards.scryfall.io/x.jpg", retries=0),
+            lambda: net.fetch_bytes("data:text/plain;base64,aGk=", retries=0),
+            lambda: net.fetch_bytes("cards.scryfall.io/x.jpg", retries=0)))
+    # A refused scheme is rejected before the socket layer is ever reached, and
+    # is permanent, so it is not retried. urlopen is the boundary that must not
+    # be crossed -- patching _open would bypass the very guard under test.
+    opened_urls = []
+
+    def spy(request, timeout=None):
+        opened_urls.append(request.full_url)
+        return _Response(b"ok")
+
+    with mock.patch.object(net.urllib.request, "urlopen", side_effect=spy):
+        _raises(ValueError,
+                lambda: net.fetch_bytes("ftp://198.51.100.7/x", retries=3))
+        never_opened = opened_urls == []
+        # ...and an ordinary https URL still travels the whole real path.
+        https_allowed = net.fetch_bytes(
+            "https://cards.scryfall.io/large/x.jpg", retries=0) == b"ok"
+        https_allowed = https_allowed and opened_urls == [
+            "https://cards.scryfall.io/large/x.jpg"]
+    https_allowed = https_allowed and never_opened
+    scheme_guarded = (
+        refused_schemes and https_allowed
+        and not (tmp / "copied.bin").exists()
+        # The URL guards stay total: a non-string is a clear result, never a
+        # stray AttributeError from urlsplit.
+        and net._is_api_url(Path("https://api.scryfall.com/x")) is False
+        and net._is_api_url(12) is False
+        and net._is_api_url(None) is False
+        and net._is_api_url("https://api.scryfall.com/x") is True)
+
     return (
         incomplete_rejected and incomplete_removed, retry_ok,
-        byte_length_verified)
+        byte_length_verified, existing_file_kept, scheme_guarded)
 
 
 class _Reader:
@@ -423,7 +507,8 @@ def main():
         tmp = Path(directory)
         malformed_jsonl, trailing_json, unterminated_json = _bulk_parser_checks(tmp)
         distinct_snapshot = _bulk_distinct_count_check(tmp)
-        short_download, byte_retry, byte_length_verified = _network_checks(tmp)
+        (short_download, byte_retry, byte_length_verified,
+         existing_file_kept, scheme_guarded) = _network_checks(tmp)
         restricted_playable = _legality_search_check(tmp)
         unknown_content_rejected = _unknown_content_filter_check(tmp)
         atomic_deck = _atomic_deck_save_check(tmp)
@@ -439,6 +524,8 @@ def main():
         "declared HTTP length mismatch aborts and removes partial file": short_download,
         "raw image fetch retries transient transport failures": byte_retry,
         "raw image fetch verifies declared HTTP length": byte_length_verified,
+        "a failed download leaves an existing file alone": existing_file_kept,
+        "only https URLs are retrieved": scheme_guarded,
         "search invalidation rejects pre-refresh worker results": _search_invalidation_check(),
         "search invalidation re-enables a button disabled by stale work": _search_ui_invalidation_check(),
         "numeric Search fields reject invalid numbers and inverted ranges": _numeric_search_checks(),

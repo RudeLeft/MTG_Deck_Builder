@@ -413,8 +413,13 @@ class DeckEditorMixin:
     def _close_deck_session(self, index):
         if not self.deck_sessions.is_valid_index(index):
             return False
-        if index == self.deck_sessions.active_index:
-            self._capture_active_session_state()
+        # Capture whichever deck is closing, because this method always ends by
+        # reloading the surviving active session over the live widgets. Column
+        # sorts and table filters are written straight to the live state by
+        # ui/table_filters.py and are not stored until something captures them,
+        # so closing a *different* tab used to overwrite the sort and filters
+        # the user had just set on the deck they were still working in.
+        self._capture_active_session_state()
         if not self._confirm_close_session(index):
             return False
 

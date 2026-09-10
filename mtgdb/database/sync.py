@@ -20,11 +20,12 @@ from mtgdb.core.background_jobs import (
 import mtgdb.core.net as net
 
 from mtgdb.database.authorities import SCRYFALL_CATALOGS
-from mtgdb.database.bulk_import import iter_card_objects
+from mtgdb.database.bulk_import import (
+    UNIVERSES_BEYOND_RULE, ScryfallBulkImporter, iter_card_objects)
 from mtgdb.database.schema import (
     CARD_TYPES_ATTEMPT_META_KEY, CARD_TYPES_ERROR_META_KEY,
     RULES_SUPERTYPES_ATTEMPT_META_KEY, RULES_SUPERTYPES_ERROR_META_KEY,
-    RULES_SUPERTYPES_META_KEY,
+    RULES_SUPERTYPES_META_KEY, UNIVERSES_BEYOND_META_KEY,
 )
 
 
@@ -346,6 +347,11 @@ class DatabaseSyncService:
         age = self.database_age_seconds()
         if age is None:
             return "first_launch"
+        if self.db.get_meta(
+                UNIVERSES_BEYOND_META_KEY, "") != UNIVERSES_BEYOND_RULE:
+            # Cheap to satisfy and wrong until it runs, so do not wait for the
+            # ordinary refresh window.
+            return "classification_refresh"
         if any(not self.db.catalog(name) for name in SCRYFALL_CATALOGS):
             return "catalog_refresh"
         try:
@@ -461,6 +467,26 @@ class DatabaseSyncService:
         stage("catalogs", ("", total, total))
         return len(refreshed) + int(rules_refreshed)
 
+    def _repair_universes_beyond(self):
+        """Re-apply the crossover classification when its rule has changed.
+
+        The inputs are already stored, so a corrected rule must not cost the
+        user a full snapshot download. The stored marker makes this a no-op on
+        every later run.
+        """
+        if not self.db.has_cards():
+            return False
+        if self.db.get_meta(
+                UNIVERSES_BEYOND_META_KEY, "") == UNIVERSES_BEYOND_RULE:
+            return False
+        try:
+            ScryfallBulkImporter(self.db.path).reclassify_universes_beyond()
+        except Exception:
+            log.exception("Universes Beyond reclassification failed")
+            return False
+        self.db.set_meta_many({UNIVERSES_BEYOND_META_KEY: UNIVERSES_BEYOND_RULE})
+        return True
+
     def _record_compatibility_diagnostics(self):
         """Refresh internal upstream-change diagnostics without risking sync."""
         if not self.db.has_cards():
@@ -536,6 +562,7 @@ class DatabaseSyncService:
             self.db.set_meta_many({
                 "last_successful_sync_epoch": f"{self.clock():.6f}",
             })
+            self._repair_universes_beyond()
             self._record_compatibility_diagnostics()
             total = self.db.count()
             stage("done", total)

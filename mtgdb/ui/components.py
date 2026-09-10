@@ -5,6 +5,9 @@ import tkinter as tk
 import unicodedata
 from tkinter import ttk
 
+from mtgdb.core.format_names import (
+    FORMAT_WORD_LABELS, format_display_name)
+
 from mtgdb.ui.tokens import (
     CLASSIC_ENTRY_IPADY,
     FONT_BODY,
@@ -35,35 +38,11 @@ def deck_board_label(board):
 # .capitalize() renders real multi-word format names as "Paupercommander" and
 # "Standardbrawl". These are spellings only: membership still comes entirely
 # from the legality data on the cards, and an unlisted key still displays.
-_FORMAT_WORD_LABELS = {
-    "competitivebrawl": "Competitive Brawl",
-    "duel": "Duel Commander",
-    "future": "Future Standard",
-    "tlr": "Tarkir Dragonstorm Limited",
-    "penny": "Penny Dreadful",
-    "oathbreaker": "Oathbreaker",
-    "oldschool": "Old School",
-    "paupercommander": "Pauper Commander",
-    "predh": "PreDH",
-    "premodern": "Premodern",
-    "standardbrawl": "Standard Brawl",
-}
-
-
-def format_display_name(value):
-    """Return the readable name for one Scryfall format key.
-
-    Shared so Search, the deck pane and the card preview cannot disagree about
-    what a format is called. An unknown key is title-cased rather than hidden:
-    a format this build has never heard of must still be selectable.
-    """
-    key = str(value or "").strip()
-    if not key:
-        return ""
-    known = _FORMAT_WORD_LABELS.get(key.casefold())
-    if known:
-        return known
-    return key.replace("_", " ").title()
+# The mapping and the naming rule live in core/format_names.py so the deck
+# legality engine -- a pure domain module that cannot import UI code -- names
+# formats exactly as the Format picker and the card preview do. Re-exported
+# here because this is where every UI module already looks for it.
+_FORMAT_WORD_LABELS = FORMAT_WORD_LABELS
 
 
 _BUTTON_STYLES = {

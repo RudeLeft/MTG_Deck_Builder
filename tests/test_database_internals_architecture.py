@@ -2,18 +2,21 @@
 
 import ast
 import atexit
+import json
 from pathlib import Path
 import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mtgdb.database.db import CardDB
-from mtgdb.database.schema import _CARD_COLUMN_NAMES, _SCHEMA_VERSION
+from mtgdb.database.schema import (
+    _CARD_COLUMN_NAMES, _SCHEMA_VERSION, initialize_schema)
 
 
 def _class(source, name):
@@ -25,6 +28,211 @@ def _class(source, name):
 
 def _methods(cls):
     return {node.name for node in cls.body if isinstance(node, ast.FunctionDef)}
+
+
+def _booster_insert_check():
+    """A booster insert must not outrank the set it was inserted into.
+
+    A collector number carrying another set's prefix ("CLB-187") marks a card
+    reprinted into a different product. The List is all of this in practice:
+    Scryfall types it "masters", which the resolver reads as a main Magic
+    release, and it is continuously updated, so it won import for anything it
+    had ever carried -- handing the user "plst #OTC-280" for Command Tower.
+
+    The rule only ever demotes a printing that would otherwise rank as a main
+    release, so Secret Lair and promo printings, which carry prefixed numbers
+    of their own, keep the tier they already had.
+    """
+    from mtgdb.database.bulk_import import ScryfallBulkImporter
+    from mtgdb.database.queries import _BOOSTER_INSERT_COLLECTOR
+
+    tmp = tempfile.mkdtemp(prefix="mtgdb-inserts-")
+    atexit.register(shutil.rmtree, tmp, True)
+    path = Path(tmp) / "cards.db"
+    connection = sqlite3.connect(path)
+    initialize_schema(connection)
+    connection.commit()
+    connection.close()
+
+    def card(card_id, set_code, number, released, set_type="expansion", **extra):
+        row = {
+            "id": card_id, "name": "Shared Card", "set": set_code,
+            "set_name": set_code.upper(), "set_type": set_type,
+            "collector_number": number, "lang": "en", "games": ["paper"],
+            "released_at": released, "type_line": "Instant",
+            "cmc": 1, "mana_cost": "{R}",
+        }
+        row.update(extra)
+        return row
+
+    ScryfallBulkImporter(str(path)).load_cards([
+        # Newest by date, but an insert carrying another set's number.
+        card("insert", "plst", "CLB-187", "2026-11-09", set_type="masters"),
+        # An older ordinary printing, which should still win.
+        card("ordinary", "2x2", "117", "2022-07-08", set_type="masters"),
+        # A promo with a prefixed number keeps its own lower tier either way.
+        card("promo", "plg24", "2J-b", "2026-01-01", set_type="promo", promo=True),
+    ])
+
+    from mtgdb.database.db import CardDB
+    db = CardDB(str(path))
+    try:
+        chosen = db.get_by_name("Shared Card")
+    finally:
+        db.close()
+
+    # Which tier it lands in matters, not merely that it was demoted. An
+    # insert is an ordinary-frame reprint, so it belongs one step down with
+    # the supplemental products -- still ahead of promos and special products,
+    # which a player would want even less.
+    second = Path(tmp) / "against-promo.db"
+    connection = sqlite3.connect(second)
+    initialize_schema(connection)
+    connection.commit()
+    connection.close()
+    ScryfallBulkImporter(str(second)).load_cards([
+        card("insert", "plst", "CLB-187", "2020-01-01", set_type="masters"),
+        card("promo", "pxyz", "5p", "2026-01-01", set_type="promo", promo=True),
+    ])
+    db = CardDB(str(second))
+    try:
+        over_promo = db.get_by_name("Shared Card")
+    finally:
+        db.close()
+
+    return (chosen is not None
+            and chosen["id"] == "ordinary"
+            and over_promo is not None
+            and over_promo["id"] == "insert"
+            # The marker is expressed once, as data, not spelled out inline.
+            and "GLOB" in _BOOSTER_INSERT_COLLECTOR)
+
+
+def _universes_beyond_check():
+    """Crossover sets are found by Scryfall's marker, not by a stamp.
+
+    The triangle security stamp used to imply Universes Beyond and no longer
+    does: The Hobbit, Avatar, Marvel and Teenage Mutant Ninja Turtles carry the
+    ordinary oval stamp or none. A stamp-only rule left those sets unclassified,
+    which both leaked them into Search when excluding Universes Beyond and let
+    them win deck import, because several are typed "expansion" and so compete
+    with main Magic releases on release date.
+
+    The rule is deliberately set-wide: commons and uncommons in a crossover set
+    frequently carry no marker of their own.
+    """
+    from mtgdb.database.bulk_import import (
+        UNIVERSES_BEYOND_RULE, ScryfallBulkImporter)
+
+    tmp = tempfile.mkdtemp(prefix="mtgdb-crossover-")
+    atexit.register(shutil.rmtree, tmp, True)
+    path = Path(tmp) / "cards.db"
+    connection = sqlite3.connect(path)
+    initialize_schema(connection)
+    connection.commit()
+    connection.close()
+
+    def card(card_id, name, set_code, **extra):
+        row = {
+            "id": card_id, "name": name, "set": set_code,
+            "set_name": set_code.upper(), "set_type": "expansion",
+            "collector_number": card_id, "lang": "en", "games": ["paper"],
+            "type_line": "Creature", "cmc": 1, "mana_cost": "{G}",
+        }
+        row.update(extra)
+        return row
+
+    ScryfallBulkImporter(str(path)).load_cards([
+        # Marked itself.
+        card("1", "Marked Hero", "hob", promo_types=["universesbeyond"]),
+        # Same set, no marker of its own: the set-wide rule must reach it.
+        card("2", "Unmarked Common", "hob"),
+        # The older stamp convention must keep working.
+        card("3", "Stamped Card", "ltr", security_stamp="triangle"),
+        card("4", "Stamped Set Sibling", "ltr"),
+        # An oval stamp alone means nothing.
+        card("5", "Ordinary Card", "fdn", security_stamp="oval"),
+    ])
+
+    check = sqlite3.connect(path)
+    flags = dict(check.execute("select name, universes_beyond from cards"))
+    check.close()
+
+    classified = flags == {
+        "Marked Hero": 1, "Unmarked Common": 1,
+        "Stamped Card": 1, "Stamped Set Sibling": 1,
+        "Ordinary Card": 0,
+    }
+
+    # A database built by an older rule is repaired from stored data alone.
+    stale = sqlite3.connect(path)
+    stale.execute("update cards set universes_beyond = 0")
+    stale.commit()
+    stale.close()
+    changed = ScryfallBulkImporter(str(path)).reclassify_universes_beyond()
+    repaired = sqlite3.connect(path)
+    after = dict(repaired.execute("select name, universes_beyond from cards"))
+    repaired.close()
+
+    return (classified and after == flags and changed > 0
+            and str(UNIVERSES_BEYOND_RULE).strip() != "")
+
+
+def _oversized_object_check():
+    """One card object bigger than the read size must parse, not hang.
+
+    The array parser used to refill its buffer only while that buffer was
+    small. An object larger than the read size can never complete under that
+    rule: the decode starves, the recovery slice removes nothing because
+    nothing was consumed, and the loop spins forever -- no exception, no
+    progress, a frozen sync with nothing to explain it. Scryfall's Treasure
+    token is already over 95,000 characters because its all_parts array names
+    every card that makes a Treasure, and it grows with every set.
+
+    Run on a worker with a deadline: a regression here is a hang, and a gate
+    that hangs never reports anything.
+    """
+    from mtgdb.database.bulk_import import iter_card_objects
+
+    tmp = tempfile.mkdtemp(prefix="mtgdb-oversized-")
+    atexit.register(shutil.rmtree, tmp, True)
+    path = Path(tmp) / "oversized.json"
+    # Comfortably past two read chunks, and past any single real card.
+    cards = [
+        {"id": "small", "name": "Small"},
+        {"id": "huge", "name": "Huge", "oracle_text": "x" * 400000},
+        {"id": "after", "name": "After"},
+    ]
+    path.write_text(json.dumps(cards), encoding="utf-8")
+
+    truncated = Path(tmp) / "truncated.json"
+    truncated.write_text('[{"id":"x","t":"' + "q" * 300000, encoding="utf-8")
+
+    outcome = {}
+
+    def parse():
+        try:
+            outcome["ids"] = [card.get("id")
+                              for card in iter_card_objects(path)]
+        except Exception as exc:                            # noqa: BLE001
+            outcome["error"] = type(exc).__name__
+        try:
+            list(iter_card_objects(truncated))
+            outcome["truncated"] = "accepted"
+        except (ValueError, json.JSONDecodeError):
+            outcome["truncated"] = "rejected"
+        except Exception as exc:                            # noqa: BLE001
+            outcome["truncated"] = type(exc).__name__
+
+    worker = threading.Thread(target=parse, daemon=True)
+    worker.start()
+    worker.join(60)
+    if worker.is_alive():
+        return False, False
+    parsed = outcome.get("ids") == ["small", "huge", "after"]
+    # A corrupt oversized file must still raise rather than read forever.
+    rejected = outcome.get("truncated") == "rejected"
+    return parsed, rejected
 
 
 def main():
@@ -147,7 +355,19 @@ def main():
         finally:
             connection.close()
 
+    oversized_parsed, oversized_rejected = _oversized_object_check()
+    crossover_classified = _universes_beyond_check()
+    inserts_demoted = _booster_insert_check()
+
     checks = {
+        "a booster insert never outranks an ordinary printing":
+            inserts_demoted,
+        "crossover sets are classified by marker, stamp, and set":
+            crossover_classified,
+        "a card object larger than the read size parses instead of hanging":
+            oversized_parsed,
+        "an oversized corrupt file raises instead of reading forever":
+            oversized_rejected,
         "every connection sets an explicit busy timeout": (
             all(value >= 30000 for value in busy_timeouts.values())
             # 5000 is sqlite3's default: proof none of them merely inherited it.
@@ -217,8 +437,14 @@ def main():
                 "mtgdb/database/semantics.py", "mtgdb/database/queries.py",
                 "mtgdb/database/search_queries.py", "mtgdb/database/taxonomy.py")),
         "synchronization imports the responsible internal owners": (
-            "from mtgdb.database.bulk_import import iter_card_objects"
+            "from mtgdb.database.bulk_import import ("
             in sources["mtgdb/database/sync.py"]
+            and "iter_card_objects" in sources["mtgdb/database/sync.py"]
+            # The crossover repair reuses the importer that owns the rule
+            # rather than restating the classification here.
+            and "ScryfallBulkImporter" in sources["mtgdb/database/sync.py"]
+            and "UNIVERSES_BEYOND_META_KEY" in sources["mtgdb/database/sync.py"]
+            and "universesbeyond" not in sources["mtgdb/database/sync.py"]
             and "from mtgdb.database.schema import ("
             in sources["mtgdb/database/sync.py"]
             and "SCRYFALL_CATALOGS" in sources["mtgdb/database/sync.py"]

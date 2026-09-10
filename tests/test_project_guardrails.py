@@ -837,8 +837,15 @@ def main():
                  & architecture_imports["mtgdb/deck/model.py"])),
         "production code imports responsible deck modules": (
             "from mtgdb.deck.model import Deck" in architecture_sources["mtgdb/ui/app.py"]
-            and "from mtgdb.deck.io import deck_from_text, save_deck_text"
-            in architecture_sources["mtgdb/ui/deck_files.py"]
+            # read_deck_text belongs here too: decklist decoding is part of
+            # the file format, not a UI concern (DECK-002).
+            and ("from mtgdb.deck.io import deck_from_text, read_deck_text, "
+                 "save_deck_text") in architecture_sources["mtgdb/ui/deck_files.py"]
+            # ...and the open path uses it rather than assuming an encoding.
+            and "read_deck_text(path)" in architecture_sources[
+                "mtgdb/ui/deck_files.py"]
+            and "open(path, encoding=" not in architecture_sources[
+                "mtgdb/ui/deck_files.py"]
             and "from mtgdb.deck.model import Deck"
             in architecture_sources["mtgdb/ui/deck.py"]
             and "from mtgdb.deck.analysis import"
@@ -1006,7 +1013,9 @@ def main():
         "database sync imports responsible internal owners": (
             "from mtgdb.database.authorities import SCRYFALL_CATALOGS"
             in architecture_sources["mtgdb/database/sync.py"]
-            and "from mtgdb.database.bulk_import import iter_card_objects"
+            and "from mtgdb.database.bulk_import import ("
+            in architecture_sources["mtgdb/database/sync.py"]
+            and "iter_card_objects"
             in architecture_sources["mtgdb/database/sync.py"]
             and "RULES_SUPERTYPES_META_KEY"
             in architecture_sources["mtgdb/database/sync.py"]
