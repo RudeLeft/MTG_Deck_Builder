@@ -33,6 +33,20 @@ class SearchRepository:
             connection=connection, columns=SEARCH_RESULT_COLUMNS,
             **criteria.query_arguments())
 
+    def context_rows(self, criteria: SearchCriteria, connection, columns=None):
+        """Unordered narrow projection for Tk-free contextual analysis."""
+        if columns is None:
+            from mtgdb.search.context import CONTEXT_COLUMNS
+            columns = CONTEXT_COLUMNS
+        return self._db.search_unordered(
+            connection=connection, columns=tuple(columns),
+            **criteria.query_arguments())
+
+    def count(self, criteria: SearchCriteria, connection):
+        """Count one Search criteria with canonical SQL semantics."""
+        return self._db.count_search(
+            connection=connection, **criteria.query_arguments())
+
     def card_by_id(self, card_id):
         return self._db.get_card(card_id)
 
@@ -70,6 +84,14 @@ class SearchRepository:
 
     def rarities(self, content_types=None, paper_only=False):
         return self._db.rarities(content_types, paper_only)
+
+    def release_years(self, content_types=None, paper_only=False, games=None):
+        return self._db.release_years(content_types, paper_only, games=games)
+
+    def equivalent_layouts(self, content_types=None, paper_only=False, games=None,
+                           **catalogs):
+        return self._db.equivalent_layouts(
+            content_types, paper_only, games=games, **catalogs)
 
     def keyword_catalog(self, content_types=None, paper_only=False):
         return self._db.keyword_catalog(content_types, paper_only)

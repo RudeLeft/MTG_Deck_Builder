@@ -30,6 +30,10 @@ from mtgdb.ui.search_filters import (
 )
 from mtgdb.ui.components import format_display_name
 from mtgdb.search.catalogs import SearchCatalogController
+from mtgdb.search.context import (
+    SearchContextController, SearchContextSnapshot, _PredictiveMembershipCounts,
+    _predict_colors, _predict_content, _predict_games,
+)
 
 
 def _card(card_id, name, keyword="Flying"):
@@ -468,6 +472,122 @@ def main():
                 time.sleep(0.005)
         accepted = bool(event and controller.accept(event))
         cached = controller.start(criteria)
+
+        # Context analysis is a separate latest-wins worker: the Results query
+        # must not wait for facet counting or zero-result diagnostics.
+        context_controller = SearchContextController(repository)
+        try:
+            context_criteria = SearchCriteria.from_mapping({
+                "card_types": ["Creature"], "content_types": ["card"],
+            })
+            first_generation = context_controller.request(
+                context_criteria,
+                card_types=["Artifact", "Creature", "Enchantment", "Instant", "Land"],
+                supertypes=["Legendary"],
+                subtypes=[("Bird", "Creature"), ("Saga", "Enchantment")],
+                keywords=[("Flying", "Keyword Ability"),
+                          ("Vigilance", "Keyword Ability")],
+                layouts=[("normal", 1), ("saga", 1), ("adventure", 1)],
+                rarities=["common"], formats=["modern"],
+                set_types=["expansion", "alchemy"],
+                sets=[("tst", "Test Set"), ("ana", "Arena Set"),
+                      ("tst2", "Second Test Set")])
+            deadline = time.monotonic() + 5.0
+            context_event = None
+            while time.monotonic() < deadline and context_event is None:
+                context_event = context_controller.poll_latest()
+                if context_event is None:
+                    time.sleep(0.01)
+            expected_artifact_compatibility = len(db.search(
+                card_types=["Artifact"], card_type_mode="any",
+                content_types=["card"], columns=("id",)))
+            expected_white_creature = len(db.search(
+                card_types=["Creature"], colors=["W"], color_mode="within",
+                content_types=["card"], columns=("id",)))
+            expected_arena_creature = len(db.search(
+                card_types=["Creature"], games=["arena"],
+                content_types=["card"], columns=("id",)))
+            context_worker_prepares_facets = (
+                context_event is not None
+                and context_event.generation == first_generation
+                and context_event.kind == "done"
+                and isinstance(context_event.payload, SearchContextSnapshot)
+                and context_event.payload.result_count == 8
+                and context_event.payload.card_type_counts.get("Artifact")
+                    == expected_artifact_compatibility
+                and context_event.payload.subtype_counts.get("Bird") == 8
+                and context_event.payload.keyword_counts.get("Flying", 0) >= 1
+                and context_event.payload.color_counts.get("W")
+                    == expected_white_creature
+                and context_event.payload.game_counts.get("arena")
+                    == expected_arena_creature
+                and context_event.payload.pip_counts.get("W") == 8
+                and context_event.payload.content_counts.get("card") == 8
+                and context_event.payload.rarity_counts.get("common") == 8
+                and context_event.payload.set_type_counts.get("expansion") == 7
+                and context_event.payload.format_counts.get("modern") == 8
+                and context_event.payload.numeric_ranges.get("cmc") == (2.0, 2.0)
+                and context_event.payload.release_years == ("2026",)
+                and context_event.payload.english_count == 8
+                and context_event.payload.all_language_count == 8)
+
+            # A selected Any/OR value must not donate its matching rows to
+            # every peer.  That made a zero-result Card Type turn available as
+            # soon as another type (for example a Sorcery face) was selected.
+            any_predictor = _PredictiveMembershipCounts(
+                ("Creature", "Sorcery", "Artifact"), ("Sorcery",), "any")
+            any_predictor.add(("Sorcery",))
+            any_predictor.add(("Creature",))
+            any_counts = any_predictor.finish()
+            any_peer_does_not_inflate_zero = (
+                any_counts == {"Creature": 1, "Sorcery": 1, "Artifact": 0})
+
+            union_facets_do_not_inflate_zero = (
+                _predict_games(
+                    [{"games": ["paper"]}, {"games": ["arena"]}],
+                    ("paper",),
+                ) == {"paper": 1, "arena": 1, "mtgo": 0}
+                and _predict_content(
+                    [
+                        {"layout": "normal", "type_line": "Creature — Bird"},
+                        {"layout": "token", "type_line": "Token Creature — Bird"},
+                    ],
+                    ("card",),
+                ).get("emblem") == 0
+                and _predict_colors(
+                    [
+                        {"color_identity": "W"},
+                        {"color_identity": "U"},
+                        {"color_identity": "U,W"},
+                        {"color_identity": ""},
+                    ],
+                    "color_identity", ("W", "U", "B", "R", "G", "C"),
+                    ("W",), "within", produced=False,
+                ).get("G") == 0
+            )
+
+            context_controller.request(
+                context_criteria, subtypes=[("Bird", "Creature")])
+            latest_criteria = SearchCriteria.from_mapping({
+                "name": "First Bird", "content_types": ["card"],
+            })
+            latest_generation = context_controller.request(
+                latest_criteria, subtypes=[("Bird", "Creature")],
+                keywords=[("Flying", "Keyword Ability")])
+            deadline = time.monotonic() + 5.0
+            latest_event = None
+            while time.monotonic() < deadline and latest_event is None:
+                latest_event = context_controller.poll_latest()
+                if latest_event is None:
+                    time.sleep(0.01)
+            context_worker_is_latest_wins = (
+                latest_event is not None
+                and latest_event.generation == latest_generation
+                and latest_event.signature == latest_criteria.signature()
+                and latest_event.kind == "done"
+                and latest_event.payload.result_count == 1)
+        finally:
+            context_controller.shutdown(timeout=2.0)
         db.close()
 
     checklist_source = (ROOT / "mtgdb/ui/search_checklist.py").read_text(encoding="utf-8")
@@ -600,7 +720,10 @@ def main():
         f"self.{name} = None" in _method_body(
             search_source, "_initialize_search_filter_state")
         for name in ("q_rules", "_format_btn", "_rarity_btn", "_subtype_btn",
-                     "_keyword_btn", "_traits_btn", "_property_chip_frame")
+                     "_keyword_btn", "_search_scope_btn", "_card_form_btn",
+                     "_mana_cost_features_btn", "_faces_btn",
+                     "_pt_properties_btn", "_status_properties_btn",
+                     "_property_chip_frame")
     )
 
     # SRCH-034. Every reader must survive a filter that has not been built.
@@ -631,7 +754,7 @@ def main():
             # carry both -- with no way for the user to correct it.
             'self.q_supertype_mode = tk.StringVar(value="any")' in search_source
             and "self._build_mode_row(" in _method_body(
-                search_source, "_build_filter_supertypes")),
+                search_source, "_build_standard_type_line_filters")),
         "every Any/All/None row comes from one builder": (
             # Card Type hand-built its row and silently kept only Any and All
             # when None was added everywhere else. One construction point means
@@ -641,7 +764,7 @@ def main():
             and "self._build_mode_row(" in _method_body(
                 search_source, "_build_card_type_filters")
             and "self._build_mode_row(" in _method_body(
-                search_source, "_build_filter_supertypes")
+                search_source, "_build_standard_type_line_filters")
             # The triple appears exactly once: as MODE_ROW_CHOICES itself.
             and search_source.count(
                 '(("Any", "any"), ("All", "all"), ("None", "none"))') == 1),
@@ -697,7 +820,7 @@ def main():
             # comes from the registry or from the hand-built dict, and one
             # lookup serves both so neither can be described twice.
             and all(filter_tooltip(key) for key in STANDARD_FILTERS)
-            and set(STANDARD_FILTER_TOOLTIPS) | {"stats"} == set(STANDARD_FILTERS)
+            and set(STANDARD_FILTER_TOOLTIPS) <= set(STANDARD_FILTERS)
             and "_add_standard_filter_tooltip" in printings_source),
         "format names are spelled out rather than run together": (
             format_display_name("paupercommander") == "Pauper Commander"
@@ -755,10 +878,13 @@ def main():
             and len(catalog_keys) == len(set(catalog_keys))),
         "the standard set is on the form in the order a search is built": (
             STANDARD_FILTERS
-            == ("name", "card_type", "colors", "stats", "printings")
+            == ("name", "supertypes", "card_type", "subtype",
+                "colors", "stats", "printings")
             # Power/Toughness is a standard row now, so it is built by the
             # form rather than reached through the advanced panel.
-            and "self._build_standard_stats_filter(form, row=4)" in _method_body(
+            and "self._build_standard_type_line_filters(form)" in _method_body(
+                search_source, "_build_search_pane")
+            and "self._build_standard_stats_filter(form, row=6)" in _method_body(
                 search_source, "_build_search_pane")
             and all(is_standard(key) for key in STANDARD_FILTERS)),
         "advanced holds every other filter, grouped and in registry order": (
@@ -769,8 +895,8 @@ def main():
             # same place rather than wherever it was opened first.
             and [category for category, _entries in catalog]
             == [c for c in CATEGORY_ORDER]
-            and advanced_filter_keys()[:3]
-            == ("mana_value", "produces", "mana_pips")),
+            and advanced_filter_keys()[:4]
+            == ("search_scope", "mana_value", "produces", "mana_pips")),
         "advanced rows are built once and only hidden": (
             "def _build_advanced_filter_rows(" in search_source
             and "self._advanced_host.pack_forget()" in _method_body(
@@ -855,7 +981,7 @@ def main():
             # matched, which the wording has to admit.
             and "either face" in tooltips["supertypes"]
             and "none of them" in tooltips["rules_text"]
-            and "tokens" in tooltips["traits"]
+            and "Tokens" in tooltips["search_scope"]
             # The labels on the controls are American; the tooltips beside
             # them cannot be British.
             and not any(
@@ -883,7 +1009,7 @@ def main():
             # search anybody meant to run.
             and 'return kinds or {"card"}' in search_source
             and "set(DEFAULT_CONTENT_TRAITS)" in _method_body(
-                search_source, "_reset_filter_traits")),
+                search_source, "_reset_filter_search_scope")),
         "a saved content scope survives a workspace written without it": (
             # The saved traits list used to overwrite the scope derived from
             # the saved content, so an older workspace lost its tokens.
@@ -895,14 +1021,16 @@ def main():
             # The results were always right; the pickers kept describing cards
             # only, because the callback that rescopes them had no caller.
             "self._on_content_filter_change()" in _method_body(
-                search_source, "_choose_traits")
+                search_source, "_choose_search_scope")
             and "self._content_types_from_traits()" in _method_body(
-                search_source, "_choose_traits")),
-        "scope traits are grouped away from the traits the mode row governs": (
-            # Include Tokens cannot be negated by None: it chooses what the
-            # search covers rather than adding a condition.
-            '"Scope · "' in _method_body(search_source, "_choose_traits")
-            and '"Trait · "' in _method_body(search_source, "_choose_traits")),
+                search_source, "_choose_search_scope")),
+        "search scope is separate from the property mode row": (
+            # Tokens/Emblems/Art Series choose the searched universe and are
+            # explicitly excluded from the trait clauses Any/All/None governs.
+            "keys - set(CONTENT_TRAIT_KEYS)" in _method_body(
+                search_source, "_selected_trait_keys")
+            and "q_trait_mode" not in _method_body(
+                search_source, "_choose_search_scope")),
         "Produces is restored after its row exists": (
             # Its checkboxes belong to an optional row, so a restore that runs
             # before the rebuild is discarded with the widgets that held it.
@@ -924,17 +1052,18 @@ def main():
             and "self.game_vars.items()" in _method_body(
                 printings_source, "restore_selection")),
         "every range of bounds is validated, not only the first three": (
-            all(f'"{label}"' in _method_body(search_source, "_do_search")
+            all(f'"{label}"' in _method_body(
+                    search_source, "_capture_search_criteria")
                 for label in ("Mana value", "Power", "Toughness",
                               "Loyalty", "Defense", "Released"))
-            and _method_body(search_source, "_do_search").count(
+            and _method_body(search_source, "_capture_search_criteria").count(
                 "self._validate_search_range(") >= 4),
         "Colors can look at either colour column": (
             colour_scope_selects_the_column
             and "self.q_color_scope = tk.StringVar(value=\"identity\")"
             in search_source
-            and "color_scope=self.q_color_scope.get()," in _method_body(
-                search_source, "_do_search")
+            and "color_scope=self.q_color_scope.get()" in _method_body(
+                search_source, "_capture_search_criteria")
             and '"color_scope": self.q_color_scope.get(),' in _method_body(
                 search_source, "_capture_search_workspace_state")
             # The mode row names the column it compares, so "Color identity:"
@@ -960,11 +1089,13 @@ def main():
                 for name in ("keyword", "creature_type", "characteristics",
                              "characteristic_mode", "rarity", "set_code",
                              "exclude_art", "show_tokens", "limit"))),
-        "card shape is a filter, and only Any or None can apply to it": (
+        "card form preserves the layout query and only Any or None applies": (
             shape_is_exclusive
-            and FILTER_BY_KEY["card_shape"]["category"] == "Card"
+            and FILTER_BY_KEY["card_form"]["category"] == "Card"
             and "choices=self.ANY_NONE_CHOICES" in _method_body(
-                search_source, "_build_filter_card_shape")),
+                search_source, "_build_filter_card_form")
+            and "Card Shape" not in FILTER_BY_KEY
+            and "Card Traits" not in FILTER_BY_KEY),
         "multi-faced is read from the faces, not from a layout list": (
             # The list called Saga, Class, Case, Leveler, Prototype, Mutate
             # and Meld multi-faced: 761 paper printings with one face.
@@ -1039,6 +1170,42 @@ def main():
         "controller delivers and caches a Tk-free result": (
             started.kind == "started" and accepted
             and cached.kind == "unchanged"),
+        "context worker prepares data-derived facets off the Search path": (
+            context_worker_prepares_facets),
+        "Any facet compatibility does not let a selected OR peer revive zero options": (
+            any_peer_does_not_inflate_zero),
+        "union-style facets do not let selected peers revive zero options": (
+            union_facets_do_not_inflate_zero),
+        "context worker publishes only the newest requested generation": (
+            context_worker_is_latest_wins),
+        "live draft context uses the same criteria adapter as manual Search": (
+            "def _capture_search_criteria(" in search_source
+            and "criteria = self._capture_search_criteria(commit_rules=False)"
+                in _method_body(search_source, "_prepare_live_search_context")
+            and "criteria = self._capture_search_criteria(commit_rules=True)"
+                in _method_body(search_source, "_do_search")
+            and "self.after(200, self._prepare_live_search_context)"
+                in _method_body(search_source, "_update_search_filter_summary")),
+        "live context covers every existing search dimension without adding one": (
+            all(name in SearchContextSnapshot.__dataclass_fields__ for name in (
+                "card_type_counts", "supertype_counts", "subtype_counts",
+                "keyword_counts", "color_counts", "produces_counts",
+                "layout_counts", "rarity_counts", "numeric_ranges",
+                "release_years", "trait_counts", "pip_counts",
+                "content_counts", "game_counts", "set_type_counts",
+                "set_counts", "format_counts", "english_count"))),
+        "broad live totals use canonical SQL count rather than result materialization": (
+            "COUNT(*) AS match_count" in search_query_source
+            and "def count_search(" in search_query_source
+            and "search_unordered" in (ROOT / "mtgdb/search/repository.py").read_text(encoding="utf-8")),
+        "zero-result filter-window choices show a red X and cannot be newly selected": (
+            'metadata.get("zero_count")' in checklist_source
+            and '"Unavailable.ListChoice.TRadiobutton"' in checklist_source
+            and 'f"✕ {shown}" if zero_count else shown' in checklist_source
+            and 'key in self._zero_count_keys and key not in self._selected' in checklist_source
+            and 'selectable = keys - self._zero_count_keys' in checklist_source
+            and 'set_context_availability' in search_source
+            and '{"zero_count": count <= 0}' in search_source),
         "search checklist maps only through hidden-first popup presenter": (
             "owner._create_hidden_popup(" in checklist_source
             and "owner._present_hidden_popup(" in checklist_source
@@ -1101,9 +1268,9 @@ def main():
         "the standard core is built and every other filter is in Advanced": (
             'text="Active Filters"' not in search_source
             and "self._build_name_filter(form)" in search_source
-            and "self._build_card_type_filters(form)" in search_source
-            and "self._build_color_filters(form)" in search_source
-            and "self._build_printing_filter(form, row=6)" in search_source
+            and "self._build_standard_type_line_filters(form)" in search_source
+            and "self._build_color_filters(form, row=5)" in search_source
+            and "self._build_printing_filter(form, row=7)" in search_source
             and "self._build_advanced_filter_zone(parent)" in search_source
             # Every registry filter still has a builder: Advanced is where the
             # rows live now, not a second way of declaring them.

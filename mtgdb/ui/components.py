@@ -419,6 +419,12 @@ class ClassicCheckbutton(tk.Checkbutton):
         options.update(_CHECK_ROLES[role])
         options.update(kwargs)
         super().__init__(master, **options)
+        self._ui_check_role = role
+        self._ui_context_unavailable = False
+        self._ui_context_base_text = str(options.get("text", ""))
+        variable = options.get("variable")
+        self._ui_context_variable = (
+            variable if hasattr(variable, "get") else None)
         self._ui_chip_variable = None
         self._ui_chip_trace = None
         if role == "chip":
@@ -444,10 +450,67 @@ class ClassicCheckbutton(tk.Checkbutton):
             except (tk.TclError, TypeError, ValueError):
                 selected = False
         try:
+            if bool(getattr(self, "_ui_context_unavailable", False)):
+                # A selected unavailable chip stays enabled only so it can be
+                # cleared.  As soon as that variable turns false, disable it
+                # immediately rather than waiting for the next facet snapshot.
+                if getattr(self, "_ui_check_role", None) == "chip":
+                    self.configure(
+                        state="normal" if selected else "disabled",
+                        cursor="hand2" if selected else "arrow",
+                    )
+                self.configure(
+                    fg=PALETTE["bad"], activeforeground=PALETTE["bad"],
+                    disabledforeground=PALETTE["bad"],
+                )
+                return
             self.configure(
                 fg=(PALETTE["on_accent"] if selected else PALETTE["text"]),
                 disabledforeground=PALETTE["muted"],
             )
+        except tk.TclError:
+            pass
+
+    def set_context_availability(
+            self, available, *, display_text=None, allow_selected_clear=True):
+        """Show one contextual option as available or explicitly unavailable.
+
+        A zero-result choice remains visible but an unselected value cannot be
+        activated.  If another filter makes an already-selected value become
+        zero, that value stays enabled only so the user can clear the conflict.
+        """
+        if display_text is not None:
+            self._ui_context_base_text = str(display_text)
+        base = self._ui_context_base_text
+        unavailable = not bool(available)
+        self._ui_context_unavailable = unavailable
+        selected = False
+        variable = self._ui_context_variable
+        if variable is not None:
+            try:
+                selected = bool(variable.get())
+            except (tk.TclError, TypeError, ValueError):
+                selected = False
+        can_interact = (not unavailable) or (bool(allow_selected_clear) and selected)
+        shown = f"✕ {base}" if unavailable else base
+        options = {
+            "text": shown,
+            "state": "normal" if can_interact else "disabled",
+            "disabledforeground": (
+                PALETTE["bad"] if unavailable else PALETTE["muted"]),
+        }
+        if self._ui_check_role == "chip":
+            options["cursor"] = "hand2" if can_interact else "arrow"
+        try:
+            self.configure(**options)
+            if self._ui_check_role == "chip":
+                self._sync_chip_contrast()
+            else:
+                self.configure(
+                    fg=(PALETTE["bad"] if unavailable else PALETTE["text"]),
+                    activeforeground=(
+                        PALETTE["bad"] if unavailable else PALETTE["text"]),
+                )
         except tk.TclError:
             pass
 
@@ -570,7 +633,7 @@ class ToolTip:
 class TokenBubbleEntry(tk.Frame):
     """Dark token/chip entry used for multi-term Rules Text searches."""
 
-    def __init__(self, master=None, search_command=None, **kwargs):
+    def __init__(self, master=None, search_command=None, change_command=None, **kwargs):
         p = PALETTE
         super().__init__(
             master, bg=p["input"], highlightthickness=1,
@@ -578,6 +641,7 @@ class TokenBubbleEntry(tk.Frame):
             bd=0, **kwargs)
         self._tokens = []
         self._search_command = search_command
+        self._change_command = change_command
         self._entry_reset_after = None
         # Keep the chip strip completely out of geometry while it is empty.
         # An empty packed Frame retains its last requested width after its last
@@ -589,6 +653,7 @@ class TokenBubbleEntry(tk.Frame):
         self.entry.bind("<Return>", self._on_return)
         self.entry.bind("<KP_Enter>", self._on_return)
         self.entry.bind("<BackSpace>", self._on_backspace, add="+")
+        self.entry.bind("<KeyRelease>", self._on_entry_changed, add="+")
         self.bind("<Destroy>", self._release_entry_reset, add="+")
 
     def focus_set(self):
@@ -596,6 +661,14 @@ class TokenBubbleEntry(tk.Frame):
 
     def _pending(self):
         return self.entry.get().strip().strip(",").strip()
+
+    def _notify_change(self):
+        callback = self._change_command
+        if callback is not None:
+            callback()
+
+    def _on_entry_changed(self, _event=None):
+        self._notify_change()
 
     def _on_return(self, _event=None):
         if self._pending():
@@ -617,17 +690,22 @@ class TokenBubbleEntry(tk.Frame):
         if any(existing.casefold() == value.casefold() for existing in self._tokens):
             self.entry.delete(0, "end")
             self._reset_entry_view()
+            self._notify_change()
             return
         self._tokens.append(value)
         self.entry.delete(0, "end")
         self._redraw()
         self._reset_entry_view()
+        self._notify_change()
 
     def remove(self, value):
         folded = str(value).casefold()
+        before = tuple(self._tokens)
         self._tokens = [v for v in self._tokens if v.casefold() != folded]
         self._redraw()
         self._reset_entry_view()
+        if tuple(self._tokens) != before:
+            self._notify_change()
 
     def _remove_chip(self, value):
         """Remove a clicked chip and return editing focus to the true field start."""
@@ -638,10 +716,13 @@ class TokenBubbleEntry(tk.Frame):
             pass
 
     def clear(self):
+        changed = bool(self._tokens or self.entry.get())
         self._tokens.clear()
         self.entry.delete(0, "end")
         self._redraw()
         self._reset_entry_view()
+        if changed:
+            self._notify_change()
 
     def _apply_entry_view_reset(self):
         try:

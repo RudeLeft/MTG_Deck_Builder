@@ -225,19 +225,18 @@ def main():
     checks.update({
         "Search has no More Types or Characteristics UI": (
             "More Types" not in search_source and "Characteristics" not in search_source),
-        "Abilities are presented as Mechanics": (
+        "Abilities are presented under the Mechanics umbrella": (
             FILTER_BY_KEY["mechanics"]["label"] == "Mechanics"
             and "Choose Abilities" not in search_source
-            and "Abilities" not in FILTER_BY_KEY["mechanics"]["tooltip"]),
-        "trusted type filters expose explicit authority failures": (
-            FILTER_BY_KEY["supertypes"]["label"] == "Supertypes"
-            # The control itself, not a summary string: the old assertion
-            # named text that lived only in a dead code path.
-            and "def _build_filter_supertypes(" in search_source
+            and all(term in FILTER_BY_KEY["mechanics"]["tooltip"] for term in (
+                "Keyword Abilities", "Keyword Actions", "Ability Words"))),
+        "trusted Type Line filters expose explicit authority failures": (
+            FILTER_BY_KEY["supertypes"]["label"] == "Supertype"
+            and "def _build_standard_type_line_filters(" in search_source
             and '"Selected supertypes:"' in search_source
-            and not any(entry["label"] == "Properties"
+            and 'text="TYPE LINE"' in search_source
+            and not any(entry["label"] in {"Properties", "Card Shape", "Card Traits"}
                         for entry in FILTER_DEFINITIONS)
-            and '"Properties: "' not in search_source
             and "Official Wizards Supertype taxonomy is unavailable" in search_source
             and "Scryfall Card Type taxonomy is unavailable" in search_source
             and "supertype_taxonomy_status" in catalog_source
@@ -255,9 +254,10 @@ def main():
             "def _build_advanced_filter_zone(" in search_source
             and "_add_filter_menu" not in search_source
             and "def _add_optional_filter(" not in search_source
-            and {"rules_text", "subtype", "format", "rarity"}
+            and {"search_scope", "rules_text", "card_form", "format", "rarity"}
             <= set(FILTER_BY_KEY)
-            # Content is expressed as Card traits now, not its own filter.
+            # Type Line values are standard; Search Scope is the existing content
+            # selector moved into Advanced rather than a new query dimension.
             and "content" not in FILTER_BY_KEY
             and "printings" not in FILTER_BY_KEY),
         "advanced filter labels match primary Search field typography": (
@@ -269,7 +269,7 @@ def main():
             and 'text="Format", style="Section.TLabel"' not in search_source
             and 'text="Rarity", style="Section.TLabel"' not in search_source
             and 'text="Printings", style="Section.TLabel"' not in printing_source),
-        "content kinds are chosen through Card traits": (
+        "content kinds are chosen through Search Scope": (
             '"content_tokens": "token"' in search_source
             and '"content_emblems": "emblem"' in search_source
             and '"content_art_series": "art"' in search_source
@@ -283,7 +283,9 @@ def main():
             # empty scope falls back to Cards rather than to nothing.
             and 'DEFAULT_CONTENT_TRAITS = ("content_cards",)' in search_source
             and "return kinds or {\"card\"}" in search_source
-            and "Supplemental" not in search_source),
+            and "Supplemental" not in search_source
+            and FILTER_BY_KEY["search_scope"]["category"] == "Search Scope"
+            and "def _choose_search_scope(" in search_source),
         "Printings default to Paper only and Any set": (
             'text="Paper only · Any set type · Any set"' in printing_source
             and "SET_TYPE_DEFAULT_ON" not in combined

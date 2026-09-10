@@ -1,218 +1,184 @@
-"""Search filter registry: the standard set, and the advanced ones by category.
+"""Presentation registry for the existing Search capabilities.
 
-The Search form and the Results table share one column with no sash between
-them, so every permanently-rendered filter takes its height out of Results.
-Two designs have answered that. The first rendered everything; the second
-built each filter on demand from an Add filter menu, which cost nothing unused
-but made a real search several menu trips before it could be run.
-
-This is the third and it comes from using the second: a small standard set
-that is always present because nearly every search touches it, and everything
-else together behind one Advanced Filter Options button. One click reveals all
-of them, grouped by category, instead of one click per filter.
-
-The registry is deliberately data, not widgets. Each entry names its category,
-its label and the tooltip that explains what the filter actually matches;
-`ui/search.py` owns the controls themselves.
+The registry deliberately names UI groups, not a second Magic taxonomy. Values
+still come from Scryfall/observed database fields and the query model remains
+unchanged; this module only decides where an existing capability is presented.
 """
 
 from __future__ import annotations
 
 
-CATEGORY_ORDER = ("Mana", "Card", "Printing")
+CATEGORY_ORDER = ("Search Scope", "Mana", "Card", "Printing & Status")
 
-# Always on the Search form, in this order. These are the filters a search
-# starts from: what the card is called, what it is, what color it is, how big
-# it is, and which printings are in scope.
-STANDARD_FILTERS = ("name", "card_type", "colors", "stats", "printings")
+# The common Search surface follows a printed Magic type line before moving on
+# to colour, stats, and printing scope.  No query field was added for this UI
+# change: Supertype/Card Type/Subtype are the existing criteria moved together.
+STANDARD_FILTERS = (
+    "name", "supertypes", "card_type", "subtype", "colors", "stats", "printings",
+)
 
-# Tooltip wording rule, applied to every filter including the standard ones:
-# one sentence saying what the filter matches, then at most one more for the
-# boundary people get wrong about it. Describe cards, not where the data came
-# from -- naming a data source tells the user nothing about their search.
 FILTER_DEFINITIONS = (
     {
-        "key": "mana_value",
-        "category": "Mana",
-        "label": "Mana value",
+        "key": "search_scope", "category": "Search Scope", "label": "Search scope",
         "tooltip": (
-            "The total cost of a card, counting colored and generic mana "
-            "together: {2}{G} is 3. Leave a box empty for no limit on that "
-            "side."),
+            "Choose whether Search covers Cards, Tokens, Emblems, or Art Series. "
+            "These choices set the search universe and are not affected by the "
+            "Any, All, or None mode used for card properties."),
     },
     {
-        "key": "produces",
-        "category": "Mana",
-        "label": "Produces",
+        "key": "mana_value", "category": "Mana", "label": "Mana value",
         "tooltip": (
-            "The mana a card can make, which is not the same as its color. "
-            "Birds of Paradise is green but makes all five colors, and "
-            "Command Tower is colorless but makes any of them."),
+            "The total cost of a card, counting colored and generic mana together. "
+            "Leave either side empty for no limit."),
     },
     {
-        "key": "stats",
-        "category": "Card",
-        "label": "Power / Toughness",
+        "key": "produces", "category": "Mana", "label": "Mana produced",
         "tooltip": (
-            "Printed power and toughness, compared as numbers, so only "
-            "creatures and other cards that have them can match. A card whose "
-            "stats vary, such as */*, has no number to compare and is left "
-            "out. Leave a box empty for no limit on that side."),
+            "The mana a card can make, which is not the same as its color or color "
+            "identity. The existing Within, Contains and Exactly modes are preserved."),
     },
     {
-        "key": "loyalty",
-        "category": "Card",
-        "label": "Loyalty (Planeswalker)",
+        "key": "mana_pips", "category": "Mana", "label": "Mana symbols in cost",
         "tooltip": (
-            "The starting loyalty printed on a planeswalker. Only "
-            "planeswalkers have loyalty, so this filter always narrows the "
-            "search to them."),
+            "How many colored mana symbols the cost has, counted per selected color. "
+            "The threshold applies to every selected color exactly as before."),
     },
     {
-        "key": "defense",
-        "category": "Card",
-        "label": "Defense (Battle)",
+        "key": "mana_cost_features", "category": "Mana", "label": "Mana cost features",
         "tooltip": (
-            "The defense printed on a battle. Kept separate from Loyalty "
-            "because no card has both, so combining the two would always "
-            "find nothing."),
+            "Find cards whose mana cost contains Hybrid mana, Phyrexian mana, or X. "
+            "These are the existing mana-cost properties, grouped here so cost-related "
+            "questions stay together."),
     },
     {
-        "key": "supertypes",
-        "category": "Card",
-        "label": "Supertypes",
+        "key": "stats", "category": "Card", "label": "Power / Toughness",
         "tooltip": (
-            "The words in front of the card type, such as Legendary, Basic "
-            "or Snow. Most cards have none, so this filter narrows a search "
-            "sharply. A two-faced card matches when either face carries the "
-            "word, so a Legendary back face is found too."),
+            "Printed numeric power and toughness. Variable values such as */* are not "
+            "numeric range matches; their existing property filter remains available."),
     },
     {
-        "key": "subtype",
-        "category": "Card",
-        "label": "Subtype",
+        "key": "loyalty", "category": "Card", "label": "Loyalty",
         "tooltip": (
-            "The words after the dash on the type line: creature types such "
-            "as Goblin, land types such as Island, and Equipment or Aura "
-            "subtypes."),
+            "The printed numeric loyalty value used by planeswalker cards. Leave either "
+            "side empty for no limit; cards without numeric loyalty do not satisfy a "
+            "loyalty range."),
     },
     {
-        "key": "mechanics",
-        "category": "Card",
-        "label": "Mechanics",
+        "key": "defense", "category": "Card", "label": "Defense",
         "tooltip": (
-            "Named abilities such as Flying, Scry or Landfall. Finds cards "
-            "that actually have the ability, not cards that merely mention "
-            "its name in their rules text."),
+            "The printed numeric defense value used by battle cards. Leave either side "
+            "empty for no limit; loyalty and defense are separate values and no card "
+            "has both as one shared statistic."),
     },
     {
-        "key": "rules_text",
-        "category": "Card",
-        "label": "Rules text",
+        "key": "supertypes", "category": "Card", "label": "Supertype",
         "tooltip": (
-            "Words in a card's rules text, across every face. Words inside "
-            "one entry may have other words between them; put quotes around "
-            "an entry to require that exact phrase. The row below decides "
-            "whether every entry must appear, any one of them, or none of "
-            "them."),
+            "The words before Card Type on the type line, such as Legendary, Basic or "
+            "Snow. Matching checks the complete type line across either face while the "
+            "trusted Supertype vocabulary remains authoritative."),
     },
     {
-        "key": "card_shape",
-        "category": "Card",
-        "label": "Card shape",
+        "key": "subtype", "category": "Card", "label": "Subtype",
         "tooltip": (
-            "How the card is printed: Adventure, Saga, Split, Flip, Meld, "
-            "Class, Leveler and the rest. A card has exactly one shape, so "
-            "this filter offers Any and None rather than All."),
+            "The words after the dash on the type line, such as Angel, Equipment, or "
+            "Forest. Current results may change the ordering and counts, but they never "
+            "create subtype names that are not already trusted vocabulary."),
     },
     {
-        "key": "mana_pips",
-        "category": "Mana",
-        "label": "Colored pips",
+        "key": "mechanics", "category": "Card", "label": "Mechanics",
         "tooltip": (
-            "How many colored mana symbols the cost has, counted per color: "
-            "two green finds {G}{G} and {2}{G}{G}. A hybrid symbol counts for "
-            "both of its colors, the way devotion reads it."),
+            "Named Keyword Abilities, Keyword Actions, and Ability Words, separate from "
+            "free-form rules text. Current results prioritize relevant mechanics without "
+            "creating new mechanic names."),
     },
     {
-        "key": "traits",
-        "category": "Card",
-        "label": "Card traits",
+        "key": "rules_text", "category": "Card", "label": "Rules text",
         "tooltip": (
-            "Yes-or-no facts that no other filter covers: Universes Beyond, "
-            "Reserved List, Commander game changers, two-faced cards, hybrid "
-            "and Phyrexian costs, and creatures with more power than "
-            "toughness. The Scope choices at the top of the list decide which "
-            "kinds of object are searched at all: Cards alone by default, and "
-            "untick Cards to search only tokens, emblems or Art Series."),
+            "Words in a card's rules text across every face. Quotes still require an "
+            "exact phrase; Any can match one term, All requires every term, and None "
+            "requires none of them to match."),
     },
     {
-        "key": "format",
-        "category": "Printing",
-        "label": "Format",
+        "key": "card_form", "category": "Card", "label": "Card form",
         "tooltip": (
-            "Cards with the legality you choose in the format you choose: "
-            "playable, banned or restricted. Playable covers both legal and "
-            "restricted cards. Only formats that have cards in the chosen "
-            "state are offered, so Restricted lists very few."),
+            "The card's existing layout value, such as a split or double-faced form. "
+            "Current results prioritize forms that can match, while selected and other "
+            "observed forms remain available."),
     },
     {
-        "key": "rarity",
-        "category": "Printing",
-        "label": "Rarity",
+        "key": "faces", "category": "Card", "label": "Faces",
         "tooltip": (
-            "The rarity of an individual printing rather than of the card. A "
-            "card printed at both common and mythic can be found under "
-            "either one."),
+            "Choose the existing Single-faced or Multi-faced card property. This uses the "
+            "card's actual face data and does not infer face count from a maintained list "
+            "of layouts."),
     },
     {
-        "key": "released",
-        "category": "Printing",
-        "label": "Released",
+        "key": "color_indicator", "category": "Card", "label": "Color indicator",
         "tooltip": (
-            "The year a printing came out, with both years included. An old "
-            "card reprinted recently matches the recent year, not the year "
-            "it was first printed."),
+            "Require a card to have a printed color indicator. This is the existing "
+            "yes/no property only; it does not add a separate filter for the indicator's "
+            "color."),
+    },
+    {
+        "key": "pt_properties", "category": "Card", "label": "P/T properties",
+        "tooltip": (
+            "The existing Power greater than toughness and Variable power/toughness "
+            "predicates, grouped beside the card characteristics they describe."),
+    },
+    {
+        "key": "property_match", "category": "Card", "label": "Property matching",
+        "tooltip": (
+            "How the selected yes/no property filters above and below combine: Any, All "
+            "or None. This is the existing property matching mode, not a new filter."),
+    },
+    {
+        "key": "format", "category": "Printing & Status", "label": "Format",
+        "tooltip": (
+            "Cards with the selected legality in the selected format. Playable, Banned "
+            "and Restricted retain their existing search semantics."),
+    },
+    {
+        "key": "rarity", "category": "Printing & Status", "label": "Rarity",
+        "tooltip": (
+            "The rarity of an individual printing rather than a card name in general. "
+            "Current matching printings determine which existing rarity values are most "
+            "relevant."),
+    },
+    {
+        "key": "released", "category": "Printing & Status", "label": "Released",
+        "tooltip": (
+            "The inclusive release-year range for an individual printing. Leave either "
+            "side empty for no limit; the available year range follows the current "
+            "printing scope."),
+    },
+    {
+        "key": "status_properties", "category": "Printing & Status", "label": "Product / status",
+        "tooltip": (
+            "The existing Universes Beyond, Reserved List, and Commander Game Changer "
+            "yes/no properties. They remain the same search predicates and are grouped "
+            "here only for presentation."),
     },
 )
 
-# The standard filters with no registry entry: Card Name, Colors, Card type
-# and Printings are built by hand, and Power / Toughness is standard but keeps
-# its registry entry. All five explain themselves the same way the advanced
-# ones do, so the whole panel reads as one voice rather than four exceptions.
 STANDARD_FILTER_TOOLTIPS = {
     "name": (
-        "Matches any card whose name contains what you type, so bolt finds "
-        "Lightning Bolt. Searching from a deck selection looks for those "
-        "exact names instead."),
+        "Matches any card whose name contains what you type. Searching from a deck "
+        "selection continues to use the existing exact-name batch behavior."),
     "colors": (
-        "The colors a card is. Look at chooses which meaning: color identity "
-        "counts everything the card brings to a deck, including its rules "
-        "text and both faces, while Card colors counts only what the card "
-        "itself is. The row below that decides whether the colors must match "
-        "exactly, be included, or simply not be exceeded."),
+        "Use Look at to search either color identity or the card's printed colors, "
+        "then apply the existing Within, Contains, or Exactly set comparison."),
     "card_type": (
-        "The main type on the type line, such as Creature, Instant or Land. "
-        "A card with two of them, like an Artifact Creature, matches either "
-        "one."),
+        "The main Card Type on the type line, such as Creature, Instant or Land. "
+        "Multi-type cards continue to match according to Any/All/None."),
     "printings": (
-        "Which printings a search may return: platform, set type, individual "
-        "sets and language. It also decides what the other filters have to "
-        "offer, so narrowing it here narrows them too."),
+        "Which existing printings may match: Printing Type, Set Type, Exact Set and "
+        "English-only scope. These choices also scope trusted filter vocabulary."),
 }
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}
 
 
 def filter_tooltip(key):
-    """The tooltip for any filter, standard or advanced.
-
-    Four standard filters are built by hand in `ui/search.py` because each has
-    a shape no generic row could give it, so their wording lives in the dict
-    above rather than in a registry entry. Every caller asks here instead of
-    knowing which of the two a filter came from, which is also what stops the
-    same filter being described twice in two different voices.
-    """
     entry = FILTER_BY_KEY.get(str(key))
     if entry is not None:
         return entry["tooltip"]
@@ -220,22 +186,12 @@ def filter_tooltip(key):
 
 
 def advanced_filters():
-    """Every filter outside the standard set, grouped in category order.
-
-    Order is the registry's, not the order a user happened to open things in,
-    so a filter is always in the same place on the panel.
-    """
     grouped = []
     for category in CATEGORY_ORDER:
         entries = tuple(
-            {
-                "key": entry["key"],
-                "label": entry["label"],
-                "tooltip": entry["tooltip"],
-            }
+            {"key": entry["key"], "label": entry["label"], "tooltip": entry["tooltip"]}
             for entry in FILTER_DEFINITIONS
-            if entry["category"] == category
-            and entry["key"] not in STANDARD_FILTERS
+            if entry["category"] == category and entry["key"] not in STANDARD_FILTERS
         )
         if entries:
             grouped.append((category, entries))
@@ -243,12 +199,8 @@ def advanced_filters():
 
 
 def advanced_filter_keys():
-    """Flat advanced order, for callers that only need the keys."""
-    return tuple(
-        entry["key"] for _category, entries in advanced_filters()
-        for entry in entries)
+    return tuple(entry["key"] for _category, entries in advanced_filters() for entry in entries)
 
 
 def is_standard(key):
-    """Standard filters are always on the form and never inside Advanced."""
     return str(key) in STANDARD_FILTERS

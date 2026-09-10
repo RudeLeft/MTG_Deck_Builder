@@ -30,6 +30,9 @@ def main():
     checklist_path = os.path.join(ROOT, "mtgdb/ui/search_checklist.py")
     with open(checklist_path, encoding="utf-8") as source_file:
         checklist_source = source_file.read()
+    styles_path = os.path.join(ROOT, "mtgdb/ui/styles.py")
+    with open(styles_path, encoding="utf-8") as source_file:
+        style_source = source_file.read()
     table_filters_path = os.path.join(ROOT, "mtgdb/ui/table_filters.py")
     with open(table_filters_path, encoding="utf-8") as source_file:
         table_filters_source = source_file.read()
@@ -227,6 +230,13 @@ def main():
                 'text="Clear", role="standard"',
                 'role="picker"',
             )),
+        "zero-count virtual choices use a red-X unavailable presentation": (
+            '"Unavailable.ListChoice.TRadiobutton"' in checklist_source
+            and 'f"✕ {shown}" if zero_count else shown' in checklist_source
+            and 'PALETTE["bad"] if zero_count else PALETTE["text"]' in checklist_source
+            and 'key in self._zero_count_keys and key not in self._selected' in checklist_source
+            and 'style.configure("Unavailable.ListChoice.TRadiobutton"' in style_source
+            and 'def set_context_availability(' in components_source),
         "single-select virtual choices render as themed ttk radio rows": (
             # UI-010: the classic Tk indicator is painted by the host platform
             # and ignores the dark palette, so every row reads as selected.

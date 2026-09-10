@@ -23,6 +23,7 @@ from mtgdb.deck.sessions import DeckSession, DeckSessionManager
 from mtgdb.images.service import CardImageService
 from mtgdb.printing.service import PrintController, PrintTemplateService
 from mtgdb.search.catalogs import SearchCatalogController
+from mtgdb.search.context import SearchContextController
 from mtgdb.search.controller import SearchController
 from mtgdb.search.repository import SearchRepository
 from mtgdb.ui.card_detail import CardDetailMixin
@@ -65,6 +66,7 @@ class DeckBuilderApp(
         self.search_repository = SearchRepository(db)
         self.search_controller = SearchController(self.search_repository)
         self.search_catalog_controller = SearchCatalogController(self.search_repository)
+        self.search_context_controller = SearchContextController(self.search_repository)
         self.database_sync_controller = DatabaseSyncController(
             DatabaseSyncService(db))
         self.print_controller = PrintController(PrintTemplateService())
@@ -533,7 +535,8 @@ class DeckBuilderApp(
         for attr in (
                 "_curve_resize_after", "_image_load_after",
                 "_image_poll_after", "_image_ready_after",
-                "_pane_clamp_after", "_workspace_load_after"):
+                "_pane_clamp_after", "_workspace_load_after",
+                "_context_debounce_after"):
             pending = getattr(self, attr, None)
             if pending is not None:
                 try:
@@ -553,6 +556,12 @@ class DeckBuilderApp(
             except tk.TclError:
                 pass
             self._search_catalog_poll_after = None
+        if getattr(self, "_context_poll_after", None) is not None:
+            try:
+                self.after_cancel(self._context_poll_after)
+            except tk.TclError:
+                pass
+            self._context_poll_after = None
         self._shutdown_database_sync()
         self._shutdown_printing()
         if self._workspace_autosave_after is not None:
@@ -562,6 +571,7 @@ class DeckBuilderApp(
                 pass
             self._workspace_autosave_after = None
         self.search_catalog_controller.shutdown()
+        self.search_context_controller.shutdown()
         self._shutdown_search_results()
         self._shutdown_workspace(timeout=None)
         self.card_image_service.shutdown()

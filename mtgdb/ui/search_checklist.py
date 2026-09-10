@@ -39,6 +39,7 @@ class VirtualChecklistView(tk.Frame):
         self.on_change = on_change
         self._all = []
         self._visible = []
+        self._zero_count_keys = set()
         self._selected = {str(value) for value in selected}
         self._top = 0
         self._visible_rows = 12
@@ -110,17 +111,29 @@ class VirtualChecklistView(tk.Frame):
 
     @staticmethod
     def _normalize(values):
+        """Normalize picker values while retaining presentation-only row metadata.
+
+        A third tuple element may be a metadata mapping.  ``zero_count`` is a
+        live-context presentation hint only: the logical key remains selectable
+        and participates in Search exactly as before.
+        """
         normalized = []
+        zero_count_keys = set()
         for item in values:
+            metadata = None
             if isinstance(item, (tuple, list)) and len(item) >= 2:
                 key, display = str(item[0]), str(item[1])
+                if len(item) >= 3 and isinstance(item[2], dict):
+                    metadata = item[2]
             else:
                 key = display = str(item)
             normalized.append((key, display))
-        return normalized
+            if metadata and bool(metadata.get("zero_count")):
+                zero_count_keys.add(key)
+        return normalized, zero_count_keys
 
     def set_values(self, values, *, selected=None, preserve_selection=True):
-        self._all = self._normalize(values)
+        self._all, self._zero_count_keys = self._normalize(values)
         if selected is not None:
             self._selected = {str(value) for value in selected}
         elif not preserve_selection:
@@ -157,11 +170,13 @@ class VirtualChecklistView(tk.Frame):
     def select_visible(self, value):
         keys = {key for key, _display in self._visible}
         if value:
-            if self.single_select and keys:
-                first = next(iter(keys))
+            selectable = keys - self._zero_count_keys
+            if self.single_select and selectable:
+                first = next(
+                    key for key, _display in self._visible if key in selectable)
                 self._selected = {first}
             else:
-                self._selected.update(keys)
+                self._selected.update(selectable)
         else:
             self._selected.difference_update(keys)
         self._refresh()
@@ -169,21 +184,21 @@ class VirtualChecklistView(tk.Frame):
 
     def select_all(self, value=True):
         keys = {key for key, _display in self._all}
-        if value and self.single_select and self._all:
-            self._selected = {self._all[0][0]}
+        selectable = keys - self._zero_count_keys
+        if value and self.single_select and selectable:
+            self._selected = {next(
+                key for key, _display in self._all if key in selectable)}
         else:
-            self._selected = keys if value else set()
+            self._selected = selectable if value else set()
         self._refresh()
         self._changed()
 
     def set_enabled(self, enabled):
         self._enabled = bool(enabled)
-        state = "normal" if self._enabled else "disabled"
-        for widget in self._rows:
-            try:
-                widget.configure(state=state)
-            except tk.TclError:
-                pass
+        # Per-row availability matters when the list is enabled: zero-result
+        # rows stay disabled unless they are selected and therefore need to be
+        # removable.  Rebinding the row pool is the single source of truth.
+        self._refresh()
         try:
             if self._enabled and len(self._visible) > self._capacity:
                 self._scroll.state(["!disabled"])
@@ -199,6 +214,12 @@ class VirtualChecklistView(tk.Frame):
     def _toggle_slot(self, slot):
         key = self._slot_values[slot]
         if key is None:
+            return
+        # An unselected zero-result value is visible for orientation but is not
+        # a usable next filter.  A selected value that later reaches zero may
+        # still be toggled off to resolve the conflict.
+        if key in self._zero_count_keys and key not in self._selected:
+            self._refresh()
             return
         if self.single_select:
             self._selected = {key}
@@ -266,11 +287,29 @@ class VirtualChecklistView(tk.Frame):
             if slot < len(rows) and slot < self._capacity:
                 key, display = rows[slot]
                 self._slot_values[slot] = key
-                self._row_text[slot].set(display or "(blank)")
+                zero_count = key in self._zero_count_keys
+                selected = key in self._selected
+                shown = display or "(blank)"
+                self._row_text[slot].set(
+                    f"✕ {shown}" if zero_count else shown)
                 if self.single_select:
-                    widget.configure(value=key)
+                    widget.configure(
+                        value=key,
+                        style=("Unavailable.ListChoice.TRadiobutton" if zero_count
+                               else "ListChoice.TRadiobutton"),
+                        state=("normal" if self._enabled and (not zero_count or selected)
+                               else "disabled"),
+                    )
                 else:
-                    self._row_vars[slot].set(key in self._selected)
+                    self._row_vars[slot].set(selected)
+                    foreground = PALETTE["bad"] if zero_count else PALETTE["text"]
+                    widget.configure(
+                        state=("normal" if self._enabled and (not zero_count or selected)
+                               else "disabled"),
+                        fg=foreground, activeforeground=foreground,
+                        disabledforeground=(
+                            PALETTE["bad"] if zero_count else PALETTE["muted"]),
+                    )
                 widget.grid()
             else:
                 self._slot_values[slot] = None

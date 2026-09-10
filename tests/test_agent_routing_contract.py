@@ -27,6 +27,7 @@ SOURCE_MARKERS = {
     "mtgdb/search/controller.py": ("class SearchController", "def invalidate("),
     "mtgdb/search/results.py": ("class SearchResultStore", "class ResultPreparationWorker"),
     "mtgdb/search/catalogs.py": ("class SearchCatalogController", "class SearchCatalogSnapshot"),
+    "mtgdb/search/context.py": ("class SearchContextController", "class SearchContextSnapshot"),
     "mtgdb/deck/model.py": ("class Deck", "def move("),
     "mtgdb/deck/io.py": ("def deck_to_text(", "def save_deck_text(", "def deck_from_text("),
     "mtgdb/deck/file_jobs.py": ("def submit_deck_file_job(", "spawn_daemon("),

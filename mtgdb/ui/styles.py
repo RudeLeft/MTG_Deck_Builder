@@ -207,6 +207,19 @@ def install_ui_styles(root):
         indicatorbackground=[("selected", p["accent"]),
                              ("active", p["surface3"])],
     )
+    # Zero-result radio choices remain visible but are explicit unavailable
+    # options.  Their text includes a red X marker and the disabled style keeps
+    # an unselected zero value from being activated.
+    style.configure("Unavailable.ListChoice.TRadiobutton", background=p["input"],
+                    foreground=p["bad"], font=FONT_HELPER,
+                    indicatorbackground=p["input"])
+    style.map(
+        "Unavailable.ListChoice.TRadiobutton",
+        foreground=[("disabled", p["bad"]), ("active", p["bad"])],
+        background=[("active", p["input"])],
+        indicatorbackground=[("selected", p["accent"]),
+                             ("active", p["surface3"])],
+    )
 
     # Same hollow-then-gold indicator, but painted on the surface the mode row
     # actually sits on. ListChoice carries the input background of a list

@@ -40,14 +40,8 @@ FORMAT_STATUS_CHOICES = (
     ("Playable", "playable"), ("Banned", "banned"),
     ("Restricted", "restricted"),
 )
-# Magic's first set through a little beyond the current printing horizon.
-RELEASE_YEAR_FIRST = 1993
-RELEASE_YEAR_LAST = datetime.date.today().year + 2
-# Content kinds live here now: they are yes/no facts about what an object is,
-# and a separate Content row for four checkboxes was a filter of its own.
-# Which kinds of object a search covers. Cards is one of the four and can be
-# turned off: without it the scope could only ever grow, so "show me the
-# tokens" meant adding 3,000 tokens to 100,000 cards and hunting for them.
+# Search vocabulary is loaded from the local Scryfall-backed snapshot rather
+# than guessed from a fixed calendar/taxonomy list.
 CONTENT_TRAIT_KEYS = {
     "content_cards": "card",
     "content_tokens": "token",
@@ -74,6 +68,16 @@ TRAIT_CHOICES = (
     ("variable_stats", "Variable power or toughness (*)"),
 )
 TRAIT_LABELS = dict(TRAIT_CHOICES)
+MANA_COST_TRAIT_KEYS = ("hybrid_mana", "phyrexian_mana", "has_x_cost")
+FACE_TRAIT_KEYS = ("single_faced", "multi_faced")
+PT_TRAIT_KEYS = ("top_heavy", "variable_stats")
+STATUS_TRAIT_KEYS = (
+    "not_universes_beyond", "universes_beyond", "reserved", "game_changer",
+)
+COLOR_INDICATOR_TRAIT_KEYS = ("color_indicator",)
+PROPERTY_TRAIT_KEYS = frozenset(
+    MANA_COST_TRAIT_KEYS + FACE_TRAIT_KEYS + PT_TRAIT_KEYS
+    + STATUS_TRAIT_KEYS + COLOR_INDICATOR_TRAIT_KEYS)
 PICKER_SUMMARY_PER_LINE = 5
 
 
@@ -127,8 +131,11 @@ class SearchFeatureMixin:
         self.q_keyword_mode = tk.StringVar(value="any")
         self._selected_subtypes = set()
         self._subtype_catalog = []
+        self._subtype_category_by_value = {}
         self.q_subtype_mode = tk.StringVar(value="any")
         self._selected_rarities = set()
+        self._rarity_catalog = []
+        self._release_year_catalog = []
         self.q_format = tk.StringVar(value="")
         # Playable is legal-or-restricted. Banned and restricted are the
         # states a deck check asks about and nothing could previously reach.
@@ -141,8 +148,19 @@ class SearchFeatureMixin:
         self._selected_layouts = set()
         self.q_layout_mode = tk.StringVar(value="any")
         self._layout_catalog = []
-        self._card_shape_btn = None
+        self._card_form_btn = None
+        self._layout_duplicates = set()
+        self._context_snapshot = None
+        self._context_poll_after = None
+        self._context_debounce_after = None
+        self._context_requested_criteria = None
+        self._context_applied_criteria = None
+        self._active_search_criteria = None
+        self._color_checks = {}
+        self._produces_checks = {}
+        self._pip_checks = {}
         self.pip_vars = {}
+        self._pip_checks = {}
         self.q_pip_min = None
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
@@ -154,7 +172,13 @@ class SearchFeatureMixin:
         self._rarity_btn = None
         self._subtype_btn = None
         self._keyword_btn = None
-        self._traits_btn = None
+        self._search_scope_btn = None
+        self._mana_cost_features_btn = None
+        self._faces_btn = None
+        self._pt_properties_btn = None
+        self._status_properties_btn = None
+        self._color_indicator_var = None
+        self._color_indicator_check = None
         self._property_chip_frame = None
         self._supertype_empty_text = ""
         for name in (
@@ -173,14 +197,13 @@ class SearchFeatureMixin:
         form.columnconfigure(2, minsize=76)
         form.columnconfigure(3, weight=1, uniform="search_control")
         self._initialize_search_filter_state()
-        # The standard set, in the order a search is usually built: what the
-        # card is called, what it is, what colour it is, how big it is, and
-        # which printings are in scope.
+        # Keep the familiar vertical Search form, but make the printed type-line
+        # relationship explicit: Supertype -> Card Type -> Subtype.
         self._build_name_filter(form)
-        self._build_card_type_filters(form)
-        self._build_color_filters(form)
-        self._build_standard_stats_filter(form, row=4)
-        self._build_printing_filter(form, row=6)
+        self._build_standard_type_line_filters(form)
+        self._build_color_filters(form, row=5)
+        self._build_standard_stats_filter(form, row=6)
+        self._build_printing_filter(form, row=7)
         self._build_advanced_filter_zone(parent)
         self._bind_search_outside_click_selection_cleanup()
         self._build_search_actions(parent)
@@ -280,13 +303,45 @@ class SearchFeatureMixin:
 
             self.after_idle(finish_blur)
 
-    def _build_card_type_filters(self, form):
-        type_label = ttk.Label(form, text="Card type")
+    def _build_standard_type_line_filters(self, form):
+        heading = ttk.Label(form, text="TYPE LINE", style="Section.TLabel")
+        heading.grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 1))
+
+        super_label = ttk.Label(form, text="Supertype")
+        super_label.grid(
+            row=2, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+        self._add_standard_filter_tooltip(super_label, "supertypes")
+        super_box = ttk.Frame(form)
+        super_box.grid(
+            row=2, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
+        self._property_chip_frame = ttk.Frame(super_box)
+        self._property_chip_frame.pack(fill="x")
+        self._render_supertype_chips()
+        self._build_mode_row(
+            super_box, "Selected supertypes:", self.q_supertype_mode, "supertypes")
+
+        self._build_card_type_filters(form, row=3)
+
+        subtype_label = ttk.Label(form, text="Subtype")
+        subtype_label.grid(
+            row=4, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+        self._add_standard_filter_tooltip(subtype_label, "subtype")
+        self._subtype_btn = AppButton(
+            form, text=self._picker_button_text(
+                self._selected_subtypes, "Any", "subtypes",
+                max_visible=10, single_line=True),
+            role="picker", command=self._choose_subtypes)
+        self._subtype_btn.grid(
+            row=4, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
+        self._add_standard_filter_tooltip(self._subtype_btn, "subtype")
+
+    def _build_card_type_filters(self, form, *, row=1):
+        type_label = ttk.Label(form, text="Card Type")
         type_label.grid(
-            row=1, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+            row=row, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
         self._add_standard_filter_tooltip(type_label, "card_type")
         typebox = ttk.Frame(form)
-        typebox.grid(row=1, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
+        typebox.grid(row=row, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._card_type_chip_frame = ttk.Frame(typebox)
         self._card_type_chip_frame.pack(fill="x")
         self._card_type_chip_frame.bind(
@@ -302,13 +357,13 @@ class SearchFeatureMixin:
             })
 
 
-    def _build_color_filters(self, form):
+    def _build_color_filters(self, form, *, row=3):
         color_label = ttk.Label(form, text="Colors")
         color_label.grid(
-            row=3, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
+            row=row, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
         self._add_standard_filter_tooltip(color_label, "colors")
         colorwrap = ttk.Frame(form)
-        colorwrap.grid(row=3, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
+        colorwrap.grid(row=row, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         colorbox = ttk.Frame(colorwrap)
         colorbox.pack(fill="x")
         for c in (*COLORS, "C"):
@@ -326,6 +381,7 @@ class SearchFeatureMixin:
                 kw["image"] = self.pips[c]
                 kw["compound"] = "left"
             check = ttk.Checkbutton(colorbox, **kw)
+            self._color_checks[c] = check
             check.pack(side="left", padx=(0, 8))
             if c != "C":
                 self._add_standard_filter_tooltip(check, "colors")
@@ -435,6 +491,7 @@ class SearchFeatureMixin:
                 kw["image"] = self.pips[color]
                 kw["compound"] = "left"
             produced = ttk.Checkbutton(box, **kw)
+            self._produces_checks[color] = produced
             produced.pack(side="left", padx=(0, 8))
             self._add_tooltip(
                 produced, filter_tooltip("produces"), wraplength=380)
@@ -484,7 +541,9 @@ class SearchFeatureMixin:
             row=row, column=1, sticky="ew",
             pady=(2 if advanced else SEARCH_ROW_PADY))
         rules_box.columnconfigure(0, weight=1)
-        self.q_rules = TokenBubbleEntry(rules_box, search_command=self._do_search)
+        self.q_rules = TokenBubbleEntry(
+            rules_box, search_command=self._do_search,
+            change_command=self._update_search_filter_summary)
         self.q_rules.grid(row=0, column=0, sticky="ew")
         self._bind_editable_focus_behavior(self.q_rules.entry)
         self._add_tooltip(
@@ -530,62 +589,289 @@ class SearchFeatureMixin:
             widget.delete(0, "end")
             self._configure_zero_start_spinbox(widget)
             self._add_tooltip(widget, self.RANGE_BOUNDS_HELP, wraplength=340)
+            widget.bind(
+                "<KeyRelease>",
+                lambda _event: self._update_search_filter_summary(), add="+")
+            widget.bind(
+                "<ButtonRelease-1>",
+                lambda _event: self._update_search_filter_summary(), add="+")
+            widget.bind(
+                "<FocusOut>",
+                lambda _event: self._update_search_filter_summary(), add="+")
         setattr(self, f"{attribute_prefix}_min", low)
         setattr(self, f"{attribute_prefix}_max", high)
         return box
 
-    def _build_filter_traits(self, parent):
-        self._traits_btn = AppButton(
-            parent, text="Any", role="picker",
-            command=self._choose_traits)
-        self._traits_btn.grid(row=0, column=1, sticky="ew", pady=2)
+    def _trait_subset_selected(self, keys):
+        selected = set(getattr(self, "_selected_traits", set()) or ())
+        return {key for key in keys if key in selected}
 
-    def _reset_filter_traits(self):
-        # Clearing returns to Cards rather than to nothing: an empty content
-        # scope is not a search anybody meant to run.
-        self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
-        self._traits_btn = None
+    def _context_trait_label(self, key):
+        label = TRAIT_LABELS[key]
+        snapshot = getattr(self, "_context_snapshot", None)
+        if snapshot is None:
+            return label
+        count = int((snapshot.trait_counts or {}).get(key, 0))
+        return f"{label} · {count:,}"
 
-    def _choose_traits(self):
-        """Pick boolean card properties through the shared checklist dialog."""
+    def _choose_trait_subset(self, title, keys, button_attr, noun):
+        keys = tuple(keys)
+        selected = self._trait_subset_selected(keys)
 
         def apply(chosen):
-            previous_content = self._content_types_from_traits()
-            self._selected_traits = {
-                str(key) for key in chosen if key in TRAIT_LABELS}
-            if self._traits_btn is not None:
-                self._traits_btn.configure(text=self._picker_button_text(
-                    {TRAIT_LABELS[key]
-                     for key in self._selected_traits},
-                    "Any", "traits", max_visible=10, single_line=True))
-            # Tokens, Emblems and Art Series widen which objects the search
-            # covers, so the vocabulary every other picker offers has to be
-            # rebuilt for the new scope. Without this the Subtype, Card type
-            # and Set lists kept describing cards only.
-            if self._content_types_from_traits() != previous_content:
-                self._on_content_filter_change()
-                return
+            current = set(getattr(self, "_selected_traits", set()) or ())
+            current.difference_update(keys)
+            current.update(str(value) for value in chosen if str(value) in keys)
+            self._selected_traits = current
+            button = getattr(self, button_attr, None)
+            self._set_picker_text(button, self._picker_button_text(
+                {TRAIT_LABELS[key] for key in chosen if key in TRAIT_LABELS},
+                "Any", noun, max_visible=8, single_line=True))
             self._update_search_filter_summary()
 
-        selected = {
-            key for key in getattr(self, "_selected_traits", set()) or ()
-            if key in TRAIT_LABELS}
+        snapshot = getattr(self, "_context_snapshot", None)
         self._open_search_multi_picker(
-            "Card Traits",
-            # The first four choose what the search covers rather than adding
-            # a condition, so the Any/All/None row below cannot apply to them.
-            # Grouping them says so, in the same "group - value" form the
-            # Mechanics and Subtype pickers already use.
-            [(key, ("Scope · " if key in CONTENT_TRAIT_KEYS else "Trait · ") + label)
-             for key, label in TRAIT_CHOICES],
+            title,
+            [
+                (key, self._context_trait_label(key),
+                 {"zero_count": (snapshot is not None and
+                                  int((snapshot.trait_counts or {}).get(key, 0)) <= 0)})
+                for key in keys
+            ],
             selected, apply,
             mode_var=self.q_trait_mode,
-            mode_label="Selected traits:",
+            mode_label="Property matching:",
             help_text=(
-                "Scope chooses which kinds of object the search covers, and "
-                "ignores the Any/All/None row: untick Cards and tick Tokens "
-                "to search tokens alone. Every Trait below is a condition "
-                "that row does govern."))
+                "These are existing yes/no Search properties. Current-result counts "
+                "are informational; selecting a value keeps the existing Any/All/None "
+                "query semantics."))
+
+    def _build_trait_subset_button(self, parent, keys, button_attr, title, noun):
+        selected = self._trait_subset_selected(keys)
+        button = AppButton(
+            parent,
+            text=self._picker_button_text(
+                {TRAIT_LABELS[key] for key in selected}, "Any", noun,
+                max_visible=8, single_line=True),
+            role="picker",
+            command=lambda: self._choose_trait_subset(title, keys, button_attr, noun))
+        button.grid(row=0, column=1, sticky="ew", pady=2)
+        setattr(self, button_attr, button)
+
+    def _reset_trait_subset(self, keys, button_attr):
+        current = set(getattr(self, "_selected_traits", set()) or ())
+        current.difference_update(keys)
+        self._selected_traits = current
+        setattr(self, button_attr, None)
+
+    def _refresh_split_trait_button_texts(self):
+        groups = (
+            (MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn", "features"),
+            (FACE_TRAIT_KEYS, "_faces_btn", "face properties"),
+            (PT_TRAIT_KEYS, "_pt_properties_btn", "properties"),
+            (STATUS_TRAIT_KEYS, "_status_properties_btn", "status properties"),
+        )
+        for keys, attribute, noun in groups:
+            button = getattr(self, attribute, None)
+            selected = self._trait_subset_selected(keys)
+            self._set_picker_text(button, self._picker_button_text(
+                {TRAIT_LABELS[key] for key in selected}, "Any", noun,
+                max_visible=8, single_line=True))
+        scope = {key for key in self._selected_traits if key in CONTENT_TRAIT_KEYS}
+        self._set_picker_text(self._search_scope_btn, self._picker_button_text(
+            {TRAIT_LABELS[key] for key in scope}, "Cards", "objects",
+            max_visible=4, single_line=True))
+        variable = getattr(self, "_color_indicator_var", None)
+        if variable is not None:
+            variable.set("color_indicator" in self._selected_traits)
+
+    def _build_filter_search_scope(self, parent):
+        self._search_scope_btn = AppButton(
+            parent, text=self._picker_button_text(
+                {TRAIT_LABELS[key] for key in self._selected_traits
+                 if key in CONTENT_TRAIT_KEYS},
+                "Cards", "objects", max_visible=4, single_line=True),
+            role="picker", command=self._choose_search_scope)
+        self._search_scope_btn.grid(row=0, column=1, sticky="ew", pady=2)
+
+    def _reset_filter_search_scope(self):
+        self._selected_traits = (
+            set(self._selected_traits) - set(CONTENT_TRAIT_KEYS)
+        ) | set(DEFAULT_CONTENT_TRAITS)
+        self._search_scope_btn = None
+
+    def _choose_search_scope(self):
+        previous = self._content_types_from_traits()
+        selected = {key for key in self._selected_traits if key in CONTENT_TRAIT_KEYS}
+
+        def apply(chosen):
+            current = set(self._selected_traits) - set(CONTENT_TRAIT_KEYS)
+            chosen = {str(value) for value in chosen if str(value) in CONTENT_TRAIT_KEYS}
+            if not chosen:
+                chosen = set(DEFAULT_CONTENT_TRAITS)
+            self._selected_traits = current | chosen
+            self._set_picker_text(self._search_scope_btn, self._picker_button_text(
+                {TRAIT_LABELS[key] for key in chosen}, "Cards", "objects",
+                max_visible=4, single_line=True))
+            if self._content_types_from_traits() != previous:
+                self._on_content_filter_change()
+            else:
+                self._update_search_filter_summary()
+
+        snapshot = getattr(self, "_context_snapshot", None)
+        content_counts = (snapshot.content_counts if snapshot is not None else {}) or {}
+        values = []
+        for key, kind in CONTENT_TRAIT_KEYS.items():
+            label = TRAIT_LABELS[key]
+            if snapshot is not None:
+                label = f"{label} · {int(content_counts.get(kind, 0)):,}"
+            values.append((
+                key, label,
+                {"zero_count": (snapshot is not None and
+                                 int(content_counts.get(kind, 0)) <= 0)},
+            ))
+        self._open_search_multi_picker(
+            "Search Scope", values,
+            selected, apply,
+            help_text=(
+                "Choose which existing Scryfall object classes Search covers. "
+                "This scopes the search; it does not participate in Property matching."))
+
+    def _build_filter_mana_cost_features(self, parent):
+        self._build_trait_subset_button(
+            parent, MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn",
+            "Mana Cost Features", "features")
+
+    def _reset_filter_mana_cost_features(self):
+        self._reset_trait_subset(MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn")
+
+    def _build_filter_faces(self, parent):
+        self._build_trait_subset_button(
+            parent, FACE_TRAIT_KEYS, "_faces_btn", "Faces", "face properties")
+
+    def _reset_filter_faces(self):
+        self._reset_trait_subset(FACE_TRAIT_KEYS, "_faces_btn")
+
+    def _build_filter_pt_properties(self, parent):
+        self._build_trait_subset_button(
+            parent, PT_TRAIT_KEYS, "_pt_properties_btn", "P/T Properties", "properties")
+
+    def _reset_filter_pt_properties(self):
+        self._reset_trait_subset(PT_TRAIT_KEYS, "_pt_properties_btn")
+
+    def _build_filter_status_properties(self, parent):
+        self._build_trait_subset_button(
+            parent, STATUS_TRAIT_KEYS, "_status_properties_btn",
+            "Product / Status", "status properties")
+
+    def _reset_filter_status_properties(self):
+        self._reset_trait_subset(STATUS_TRAIT_KEYS, "_status_properties_btn")
+
+    def _build_filter_color_indicator(self, parent):
+        variable = tk.BooleanVar(
+            master=self, value="color_indicator" in self._selected_traits)
+        self._color_indicator_var = variable
+
+        def changed():
+            if variable.get():
+                self._selected_traits.add("color_indicator")
+            else:
+                self._selected_traits.discard("color_indicator")
+            self._update_search_filter_summary()
+
+        check = ClassicCheckbutton(
+            parent, text="Has a color indicator", variable=variable,
+            command=changed, role="chip")
+        self._color_indicator_check = check
+        check.grid(row=0, column=1, sticky="w", pady=2)
+
+    def _reset_filter_color_indicator(self):
+        self._selected_traits.discard("color_indicator")
+        self._color_indicator_var = None
+        self._color_indicator_check = None
+
+    def _build_filter_property_match(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="w", pady=2)
+        for text, value in self.MODE_ROW_CHOICES:
+            radio = ttk.Radiobutton(
+                box, text=text, variable=self.q_trait_mode, value=value,
+                style="FormChoice.TRadiobutton",
+                command=self._update_search_filter_summary)
+            radio.pack(side="left", padx=(0 if value == "any" else 5, 0))
+
+    def _reset_filter_property_match(self):
+        self.q_trait_mode.set("any")
+
+    def _build_filter_card_form(self, parent):
+        box = ttk.Frame(parent)
+        box.grid(row=0, column=1, sticky="ew", pady=2)
+        self._card_form_btn = AppButton(
+            box, text=self._picker_button_text(
+                {self._layout_display_name(value) for value in self._selected_layouts},
+                "Any", "forms", max_visible=10, single_line=True),
+            role="picker", command=self._choose_card_forms)
+        self._card_form_btn.pack(fill="x")
+        self._build_mode_row(
+            box, "Selected forms:", self.q_layout_mode, "forms",
+            meanings={
+                "any": "Any: the card uses one of the selected Scryfall layouts.",
+                "none": "None: exclude every card using a selected Scryfall layout.",
+            }, choices=self.ANY_NONE_CHOICES)
+
+    def _reset_filter_card_form(self):
+        self._selected_layouts = set()
+        self.q_layout_mode.set("any")
+        self._card_form_btn = None
+
+    def _contextual_layout_catalog(self):
+        snapshot = getattr(self, "_context_snapshot", None)
+        counts = (snapshot.layout_counts if snapshot is not None else {}) or {}
+        catalog = list(getattr(self, "_layout_catalog", ()) or ())
+        selected = set(getattr(self, "_selected_layouts", set()) or ())
+        duplicates = set(getattr(self, "_layout_duplicates", set()) or ())
+        # A hidden duplicate from a legacy workspace stays visible until the user
+        # clears it, so restoring old state can never silently change its query.
+        catalog = [item for item in catalog if item[0] not in duplicates or item[0] in selected]
+        return sorted(
+            catalog,
+            key=lambda item: (
+                0 if item[0] in selected else 1,
+                0 if int(counts.get(item[0], 0)) > 0 else 1,
+                -int(counts.get(item[0], 0)),
+                self._layout_display_name(item[0]).casefold(),
+            ))
+
+    def _choose_card_forms(self):
+        valid = {key for key, _count in self._layout_catalog}
+        snapshot = getattr(self, "_context_snapshot", None)
+        counts = (snapshot.layout_counts if snapshot is not None else {}) or {}
+
+        def apply(chosen):
+            self._selected_layouts = {str(value) for value in chosen if str(value) in valid}
+            self._set_picker_text(
+                self._card_form_btn,
+                self._picker_button_text(
+                    {self._layout_display_name(value) for value in self._selected_layouts},
+                    "Any", "forms", max_visible=10, single_line=True))
+            self._update_search_filter_summary()
+
+        self._open_search_multi_picker(
+            "Choose Card Forms",
+            [
+                (key, f"{self._layout_display_name(key)} · {int(counts.get(key, count)):,}",
+                 {"zero_count": (snapshot is not None and
+                                  int(counts.get(key, count)) <= 0)})
+                for key, count in self._contextual_layout_catalog()
+            ],
+            set(self._selected_layouts), apply,
+            mode_var=self.q_layout_mode,
+            mode_label="Selected forms:",
+            help_text=(
+                "Card Form uses the existing observed Scryfall layout field. Values "
+                "matching the current Search are listed first; zero-count values stay selectable "
+                "but are shown in muted text."),
+            mode_choices=self.ANY_NONE_CHOICES)
 
     LAYOUT_LABELS = {
         "modal_dfc": "Modal double-faced",
@@ -598,61 +884,12 @@ class SearchFeatureMixin:
     def _layout_display_name(self, value):
         """Readable name for one Scryfall layout key.
 
-        An unmapped key is title-cased rather than hidden: a shape this build
+        An unmapped key is title-cased rather than hidden: a layout this build
         has never seen must still be selectable.
         """
         key = str(value or "").strip()
         return self.LAYOUT_LABELS.get(
             key.casefold(), key.replace("_", " ").capitalize())
-
-    def _build_filter_card_shape(self, parent):
-        box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="ew", pady=2)
-        self._card_shape_btn = AppButton(
-            box, text=self._picker_button_text(
-                {self._layout_display_name(value)
-                 for value in self._selected_layouts},
-                "Any", "shapes", max_visible=10, single_line=True),
-            role="picker", command=self._choose_card_shapes)
-        self._card_shape_btn.pack(fill="x")
-        self._build_mode_row(
-            box, "Selected shapes:", self.q_layout_mode, "shapes",
-            meanings={
-                "any": "Any: the card is printed in one of the selected shapes.",
-                "none": ("None: exclude every card printed in a selected "
-                         "shape, which is how to search ordinary cards only."),
-            },
-            choices=self.ANY_NONE_CHOICES)
-
-    def _reset_filter_card_shape(self):
-        self._selected_layouts = set()
-        self.q_layout_mode.set("any")
-        self._card_shape_btn = None
-
-    def _choose_card_shapes(self):
-        def apply(chosen):
-            self._selected_layouts = {
-                str(value) for value in chosen
-                if str(value) in {key for key, _count in self._layout_catalog}}
-            self._set_picker_text(
-                self._card_shape_btn,
-                self._picker_button_text(
-                    {self._layout_display_name(value)
-                     for value in self._selected_layouts},
-                    "Any", "shapes", max_visible=10, single_line=True))
-            self._update_search_filter_summary()
-
-        self._open_search_multi_picker(
-            "Choose Card Shapes",
-            [(key, f"{self._layout_display_name(key)} · {count:,}")
-             for key, count in self._layout_catalog],
-            set(self._selected_layouts), apply,
-            mode_var=self.q_layout_mode,
-            mode_label="Selected shapes:",
-            mode_choices=self.ANY_NONE_CHOICES,
-            help_text=(
-                "Choose one or several printed shapes. The count beside each "
-                "one is how many printings currently have it."))
 
     PIP_SELECTION_HELP = (
         "Every color you tick must appear at least this many times in the "
@@ -676,6 +913,7 @@ class SearchFeatureMixin:
                 kw["image"] = self.pips[color]
                 kw["compound"] = "left"
             check = ttk.Checkbutton(pips, **kw)
+            self._pip_checks[color] = check
             check.pack(side="left", padx=(0, 8))
             self._add_tooltip(check, self.PIP_SELECTION_HELP, wraplength=380)
         row = ttk.Frame(box)
@@ -686,6 +924,15 @@ class SearchFeatureMixin:
         self._add_tooltip(self.q_pip_min, self.PIP_SELECTION_HELP, wraplength=380)
         self.q_pip_min.delete(0, "end")
         self.q_pip_min.insert(0, "1")
+        self.q_pip_min.bind(
+            "<KeyRelease>",
+            lambda _event: self._update_search_filter_summary(), add="+")
+        self.q_pip_min.bind(
+            "<ButtonRelease-1>",
+            lambda _event: self._update_search_filter_summary(), add="+")
+        self.q_pip_min.bind(
+            "<FocusOut>",
+            lambda _event: self._update_search_filter_summary(), add="+")
         ttk.Label(
             row, text="of each selected color", style="Muted.TLabel").pack(
                 side="left", padx=(5, 0))
@@ -720,8 +967,7 @@ class SearchFeatureMixin:
         """
         box = ttk.Frame(parent)
         box.grid(row=0, column=1, sticky="w", pady=2)
-        years = [""] + [str(year) for year in
-                        range(RELEASE_YEAR_LAST, RELEASE_YEAR_FIRST - 1, -1)]
+        years = [""] + list(getattr(self, "_release_year_catalog", ()) or ())
         self.q_released_min = AppCombobox(
             box, values=years, width=7, state="readonly")
         self.q_released_min.set("")
@@ -821,7 +1067,7 @@ class SearchFeatureMixin:
                 continue
 
     def _selected_trait_keys(self):
-        """Card traits that contribute a clause, excluding content kinds.
+        """Existing property predicates that contribute a clause, excluding scope kinds.
 
         Tokens, Emblems and Art Series choose which objects the search covers
         through content_types; treating them as clauses as well would filter
@@ -1152,7 +1398,7 @@ class SearchFeatureMixin:
 
 
     def _content_types_from_traits(self):
-        """Which kinds of object the search covers, chosen in Card traits.
+        """Which kinds of object the Search Scope covers.
 
         All four are independent, so turning Cards off and Tokens on searches
         tokens alone. Tokens, Emblems and Art Series stay off until asked for,
@@ -1294,7 +1540,13 @@ class SearchFeatureMixin:
             command=lambda: self._clear_table_filter("results")
         ).pack(side="right", padx=(0, 6))
 
+        self._search_context_notice = ttk.Label(
+            parent, text="", style="Muted.TLabel", justify="left", wraplength=620)
+        self._search_context_notice.pack(fill="x", pady=(0, 3))
+        self._search_context_notice.pack_forget()
+
         table = ttk.Frame(parent)
+        self._results_table_frame = table
         table.pack(fill="both", expand=True, pady=(0, 8))
         ordinary = tuple(c for c in TABLE_COLUMN_ORDER
                          if c != "cost" and "results" in TABLE_COLUMNS[c]["views"])
@@ -1382,6 +1634,12 @@ class SearchFeatureMixin:
         self._rules_text_shadow = []
         self.q_rules_mode.set("all")
         self.q_card_type_mode.set("any")
+        self.q_supertype_mode.set("any")
+        self.q_subtype_mode.set("any")
+        for variable in self.property_vars.values():
+            variable.set(False)
+        self._selected_subtypes = set()
+        self._set_picker_text(self._subtype_btn, "Any")
         self.q_color_mode.set("within")
         self.q_color_scope.set("identity")
         self.q_produces_mode.set("includes")
@@ -1403,6 +1661,7 @@ class SearchFeatureMixin:
         # would otherwise stay scrolled to wherever the taller panel had left
         # it. Return it to the first row along with the criteria.
         self._reset_results_viewport()
+        self._clear_search_context_presentation()
         self._update_search_filter_summary()
 
 
@@ -1421,7 +1680,7 @@ class SearchFeatureMixin:
         return True
 
     def _on_content_filter_change(self):
-        """Content changed through Card traits; rebuild the scoped vocabulary."""
+        """Search Scope changed; rebuild the scoped vocabulary."""
         self._refresh_search_catalogs()
         self._update_search_filter_summary()
 
@@ -1468,7 +1727,9 @@ class SearchFeatureMixin:
             max_visible=10, single_line=True))
             self._update_search_filter_summary()
         self._open_search_multi_picker(
-            "Choose Subtypes", self._subtype_catalog, self._selected_subtypes, apply,
+            "Choose Subtypes",
+            self._contextual_subtype_values(),
+            self._selected_subtypes, apply,
             mode_var=self.q_subtype_mode,
             mode_label="Selected subtypes:",
             help_text="Choose one or several card subtypes.")
@@ -1483,11 +1744,265 @@ class SearchFeatureMixin:
                     max_visible=10, single_line=True))
             self._update_search_filter_summary()
         self._open_search_multi_picker(
-            "Choose Mechanics", self._keyword_catalog, self._selected_keywords, apply,
+            "Choose Mechanics",
+            self._contextual_picker_values(
+                self._keyword_catalog, "keyword_counts", self._selected_keywords),
+            self._selected_keywords, apply,
             mode_var=self.q_keyword_mode,
             mode_label="Selected mechanics:",
             help_text="Choose one or several card mechanics.")
 
+
+    def _contextual_picker_values(self, catalog, count_attribute, selected=()):
+        """Selected first, then current matches, while retaining the full catalog."""
+        selected = {str(value) for value in (selected or ())}
+        snapshot = getattr(self, "_context_snapshot", None)
+        counts = (getattr(snapshot, count_attribute, None) if snapshot is not None else None)
+        normalized = []
+        for item in catalog or ():
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                key, display = str(item[0]), str(item[1])
+            else:
+                key = display = str(item)
+            count = int((counts or {}).get(key, 0))
+            contextual_display = f"{display} · {count:,}" if counts is not None else display
+            normalized.append((key, contextual_display, display, count))
+        if counts is None:
+            return [(key, display) for key, _shown, display, _count in normalized]
+        normalized.sort(key=lambda item: (
+            0 if item[0] in selected else 1,
+            0 if item[3] > 0 else 1,
+            -item[3], item[2].casefold()))
+        return [
+            (key, shown, {"zero_count": count <= 0})
+            for key, shown, _display, count in normalized
+        ]
+
+    def _contextual_subtype_values(self):
+        values = self._contextual_picker_values(
+            self._subtype_catalog, "subtype_counts", self._selected_subtypes)
+        selected_types = {
+            str(value).casefold() for value, variable in self.card_type_vars.items()
+            if variable.get()}
+        if not selected_types:
+            return values
+        positions = {item[0]: index for index, item in enumerate(values)}
+        return sorted(values, key=lambda item: (
+            0 if item[0] in self._selected_subtypes else 1,
+            0 if str(self._subtype_category_by_value.get(item[0], "")).casefold()
+                 in selected_types else 1,
+            positions[item[0]],
+        ))
+
+    def _clear_search_context_presentation(self):
+        pending = getattr(self, "_context_debounce_after", None)
+        self._context_debounce_after = None
+        if pending is not None:
+            try:
+                self.after_cancel(pending)
+            except tk.TclError:
+                pass
+        self._context_snapshot = None
+        self._context_requested_criteria = None
+        self._context_applied_criteria = None
+        controller = getattr(self, "search_context_controller", None)
+        if controller is not None:
+            controller.invalidate()
+        notice = getattr(self, "_search_context_notice", None)
+        if notice is not None:
+            try:
+                notice.pack_forget()
+                notice.configure(text="")
+            except tk.TclError:
+                pass
+
+    def _context_set_tooltip(self, widget, suffix=""):
+        """Append live context to an existing tooltip without changing geometry."""
+        if widget is None:
+            return
+        tip = getattr(widget, "_mtg_tooltip", None)
+        if tip is None:
+            return
+        base = getattr(widget, "_context_tooltip_base", None)
+        if base is None:
+            base = str(tip.text or "")
+            try:
+                widget._context_tooltip_base = base
+            except AttributeError:
+                pass
+        tip.text = base if not suffix else f"{base}\n\n{suffix}"
+
+    def _apply_context_chip_state(self, widgets, catalog, counts, variables):
+        """Mark zero-result trusted chips unavailable without trapping selection."""
+        for value, widget in zip(catalog or (), widgets or ()):
+            try:
+                count = int((counts or {}).get(value, 0))
+                available = count > 0
+                availability = getattr(widget, "set_context_availability", None)
+                if callable(availability):
+                    availability(available, allow_selected_clear=True)
+                else:
+                    selected = bool(variables.get(value) and variables[value].get())
+                    widget.configure(
+                        state=("normal" if available or selected else "disabled"),
+                        fg=(PALETTE["text"] if available else PALETTE["bad"]),
+                        disabledforeground=PALETTE["bad"],
+                    )
+                if getattr(widget, "_mtg_tooltip", None) is None:
+                    self._add_tooltip(
+                        widget,
+                        (f"{count:,} cards match this option under the other "
+                         "current filters."),
+                        wraplength=320)
+                    try:
+                        widget._context_tooltip_base = ""
+                    except AttributeError:
+                        pass
+                else:
+                    self._context_set_tooltip(
+                        widget,
+                        (f"{count:,} cards match this option under the other "
+                         "current filters."))
+            except (tk.TclError, AttributeError):
+                pass
+
+    @staticmethod
+    def _context_range_text(bounds, applicable, noun):
+        if not applicable or not bounds:
+            return f"No cards under the other current filters have numeric {noun}."
+        low, high = bounds
+        def shown(value):
+            number = float(value)
+            return str(int(number)) if number.is_integer() else f"{number:g}"
+        return f"Available under the other current filters: {shown(low)} to {shown(high)}."
+
+    def _apply_live_context_presentation(self):
+        snapshot = getattr(self, "_context_snapshot", None)
+        criteria = getattr(self, "_context_applied_criteria", None)
+        if snapshot is None or criteria is None:
+            return
+
+        self._refresh_split_trait_button_texts()
+        indicator_count = int((snapshot.trait_counts or {}).get("color_indicator", 0))
+        self._context_set_tooltip(
+            getattr(self, "_color_indicator_check", None),
+            f"With this property: {indicator_count:,} cards.")
+        self._apply_context_chip_state(
+            getattr(self, "_card_type_chip_widgets", ()),
+            getattr(self, "_card_type_catalog", ()), snapshot.card_type_counts,
+            self.card_type_vars)
+        self._apply_context_chip_state(
+            getattr(self, "_property_chip_widgets", ()),
+            getattr(self, "_property_catalog", ()), snapshot.supertype_counts,
+            self.property_vars)
+
+        for key, widget in getattr(self, "_color_checks", {}).items():
+            count = int((snapshot.color_counts or {}).get(key, 0))
+            self._context_set_tooltip(widget, f"With this color choice: {count:,} cards.")
+        for key, widget in getattr(self, "_produces_checks", {}).items():
+            count = int((snapshot.produces_counts or {}).get(key, 0))
+            self._context_set_tooltip(widget, f"With this mana-production choice: {count:,} cards.")
+        for key, widget in getattr(self, "_pip_checks", {}).items():
+            count = int((snapshot.pip_counts or {}).get(key, 0))
+            self._context_set_tooltip(widget, f"With this mana-symbol requirement: {count:,} cards.")
+
+        numeric_widgets = {
+            "cmc": (getattr(self, "q_cmc_min", None), getattr(self, "q_cmc_max", None), "mana value"),
+            "power": (getattr(self, "q_power_min", None), getattr(self, "q_power_max", None), "power"),
+            "toughness": (getattr(self, "q_toughness_min", None), getattr(self, "q_toughness_max", None), "toughness"),
+            "loyalty": (getattr(self, "q_loyalty_min", None), getattr(self, "q_loyalty_max", None), "loyalty"),
+            "defense": (getattr(self, "q_defense_min", None), getattr(self, "q_defense_max", None), "defense"),
+        }
+        for key, (low_widget, high_widget, noun) in numeric_widgets.items():
+            suffix = self._context_range_text(
+                (snapshot.numeric_ranges or {}).get(key),
+                int((snapshot.numeric_applicability or {}).get(key, 0)), noun)
+            self._context_set_tooltip(low_widget, suffix)
+            self._context_set_tooltip(high_widget, suffix)
+
+        release_suffix = (
+            f"Available under the other current filters: {snapshot.release_years[0]} to "
+            f"{snapshot.release_years[-1]}."
+            if snapshot.release_years else
+            "No release years occur under the other current filters.")
+        self._context_set_tooltip(getattr(self, "q_released_min", None), release_suffix)
+        self._context_set_tooltip(getattr(self, "q_released_max", None), release_suffix)
+
+        printings = getattr(self, "_search_printings", None)
+        if printings is not None and hasattr(printings, "apply_context_snapshot"):
+            printings.apply_context_snapshot(snapshot)
+
+        notice = getattr(self, "_search_context_notice", None)
+        if notice is None:
+            return
+        text = ""
+        if snapshot.result_count == 0:
+            parts = []
+            for label, count in tuple(snapshot.suggestions or ())[:2]:
+                parts.append(f"remove {label} -> {count:,}")
+            for label, mode, count in tuple(snapshot.mode_suggestions or ())[:1]:
+                parts.append(f"{label} {mode} -> {count:,}")
+            text = "Current filters match 0 cards."
+            if parts:
+                text += " Try: " + " · ".join(parts) + "."
+        elif (getattr(self, "_active_search_signature", None)
+              != criteria.signature()):
+            text = f"Current filters match {snapshot.result_count:,} cards. Search to update Results."
+
+        if text:
+            notice.configure(text=text)
+            table = getattr(self, "_results_table_frame", None)
+            if table is not None and table.winfo_exists():
+                notice.pack(fill="x", pady=(0, 3), before=table)
+            else:
+                notice.pack(fill="x", pady=(0, 3))
+        else:
+            notice.pack_forget()
+
+    def _request_search_context(self, criteria):
+        controller = getattr(self, "search_context_controller", None)
+        if controller is None:
+            return
+        self._context_requested_criteria = criteria
+        sets = tuple(getattr(getattr(self, "_search_printings", None), "_eligible_sets", ()) or ())
+        set_types = tuple(sorted(
+            getattr(getattr(self, "_search_printings", None), "_present_set_types", ()) or (),
+            key=str.casefold))
+        controller.request(
+            criteria, card_types=self._card_type_catalog,
+            supertypes=self._property_catalog, subtypes=self._subtype_catalog,
+            keywords=self._keyword_catalog, layouts=self._layout_catalog,
+            rarities=self._rarity_catalog, formats=self._format_catalog_for_status(),
+            set_types=set_types, sets=sets)
+        if self._context_poll_after is None:
+            self._context_poll_after = self.after(40, self._poll_search_context)
+
+    def _poll_search_context(self):
+        self._context_poll_after = None
+        controller = getattr(self, "search_context_controller", None)
+        if controller is None:
+            return
+        event = controller.poll_latest()
+        if event is None:
+            if controller.running:
+                self._context_poll_after = self.after(40, self._poll_search_context)
+            return
+        requested = getattr(self, "_context_requested_criteria", None)
+        if requested is None or event.signature != requested.signature():
+            if controller.running:
+                self._context_poll_after = self.after(40, self._poll_search_context)
+            return
+        if event.kind == "error":
+            log.warning("Search context analysis failed: %s", event.payload)
+            return
+        self._context_snapshot = event.payload
+        self._context_applied_criteria = requested
+        self._apply_live_context_presentation()
+        log.debug(
+            "Live Search context prepared for %s rows in %.3f seconds",
+            event.payload.result_count, float(event.elapsed or 0.0))
+        if controller.running:
+            self._context_poll_after = self.after(40, self._poll_search_context)
 
     def _format_catalog_for_status(self, status=None):
         """Formats that can actually be legal, banned or restricted somewhere.
@@ -1504,10 +2019,23 @@ class SearchFeatureMixin:
         """Supply the picker a new value list when its Legality changes."""
         values = self._format_catalog_for_status(status)
         current = self.q_format.get().strip()
-        return (
-            [("", "Any")] + [(fmt, format_display_name(fmt)) for fmt in values],
-            {current} if current in values else {""},
-        )
+        snapshot = getattr(self, "_context_snapshot", None)
+        applied = getattr(self, "_context_applied_criteria", None)
+        if applied is None or str(applied.fmt_status) != str(status):
+            snapshot = None
+        counts = (snapshot.format_counts if snapshot is not None else {}) or {}
+        shown = []
+        for fmt in values:
+            label = format_display_name(fmt)
+            if snapshot is not None:
+                label = f"{label} · {int(counts.get(fmt, 0)):,}"
+            shown.append((
+                fmt, label,
+                {"zero_count": (snapshot is not None and
+                                 int(counts.get(fmt, 0)) <= 0)},
+            ))
+        return ([("", "Any")] + shown,
+                {current} if current in values else {""})
 
     def _set_format_filter(self, value):
         value = str(value or "").strip()
@@ -1537,12 +2065,23 @@ class SearchFeatureMixin:
             if value and value not in self._format_catalog_for_status():
                 value = ""
             self._set_format_filter(value)
+            self._update_search_filter_summary()
 
+        snapshot = getattr(self, "_context_snapshot", None)
+        counts = (snapshot.format_counts if snapshot is not None else {}) or {}
+        format_values = [("", "Any")] + [
+            (
+                fmt,
+                (f"{format_display_name(fmt)} · {int(counts.get(fmt, 0)):,}"
+                 if snapshot is not None else format_display_name(fmt)),
+                {"zero_count": (snapshot is not None and
+                                 int(counts.get(fmt, 0)) <= 0)},
+            )
+            for fmt in self._format_catalog_for_status()
+        ]
         self._open_search_multi_picker(
             "Choose Format",
-            [("", "Any")] + [
-                (fmt, format_display_name(fmt))
-                for fmt in self._format_catalog_for_status()],
+            format_values,
             selected,
             apply,
             help_text=(
@@ -1561,9 +2100,12 @@ class SearchFeatureMixin:
             if self._rarity_btn is not None:
                 self._rarity_btn.configure(text=self._picker_button_text(
                 labels, "Any", "rarities"))
+            self._update_search_filter_summary()
         self._open_search_multi_picker(
-            "Choose Rarities", [(r, r.replace("_", " ").capitalize())
-                                for r in self._rarity_catalog],
+            "Choose Rarities",
+            self._contextual_picker_values(
+                [(r, r.replace("_", " ").capitalize()) for r in self._rarity_catalog],
+                "rarity_counts", self._selected_rarities),
             self._selected_rarities, apply,
             help_text="Choose one or several rarities.")
 
@@ -1726,16 +2268,25 @@ class SearchFeatureMixin:
             pending["format"] if pending["format"] in self._format_catalog else "")
         self._layout_catalog = [
             (str(value), int(count)) for value, count in snapshot.layouts]
+        self._layout_duplicates = set(snapshot.equivalent_layouts or ())
+        self._release_year_catalog = [str(value) for value in snapshot.release_years]
+        for widget in (getattr(self, "q_released_min", None),
+                       getattr(self, "q_released_max", None)):
+            if widget is not None:
+                current = widget.get().strip()
+                widget.configure(values=[""] + self._release_year_catalog)
+                if current and current in self._release_year_catalog:
+                    widget.set(current)
         valid_layouts = {value for value, _count in self._layout_catalog}
         self._selected_layouts = {
             value for value in getattr(self, "_selected_layouts", set()) or ()
             if value in valid_layouts}
         self._set_picker_text(
-            getattr(self, "_card_shape_btn", None),
+            getattr(self, "_card_form_btn", None),
             self._picker_button_text(
                 {self._layout_display_name(value)
                  for value in self._selected_layouts},
-                "Any", "shapes", max_visible=10, single_line=True))
+                "Any", "forms", max_visible=10, single_line=True))
         self._rarity_catalog = list(snapshot.rarities)
         self._selected_rarities = set(pending["rarities"]).intersection(
             self._rarity_catalog)
@@ -1752,6 +2303,8 @@ class SearchFeatureMixin:
             self._selected_keywords, "Any", "mechanics",
             max_visible=10, single_line=True))
 
+        self._subtype_category_by_value = {
+            str(value): str(category) for value, category in snapshot.subtypes}
         self._subtype_catalog = [
             (value, f"{category} · {value}") for value, category in snapshot.subtypes
         ]
@@ -1793,16 +2346,40 @@ class SearchFeatureMixin:
         return True
 
     def _update_search_filter_summary(self):
-        """The seam every filter control calls when its value changes.
+        """Debounce a live draft-facet refresh after any existing filter changes.
 
-        There is deliberately no aggregate "Active filters" line: each picker
-        summarizes itself on its own button, which is where the user is
-        looking. This method kept building that line for a long time after the
-        label it wrote to stopped existing -- ninety lines that ran on every
-        checkbox click and could not change anything a user saw. The seam is
-        worth keeping and the body is not.
+        Results remain manual: this schedules only Tk-free context analysis. A
+        later filter change invalidates the visible snapshot immediately, and
+        the latest-wins context worker cancels stale SQLite work.
         """
+        self._context_snapshot = None
+        self._context_applied_criteria = None
+        pending = getattr(self, "_context_debounce_after", None)
+        if pending is not None:
+            try:
+                self.after_cancel(pending)
+            except tk.TclError:
+                pass
+        try:
+            self._context_debounce_after = self.after(200, self._prepare_live_search_context)
+        except tk.TclError:
+            self._context_debounce_after = None
         return None
+
+    def _prepare_live_search_context(self):
+        self._context_debounce_after = None
+        if getattr(self, "_search_catalog_loading", False):
+            return
+        repository = getattr(self, "search_repository", None)
+        if repository is None or not repository.has_cards():
+            return
+        try:
+            criteria = self._capture_search_criteria(commit_rules=False)
+        except (ValueError, tk.TclError):
+            # Partial numeric edits such as '-' are allowed while typing. They
+            # simply have no context snapshot until the field becomes valid.
+            return
+        self._request_search_context(criteria)
 
 
     @staticmethod
@@ -1941,7 +2518,7 @@ class SearchFeatureMixin:
             "card" if str(value) == "deck" else str(value)
             for value in state.get("content", ["card"])
         ]
-        # Content is expressed as Card traits now, so a saved content list is
+        # Search Scope uses the existing content-trait storage, so a saved content list is
         # restored by selecting the traits that produce it.
         content = {
             value for value in saved_content
@@ -2010,10 +2587,7 @@ class SearchFeatureMixin:
             str(value) for value in state.get("traits", []) or ()
             if str(value) in TRAIT_LABELS and str(value) not in CONTENT_TRAIT_KEYS
         } | restored_content_traits
-        if getattr(self, "_traits_btn", None) is not None:
-            self._traits_btn.configure(text=self._picker_button_text(
-                {TRAIT_LABELS[key] for key in self._selected_traits},
-                "Any", "traits", max_visible=10, single_line=True))
+        self._refresh_split_trait_button_texts()
         # Workspaces written before the standard/advanced split named this
         # key "optional_values"; the values inside it never changed.
         self._restore_advanced_filter_values(
@@ -2024,15 +2598,15 @@ class SearchFeatureMixin:
         wanted_produces = {str(value) for value in state.get("produces", [])}
         for key, variable in self.produces_vars.items():
             variable.set(key in wanted_produces)
-        # Card shape and Colored pips own row-built state for the same reason.
+        # Card Form and mana-symbol controls own row-built state for the same reason.
         self._selected_layouts = {
             str(value) for value in state.get("layouts", []) or ()}
         self._set_picker_text(
-            getattr(self, "_card_shape_btn", None),
+            getattr(self, "_card_form_btn", None),
             self._picker_button_text(
                 {self._layout_display_name(value)
                  for value in self._selected_layouts},
-                "Any", "shapes", max_visible=10, single_line=True))
+                "Any", "forms", max_visible=10, single_line=True))
         wanted_pips = {str(value) for value in state.get("pips", []) or ()}
         for key, variable in self.pip_vars.items():
             variable.set(key in wanted_pips)
@@ -2105,6 +2679,76 @@ class SearchFeatureMixin:
             raise ValueError(
                 f"{label} minimum cannot be greater than its maximum.")
 
+    def _capture_search_criteria(self, *, commit_rules=False):
+        """Capture one validated semantic snapshot for Search and live facets.
+
+        This is the only Tk-to-SearchCriteria adapter. Manual Results searches
+        and draft context therefore cannot drift in how a filter is interpreted.
+        """
+        numeric = {
+            "cmc_min": self._numeric_field_value(getattr(self, "q_cmc_min", None)),
+            "cmc_max": self._numeric_field_value(getattr(self, "q_cmc_max", None)),
+            "power_min": self._numeric_field_value(getattr(self, "q_power_min", None)),
+            "power_max": self._numeric_field_value(getattr(self, "q_power_max", None)),
+            "toughness_min": self._numeric_field_value(getattr(self, "q_toughness_min", None)),
+            "toughness_max": self._numeric_field_value(getattr(self, "q_toughness_max", None)),
+        }
+        optional_ranges = {
+            "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
+            "Defense": ("q_defense_min", "q_defense_max"),
+            "Released": ("q_released_min", "q_released_max"),
+        }
+        for _label, (low, high) in optional_ranges.items():
+            numeric[low] = self._numeric_field_value(getattr(self, low, None))
+            numeric[high] = self._numeric_field_value(getattr(self, high, None))
+        self._validate_search_range("Mana value", numeric["cmc_min"], numeric["cmc_max"])
+        self._validate_search_range("Power", numeric["power_min"], numeric["power_max"])
+        self._validate_search_range(
+            "Toughness", numeric["toughness_min"], numeric["toughness_max"])
+        for label, (low, high) in optional_ranges.items():
+            self._validate_search_range(label, numeric[low], numeric[high])
+        numeric["q_pip_min"] = self._numeric_field_value(getattr(self, "q_pip_min", None))
+
+        name_filter, exact_names = self._effective_name_filters()
+        rules = self._rules_text_values(commit_pending=commit_rules)
+        if not commit_rules:
+            pending = " ".join(self._rules_pending_text().strip().split())
+            if pending and not any(value.casefold() == pending.casefold() for value in rules):
+                rules.append(pending)
+
+        return SearchCriteria.from_mapping(dict(
+            name=name_filter, names=exact_names,
+            text=rules, text_mode=self.q_rules_mode.get(),
+            card_types=[value for value, variable in self.card_type_vars.items() if variable.get()],
+            card_type_mode=self.q_card_type_mode.get(),
+            supertypes=[value for value, variable in self.property_vars.items() if variable.get()],
+            supertype_mode=self.q_supertype_mode.get(),
+            subtypes=sorted(self._selected_subtypes), subtype_mode=self.q_subtype_mode.get(),
+            keywords=sorted(self._selected_keywords), keyword_mode=self.q_keyword_mode.get(),
+            colors=[value for value, variable in self.color_vars.items() if variable.get()],
+            color_mode=self.q_color_mode.get(), color_scope=self.q_color_scope.get(),
+            produces=[value for value, variable in self.produces_vars.items() if variable.get()],
+            produces_mode=self.q_produces_mode.get(),
+            traits=self._selected_trait_keys(), trait_mode=self.q_trait_mode.get(),
+            layouts=sorted(self._selected_layouts), layout_mode=self.q_layout_mode.get(),
+            pips=[value for value, variable in self.pip_vars.items() if variable.get()],
+            pip_min=numeric["q_pip_min"],
+            loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
+            defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
+            released_from=numeric["q_released_min"], released_to=numeric["q_released_max"],
+            cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
+            power_min=numeric["power_min"], power_max=numeric["power_max"],
+            toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],
+            rarities=sorted(self._selected_rarities),
+            fmt=self.q_format.get().strip(), fmt_status=self.q_format_status.get(),
+            set_codes=sorted(self._search_printings.selected_set_codes()) or None,
+            set_types=sorted(self._search_printings.selected_set_types()) or None,
+            lang=("en" if self.english_only.get() else ""),
+            paper_only=bool(self._search_printings.paper_only.get()),
+            games=self._search_printings.selected_games(),
+            content_types=sorted(self._selected_content_types()),
+        ))
+
     def _do_search(self):
         """Run SQLite search off Tk's main thread and deliver only results to Tk."""
         self._update_search_filter_summary()
@@ -2128,94 +2772,26 @@ class SearchFeatureMixin:
                 "The card database is empty.\n\nUse Database -> Update Database first.")
             return
         try:
-            # An empty field means no restriction, so a spinbox that has
-            # just been rebuilt reads as None rather than raising.
-            numeric = {
-                "cmc_min": self._numeric_field_value(getattr(self, "q_cmc_min", None)),
-                "cmc_max": self._numeric_field_value(getattr(self, "q_cmc_max", None)),
-                "power_min": self._numeric_field_value(getattr(self, "q_power_min", None)),
-                "power_max": self._numeric_field_value(getattr(self, "q_power_max", None)),
-                "toughness_min": self._numeric_field_value(
-                    getattr(self, "q_toughness_min", None)),
-                "toughness_max": self._numeric_field_value(
-                    getattr(self, "q_toughness_max", None)),
-            }
-            optional_ranges = {
-                "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
-                "Defense": ("q_defense_min", "q_defense_max"),
-                "Released": ("q_released_min", "q_released_max"),
-            }
-            for label, (low, high) in optional_ranges.items():
-                numeric[low] = self._numeric_field_value(getattr(self, low, None))
-                numeric[high] = self._numeric_field_value(getattr(self, high, None))
-            # Every pair of bounds is checked. Leaving these three out meant a
-            # backwards range ran and returned nothing, with no way to tell
-            # that apart from a search that genuinely matches no card -- and
-            # Released is two dropdowns, so reversing it takes one click.
-            self._validate_search_range("Mana value", numeric["cmc_min"], numeric["cmc_max"])
-            self._validate_search_range("Power", numeric["power_min"], numeric["power_max"])
-            self._validate_search_range("Toughness", numeric["toughness_min"], numeric["toughness_max"])
-            for label, (low, high) in optional_ranges.items():
-                self._validate_search_range(label, numeric[low], numeric[high])
-            numeric["q_pip_min"] = self._numeric_field_value(
-                getattr(self, "q_pip_min", None))
+            criteria = self._capture_search_criteria(commit_rules=True)
         except ValueError as exc:
             self.results_count_lbl.configure(text="RESULTS | Invalid search filter")
             self._status(str(exc))
             messagebox.showerror("Invalid Search Filter", str(exc))
             return
 
-        name_filter, exact_names = self._effective_name_filters()
-        search_args = dict(
-            name=name_filter, names=exact_names,
-            text=self._rules_text_values(), text_mode=self.q_rules_mode.get(),
-            card_types=[value for value, variable in self.card_type_vars.items() if variable.get()],
-            card_type_mode=self.q_card_type_mode.get(),
-            supertypes=[value for value, variable in self.property_vars.items() if variable.get()],
-            supertype_mode=self.q_supertype_mode.get(),
-            subtypes=sorted(self._selected_subtypes), subtype_mode=self.q_subtype_mode.get(),
-            keywords=sorted(self._selected_keywords), keyword_mode=self.q_keyword_mode.get(),
-            colors=[value for value, variable in self.color_vars.items() if variable.get()],
-            color_mode=self.q_color_mode.get(),
-            color_scope=self.q_color_scope.get(),
-            produces=[value for value, variable in self.produces_vars.items()
-                      if variable.get()],
-            produces_mode=self.q_produces_mode.get(),
-            traits=self._selected_trait_keys(),
-            trait_mode=self.q_trait_mode.get(),
-            layouts=sorted(self._selected_layouts),
-            layout_mode=self.q_layout_mode.get(),
-            pips=[value for value, variable in self.pip_vars.items()
-                  if variable.get()],
-            pip_min=numeric["q_pip_min"],
-            loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
-            defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
-            released_from=numeric["q_released_min"],
-            released_to=numeric["q_released_max"],
-            cmc_min=numeric["cmc_min"], cmc_max=numeric["cmc_max"],
-            power_min=numeric["power_min"], power_max=numeric["power_max"],
-            toughness_min=numeric["toughness_min"], toughness_max=numeric["toughness_max"],
-            rarities=sorted(self._selected_rarities),
-            fmt=self.q_format.get().strip(),
-            fmt_status=self.q_format_status.get(),
-            set_codes=sorted(self._search_printings.selected_set_codes()) or None,
-            set_types=sorted(self._search_printings.selected_set_types()) or None,
-            lang=("en" if self.english_only.get() else ""),
-            paper_only=bool(self._search_printings.paper_only.get()),
-            games=self._search_printings.selected_games(),
-            content_types=sorted(self._selected_content_types()),
-        )
-        criteria = SearchCriteria.from_mapping(search_args)
+        self._active_search_criteria = criteria
         start = self.search_controller.start(criteria)
         if start.kind == "busy":
             self._pending_search_request = True
             return
         if start.kind == "unchanged":
             self._set_result_count()
+            self._request_search_context(criteria)
             return
         if start.kind == "cached":
             self._set_result_store(start.results, start.signature)
             self._render_results()
+            self._request_search_context(criteria)
             return
         self.results_count_lbl.configure(text="RESULTS | Searching…")
         try:
@@ -2266,4 +2842,7 @@ class SearchFeatureMixin:
             event.payload.logical_count, float(event.elapsed or 0.0))
         self._set_result_store(event.payload, event.signature)
         self._render_results()
+        if (self._active_search_criteria is not None
+                and self._active_search_criteria.signature() == event.signature):
+            self._request_search_context(self._active_search_criteria)
         self._resume_pending_search_request()

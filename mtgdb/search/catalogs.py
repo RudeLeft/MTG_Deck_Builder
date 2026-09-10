@@ -33,6 +33,8 @@ class SearchCatalogSnapshot:
     sets: tuple
     formats_by_status: dict
     layouts: tuple
+    release_years: tuple
+    equivalent_layouts: tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +131,7 @@ class SearchCatalogController:
             tuple(base["keywords"]), tuple(base["subtypes"]),
             tuple(base["set_types"]), tuple(sets),
             dict(base["formats_by_status"]), tuple(base["layouts"]),
+            tuple(base["release_years"]), tuple(base["equivalent_layouts"]),
         )
 
     def _load_base(self, content, paper_only, platforms=()):
@@ -146,7 +149,7 @@ class SearchCatalogController:
             "format legality",
             lambda: self.repository.formats_by_status(
                 content, paper_only, games=platforms or None), {})
-        return {
+        base = {
             "card_types": safe(
                 "card-type", lambda: self.repository.card_types(content, paper_only), []),
             "card_type_status": safe(
@@ -170,10 +173,21 @@ class SearchCatalogController:
                     content, paper_only, games=platforms or None), []),
             "formats_by_status": by_status,
             "layouts": safe(
-                "card-shape",
+                "card-form",
                 lambda: self.repository.layouts(
                     content, paper_only, games=platforms or None), []),
+            "release_years": safe(
+                "release-year",
+                lambda: self.repository.release_years(
+                    content, paper_only, games=platforms or None), []),
         }
+        base["equivalent_layouts"] = safe(
+            "card-form equivalence",
+            lambda: self.repository.equivalent_layouts(
+                content, paper_only, games=platforms or None,
+                card_types=base["card_types"], supertypes=base["supertypes"],
+                subtypes=base["subtypes"], keywords=base["keywords"]), ())
+        return base
 
     def _load_sets(self, content, paper_only, selected, platforms=()):
         try:

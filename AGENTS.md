@@ -78,6 +78,7 @@ mtgdb/
     controller.py        #   query worker lifecycle, generations/invalidation, terminal-event queue, cache
     results.py           #   compact SearchResultStore, pure table semantics, async view/vocabulary preparation
     catalogs.py          #   bounded platform-scoped taxonomy snapshots + latest-wins async discovery
+    context.py           #   latest-wins live draft predictive facets/ranges and zero-result diagnostics
   deck/                  # deck domain (Tk-free, no sqlite)
     model.py             #   Deck: exact-printing entries, quantities, board mutations
     io.py                #   portable TXT serialization, atomic save + section parsing
@@ -156,7 +157,7 @@ which dependency directions are legal.
 
 | Feature | Presentation | Logic / data |
 | --- | --- | --- |
-| Search | `mtgdb/ui/search.py`, `mtgdb/ui/search_printings.py`, `mtgdb/ui/search_checklist.py`, `mtgdb/ui/set_filters.py`, `mtgdb/ui/table_filters.py`, `mtgdb/ui/results.py`, `mtgdb/ui/tables.py` | `mtgdb/search/models.py`, `mtgdb/search/repository.py`, `mtgdb/search/controller.py`, `mtgdb/search/results.py`, `mtgdb/search/catalogs.py`, `mtgdb/database/db.py`, `mtgdb/database/constants.py`, `mtgdb/database/search_queries.py`, `mtgdb/database/taxonomy.py` |
+| Search | `mtgdb/ui/search.py`, `mtgdb/ui/search_printings.py`, `mtgdb/ui/search_checklist.py`, `mtgdb/ui/set_filters.py`, `mtgdb/ui/table_filters.py`, `mtgdb/ui/results.py`, `mtgdb/ui/tables.py` | `mtgdb/search/models.py`, `mtgdb/search/repository.py`, `mtgdb/search/controller.py`, `mtgdb/search/results.py`, `mtgdb/search/catalogs.py`, `mtgdb/search/context.py`, `mtgdb/database/db.py`, `mtgdb/database/constants.py`, `mtgdb/database/search_queries.py`, `mtgdb/database/taxonomy.py` |
 | Card preview & images | `mtgdb/ui/card_detail.py`, `mtgdb/ui/styles.py`, `mtgdb/ui/tokens.py` | `mtgdb/images/service.py`, `mtgdb/core/cache_names.py`, `mtgdb/core/net.py`, `mtgdb/database/constants.py`, `mtgdb/deck/legality.py` |
 | Deck editing | `mtgdb/ui/deck.py`, `mtgdb/ui/tables.py`, `mtgdb/ui/search.py`, `mtgdb/ui/search_checklist.py`, `mtgdb/ui/comparison_controls.py` | `mtgdb/deck/model.py`, `mtgdb/deck/sessions.py` |
 | Deck file open/save/import/export | `mtgdb/ui/deck_files.py`, `mtgdb/ui/set_filters.py` | `mtgdb/deck/io.py`, `mtgdb/deck/file_jobs.py`, `mtgdb/database/db.py`, `mtgdb/database/queries.py`, `mtgdb/database/taxonomy.py` |
@@ -198,6 +199,7 @@ only in the module that owns X.
 | `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, terminal-event queue, bounded cache |
 | `mtgdb/search/results.py` | Compact immutable Search result rows/store, exact-printing hydration cache, pure table value/filter/sort semantics, complete logical view indexes, generation-protected Results and vocabulary preparation |
 | `mtgdb/search/catalogs.py` | Bounded Content/Platform/Paper/Set-Type trusted-taxonomy snapshot caches and latest-wins background catalog discovery |
+| `mtgdb/search/context.py` | Tk-free latest-wins live draft Search analysis: predictive self-excluding facet counts, numeric ranges, existing-property counts, cancellation/cache, and zero-result relaxation suggestions |
 | `mtgdb/deck/model.py` | Exact-printing deck state, quantities, board mutations, entry access, compat delegation |
 | `mtgdb/deck/io.py` | Portable TXT serialization, atomic user-selected TXT save, section parsing, printing tags, resolver import |
 | `mtgdb/deck/file_jobs.py` | Tk-free daemon submission wrapper for deck import/save/export file work |
@@ -227,7 +229,7 @@ only in the module that owns X.
 | `mtgdb/ui/autocomplete.py` | Hidden-first autocomplete-popup lifecycle/navigation plus the current `AutocompleteEntry` control |
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
 | `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
-| `mtgdb/ui/search.py` | Trusted Search layout/state: primary Card Type/Supertypes/Colors/numeric/Mechanics filters, Advanced Content/Rules Text/Subtype/Format/Rarity/Printings coordination and alignment, validated criteria, exact-name presets, complete Clear, strict workspace restore, summaries |
+| `mtgdb/ui/search.py` | Trusted Search layout/state: standard Type Line (Supertype/Card Type/Subtype), Colors/stats/Printings, reorganized Advanced existing filters, debounced live draft context presentation, validated canonical criteria capture, exact-name presets, complete Clear, strict workspace restore, summaries |
 | `mtgdb/ui/search_filters.py` | Search filter registry: the standard set, each advanced filter's category, label, and match-explaining tooltip, the hand-built filters' tooltips, and one lookup that serves both |
 | `mtgdb/ui/search_printings.py` | Search adaptation of the shared Printings component: Search button/summary wiring, Search-owned callbacks, Search English/content scope |
 | `mtgdb/ui/search_checklist.py` | Hidden-first reusable searchable virtual choice dialog for taxonomy/format/rarity pickers; multi-select uses checkboxes and single-select uses radio controls |
@@ -300,6 +302,7 @@ have at least two routing examples.
 | `mtgdb/ui/autocomplete.py` | change autocomplete popup keyboard/focus/dismissal mechanics<br>change `AutocompleteEntry` suggestion/commit behavior | `mtgdb/ui/components.py`; consuming Search UI | Keep popup mechanics centralized; do not duplicate them in individual screens. |
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
 | `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Legality/Rotate/Zoom actions, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
+| `mtgdb/search/context.py` | change contextual facet analysis, zero-result relaxation diagnostics, or latest-wins context worker lifecycle<br>change which existing Search properties are counted for presentation | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Tk-free only; context may reorder/count existing vocabulary but MUST NOT invent taxonomy values or silently change Search criteria. |
 | `mtgdb/ui/search.py` | add/change trusted primary/Advanced Search controls, criteria capture, or scoped taxonomy refresh<br>change strict workspace restore, filter summaries, complete Clear/reset, callbacks, Rules Text editing semantics, or exact-name presets | `mtgdb/search/models.py`; `mtgdb/search/controller.py`; `mtgdb/search/repository.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/search_queries.py` | Shared printing/set state belongs in `ui/set_filters.py` with Search adaptation in `ui/search_printings.py`; UI MUST consume taxonomy vocabulary, never invent/restore it; missing stored fields route through schema/import first. |
 | `mtgdb/ui/search_filters.py` | add an advanced Search filter or change its category/label<br>change the standard set or any Search filter's tooltip wording | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
 | `mtgdb/ui/search_printings.py` | change how Search opens/summarizes the shared Printings picker<br>change Search-specific content/language callbacks into shared printing state | `mtgdb/ui/set_filters.py`; `mtgdb/ui/search.py`; `mtgdb/database/taxonomy.py` | Paper/Set Type/Exact Set popup behavior belongs in `ui/set_filters.py`; do not duplicate the shared controller here. |
@@ -530,58 +533,8 @@ every feature together and is exempt.
   **Any** radio choice: it MUST display selected whenever no specific format is
   active, and selecting it MUST replace/unselect every specific format. An empty Set
   Type or Exact Set selection means Any. _Verification:_ **AUTO**.
-- **SRCH-034 — MUST:** Present Search as a standard set of filters always on
-  the form, with every other filter together behind one **Advanced Filter
-  Options** button. The Search form and the Results table share one column
-  with no sash between them, so a permanently-rendered filter takes its height
-  out of Results for every user. Two earlier designs answered that badly: the
-  first rendered everything, and the second built each filter on demand from
-  an Add filter menu, which cost nothing unused but turned a real search into
-  several menu trips and made the filters a user reaches for most something
-  they re-added every session. The standard set is
-  `name, card_type, colors, stats, printings`, in that order, because that is
-  the order a search is built: what the card is called, what it is, what
-  colour it is, how big it is, and which printings are in scope. Everything
-  else is declared in `ui/search_filters.py` with its category, label, and a
-  tooltip that states what the filter matches, reached through one
-  `filter_tooltip` lookup that serves standard and advanced alike so a filter
-  cannot be described twice in two voices, and appears in the advanced
-  panel grouped by category in registry order, so a filter is always in the
-  same place. `ui/search.py` owns the controls. Advanced rows MUST be built
-  once and hidden rather than rebuilt on each expand — rebuilding makes the
-  first click the slowest one in the panel — and collapsing MUST return the
-  Results viewport to its first row, because a shorter form otherwise leaves
-  it scrolled to where the taller panel was. `Clear` MUST empty every filter
-  without removing any of them, including the standard rows, which are never
-  rebuilt and so have to empty themselves in place. Workspace capture MUST
-  record the values those controls hold and whether the advanced panel was
-  open, so a session that was working in Advanced reopens there.
-  _Verification:_ **AUTO**.
-- **SRCH-035 — MUST:** Give every Search filter a tooltip that says what the
-  filter matches against rather than naming the control, and distinguish it
-  from any neighbouring filter it could be confused with. Produces and Colors
-  read different columns and Mechanics and Rules text search different data;
-  a user reading only the tooltip MUST be able to tell which one answers their
-  question. This covers the pinned filters too — Card Name, Card type, Colors
-  and Printings are the four a new user meets first, and leaving them silent
-  made the explained filters look like the exceptional ones. A tooltip MUST
-  NOT name a data source: "Scryfall", "the database" or "the local snapshot"
-  spend the reader's attention on something that cannot change their search.
-  A tooltip that describes a control MUST describe the control that is there:
-  Colors grew a second row, Rules text grew a third mode and Card traits
-  gained the only route to tokens, and each left its tooltip describing the
-  version before. Spelling follows the labels on the controls, which are
-  American. A filter's tooltip MUST reach the controls it is operated through
-  and not only its label: people hover the picker or the box they are about to
-  use, and a tooltip only on the label is one most of them never see. Two
-  tooltips on one widget both fire, so bulk tagging MUST skip controls that
-  already carry their own wording. The Printings popup MUST explain the scope
-  it sets — platform, set type, exact set, language — because it decides what
-  every other filter has to offer, and publisher set-type names such as
-  Arsenal, Box and Memorabilia name nothing a reader can guess. A set type
-  this build has not seen MUST still appear, explained by its section.
-  Every filter's wording, pinned or optional, lives in
-  `ui/search_filters.py`. _Verification:_ **AUTO**.
+- **SRCH-034 — MUST:** Present Search with the common filters always on the form and every remaining existing capability behind one **Advanced Filter Options** button. The standard order is Card Name, then one visually explicit **TYPE LINE** block in printed order **Supertype → Card Type → Subtype**, then Colors, Power / Toughness, and Printings. Advanced remains built once and hidden/shown rather than rebuilt on expand. Its organizational groups are Search Scope, Mana, Card, and Printing & Status. Reorganization MUST preserve every existing `SearchCriteria`/query capability and workspace meaning; presentation grouping MUST NOT create a new Search dimension. `Clear` MUST empty standard and Advanced values without removing controls, and workspace capture MUST preserve values plus Advanced open/closed state. _Verification:_ **AUTO**.
+- **SRCH-035 — MUST:** Give every Search filter a concise tooltip explaining what it matches and any important neighbouring distinction, using American spelling. User-facing taxonomy names MUST use real Magic/Scryfall concepts when such a concept exists; organizational UI headings MAY be plain-language group names but MUST NOT masquerade as Magic taxonomy. **Card Shape** and **Card Traits** MUST NOT appear as user-facing filter categories: Scryfall `layout` is presented as **Card Form**, and the existing trait predicates are presented in Search Scope, Mana Cost Features, Faces, Color Indicator, P/T Properties, and Product / Status while retaining their existing query semantics. Tooltips MUST reach the operated controls, not only labels. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
   column, never from colour identity or rules text. Colour identity answers a
   different question — Birds of Paradise has identity `G` and produces every
@@ -607,14 +560,7 @@ every feature together and is exempt.
   control: colour scope and Artist both kept working SQL, a criterion and a
   passing gate after their controls were gone, which is a feature no user can
   run, proved by a test. _Verification:_ **AUTO**.
-- **SRCH-040 — MUST:** Derive "multi-faced" from whether Scryfall gave the
-  card faces, never from a list of layouts maintained here. The list called
-  Saga, Class, Case, Leveler, Prototype, Mutate and Meld multi-faced — 761
-  paper printings with a single face — while genuinely two-faced layouts this
-  build had not heard of read as single-faced. Card shape is the separate
-  question and MUST be its own filter over the observed `layout` vocabulary; a
-  card has exactly one shape, so that control offers Any and None only. A mode
-  its values cannot satisfy MUST NOT be offered. _Verification:_ **AUTO**.
+- **SRCH-040 — MUST:** Derive multi-faced/single-faced from Scryfall `card_faces`, never from a maintained layout list. Preserve the existing Scryfall `layout` query capability under the user-facing **Card Form** label. Card Form vocabulary MUST be observed Scryfall layout values; a card has one layout, so the existing Any/None modes remain. A layout MAY be suppressed from Card Form only when background taxonomy analysis proves its complete scoped printing population is exactly equal to a same-named existing Card Type, Supertype, Subtype, or Mechanic population. This equivalence MUST be data-derived rather than a handwritten list, and a legacy saved selected layout MUST remain visible until cleared so restore never changes query meaning. _Verification:_ **AUTO**.
 - **SRCH-041 — MUST:** Store per-row what a search would otherwise aggregate.
   Coloured pip counts are computed at import, not per query: counted in SQL
   they can use no index and cannot see hybrid halves. A hybrid symbol counts
@@ -646,6 +592,7 @@ every feature together and is exempt.
   MUST select the last row, not the whole list, and MUST NOT leave the
   selection count larger than the store.
   _Verification:_ **AUTO**.
+- **SRCH-045 — MUST:** Treat Search context as a live draft facet system rather than post-result decoration. Every valid committed filter change MUST debounce into one latest-wins Tk-free `SearchCriteria` context request before the user presses Search; foreground Results remain manual. Manual Search and live context MUST capture criteria through the same adapter. Every existing Search dimension MUST participate through contextual compatibility counts, observed numeric/release ranges, or the live total; context MUST respect the dimension's actual Any/All/None, Within/Contains/Exactly, legality, pip-threshold, platform, content-scope, and global property semantics. For an `Any` multi-select facet, each value's displayed compatibility count MUST be measured against all other Search dimensions while excluding the facet's other selected values, so an already-selected OR value cannot make an otherwise incompatible peer appear usable. Union-style existing dimensions such as Search Scope, Printing Type, and `Within` color/mana sets MUST likewise count a candidate's own compatible contribution rather than letting already-selected peers keep every option above zero. `All`/`None` facets and narrowing set modes such as `Contains` MAY retain prospective add-value counts because those modes narrow the current facet. An unselected authoritative value with a zero compatibility count MUST remain visible, MUST carry an explicit red `✕` unavailable marker, and MUST NOT be selectable by direct or bulk actions. A selected value that later becomes zero MUST remain visible and removable so context never traps the user in a conflict. Context MUST NOT add a filter dimension, silently change a selection, or remove an authoritative value. Stale analysis MUST be canceled or ignored, broad totals MUST use canonical `COUNT(*)` rather than materializing ordered result IDs, context row projections MUST be narrow/unordered, and repeated snapshots MUST use a bounded cache invalidated with the database. Zero-result relaxation suggestions MAY only remove or change modes of existing filters. _Verification:_ **AUTO**.
 - **SRCH-044 — MUST:** Give every table column one display value, produced by
   `search/results.table_value`, and filter on that same value. Every column
   heading opens a filter, so a column with no value has a filter that cannot
@@ -718,26 +665,7 @@ every feature together and is exempt.
   a single selected row uses the same preset path with one exact name. The Card Name field
   MAY display the batch summary, but SQL ownership remains in
   `database/search_queries.py`. _Verification:_ **AUTO**.
-- **SRCH-021 — MUST:** Keep the standard Search surface to exactly Card Name,
-  Card Type, Colors, Power / Toughness, and Printings, in that order, and keep
-  every other filter in the advanced panel under SRCH-034. Printings is
-  standard because it carries the Paper/English scope every search depends on
-  and composes the shared `PrintingFilter` that Open Deck also builds. The
-  advanced panel starts collapsed, so the filters no one on this search is
-  using still cost Results only the one row that reveals them. Content MUST show one compact horizontal choice group in the exact order
-  `Cards | Tokens | Emblems | Art Series` on the same row as the Content label. The
-  `Cards` choice MUST begin at the same shared Advanced control-column x-position as
-  Rules Text, Subtype, Format, Rarity, and Printings; the Content choices MUST remain
-  compact and left-grouped rather than stretching across the Search width. Rules Text,
-  Subtype, and Printings MUST share the same outer two-column label/control grid so
-  Format, Rarity, and the Printings picker align with Rules Text and Subtype instead of
-  nesting a second label grid. Content,
-  Rules Text, Subtype, Format, Rarity, and Printings labels MUST use the same normal
-  body-label typography and
-  text color as primary Search labels such as Card Name and Card Type; they are field
-  labels, not gold section headings. There is no `More Types` or
-  `Characteristics` filter; named Scryfall keyword/ability data is presented as
-  `Mechanics`. _Verification:_ **AUTO**.
+- **SRCH-021 — MUST:** Keep the standard Search surface compact and stable: Card Name; the Type Line block Supertype, Card Type, Subtype; Colors; Power / Toughness; and Printings. Keep all other existing filters in Advanced under SRCH-034. Search Scope contains exactly the existing Cards, Tokens, Emblems, and Art Series choices. There is no `More Types`, `Characteristics`, `Card Shape`, or `Card Traits` user-facing filter; named Scryfall keyword/ability data is presented as `Mechanics`, and observed Scryfall layouts are presented as `Card Form`. _Verification:_ **AUTO**.
 - **SRCH-022 — MUST:** Rebuild trusted filter vocabulary when Content or Paper-only
   scope changes and prune selected values that no longer exist in that scope.
   Workspace restore MAY select values already in the current vocabulary but MUST
@@ -1753,7 +1681,7 @@ every feature together and is exempt.
   UI MUST say that the Scryfall Card Type taxonomy is unavailable and direct the
   user to Database > Update Database, rather than presenting the state as a normal
   empty scope. _Verification:_ **AUTO**.
-- **DATA-005 — MUST:** Present this filter as **Supertypes**. Define no
+- **DATA-005 — MUST:** Present this filter as **Supertype**. Define no
   hardcoded Supertype picker vocabulary in production taxonomy/filter source.
   Rule-specific domain logic that independently needs a named supertype MUST NOT
   authorize or populate this picker. Discover the current Comprehensive
@@ -1770,31 +1698,7 @@ every feature together and is exempt.
   keyword-action, and ability-word catalogs. Every selectable value MUST occur on
   at least one currently scoped local row; missing/failed catalogs yield no
   invented fallback vocabulary. _Verification:_ **AUTO**.
-- **DATA-008 — MUST:** Derive Search Content only as Cards, Tokens, Emblems, and
-  Art Series from Scryfall-backed row/layout semantics. Content is chosen through
-  Card traits rather than its own filter row: all four are independent Scope
-  choices that select a content kind instead of adding a query clause, and
-  Cards MUST be one of them rather than an assumption. While Cards could not
-  be turned off the scope could only ever grow, so asking to see the tokens
-  added 3,000 of them to 100,000 cards and left the user to find them. Tokens,
-  Emblems and Art Series stay off until asked for, and an empty scope MUST
-  fall back to Cards: searching no kind of object at all is not a search
-  anybody meant to run. A saved content list is authoritative for scope when a
-  workspace is restored, because a workspace written before Cards was a choice
-  carries no trait for it. Because they change what the search covers, changing one MUST
-  rebuild the trusted vocabulary for the new scope — the results were correct
-  while Subtype, Card type and Set went on describing cards only — and they
-  MUST be grouped apart from the traits the Any/All/None row governs, which
-  cannot apply to a choice of scope. Art Series MUST use the
-  internal `art` content key and the user-facing label **Art Series**, MUST be
-  default-off, and MUST become Search-visible only when explicitly selected. An
-  explicit Art Series Content request MUST override the legacy hidden art exclusion
-  so a fully broadened Search can reach every imported row. A layout unknown to this
-  build MUST remain importable and Search-visible under Cards while being internally
-  classified/diagnosed as unknown;
-  unknown layout semantics MUST NOT be guessed. Do not create a `Supplemental` bucket: Plane, Scheme, Dungeon,
-  Conspiracy, Vanguard, Phenomenon, and other legitimate objects remain their real
-  Card Types under Cards. _Verification:_ **AUTO**.
+- **DATA-008 — MUST:** Derive Search Content only as Cards, Tokens, Emblems, and Art Series from Scryfall-backed row/layout semantics. Present these four existing choices in **Search Scope**, not as Card Traits. All four independently select a content kind rather than adding a trait clause; Cards defaults on, Tokens/Emblems/Art Series default off, and an empty selection falls back to Cards. Changing Search Scope MUST rebuild trusted vocabulary for that scope. Art Series uses the internal `art` key and explicit selection overrides the legacy hidden-art exclusion. Unknown future layouts remain importable/Search-visible under Cards while internally diagnosed as unknown; do not invent a Supplemental bucket or infer new content classes. _Verification:_ **AUTO**.
 - **DATA-009 — MUST:** Derive Formats, Rarities, Set Types, and Exact Sets only
   from values observed in the current local Scryfall snapshot and current
   Content/Paper scope. Format picker membership MUST come directly from locally

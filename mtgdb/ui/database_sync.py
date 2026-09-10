@@ -376,6 +376,7 @@ class DatabaseSyncMixin:
         # Rebuild through the same generation-protected background path used
         # for startup and cold Search scopes; do not scan the new DB on Tk.
         self.search_catalog_controller.invalidate()
+        self.search_context_controller.invalidate()
         self._update_search_filter_summary()
         self._refresh_search_catalogs()
         popup = self._sync_popup

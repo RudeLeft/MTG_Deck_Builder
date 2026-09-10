@@ -448,8 +448,23 @@ class SearchQueryBuilder:
             self.clauses.append("paper = 1")
         return True
 
-    def build(self, *, set_codes, columns):
+    def where_sql(self):
+        """Return the canonical WHERE fragment and bound parameters.
+
+        Contextual Search analysis needs the exact same semantic clauses as the
+        foreground result query, but it must be able to aggregate/count without
+        paying for the result-ordering step.  Keeping this on the canonical
+        builder prevents the two paths from drifting.
+        """
         where = (" WHERE " + " AND ".join(self.clauses)) if self.clauses else ""
+        return where, list(self.params)
+
+    def build_count(self):
+        where, params = self.where_sql()
+        return f"SELECT COUNT(*) AS match_count FROM cards{where}", params
+
+    def build(self, *, set_codes, columns, ordered=True):
+        where, params = self.where_sql()
         one_selected_set = (
             set_codes is not None and self.chosen_sets is not None
             and len(self.chosen_sets) == 1
@@ -464,8 +479,54 @@ class SearchQueryBuilder:
                     column not in _CARD_COLUMN_NAMES for column in chosen_columns):
                 raise ValueError("Invalid card-search projection")
             projection = ", ".join(chosen_columns)
-        sql = f"SELECT {projection} FROM cards{where} ORDER BY {order}"
-        return sql, list(self.params)
+        order_sql = f" ORDER BY {order}" if ordered else ""
+        sql = f"SELECT {projection} FROM cards{where}{order_sql}"
+        return sql, params
+
+
+def _configured_search_builder(*, name="", names=None, text="", text_mode="all",
+                               type_line="", card_types=None, card_type_mode="any",
+                               supertypes=None, supertype_mode="all", subtypes=None,
+                               subtype_mode="any", keywords=None, keyword_mode="any",
+                               colors=None, color_mode="within", color_scope="identity",
+                               produces=None, produces_mode="includes", traits=None,
+                               trait_mode="any", layouts=None, layout_mode="any",
+                               pips=None, pip_min=None, loyalty_min=None, loyalty_max=None,
+                               defense_min=None, defense_max=None, released_from=None,
+                               released_to=None, games=None, cmc_min=None, cmc_max=None,
+                               power_min=None, power_max=None, toughness_min=None,
+                               toughness_max=None, rarities=None, fmt="",
+                               fmt_status="playable", set_codes=None, set_types=None,
+                               lang="", paper_only=False, content_types=None):
+    """Create the one canonical builder used by results and context aggregates."""
+    builder = SearchQueryBuilder()
+    explicit_content = (
+        {str(value).casefold() for value in content_types if str(value)}
+        if content_types is not None else None
+    )
+    builder.add_art_filter(not (explicit_content and "art" in explicit_content))
+    if not builder.add_content_filter(content_types):
+        return None
+    builder.add_name_and_rules(name, names, text, text_mode)
+    builder.add_type_filters(
+        card_types, card_type_mode, supertypes, supertype_mode,
+        subtypes, subtype_mode, keywords, keyword_mode, type_line)
+    builder.add_color_filter(colors, color_mode, color_scope)
+    builder.add_produces_filter(produces, produces_mode)
+    builder.add_trait_filters(traits, trait_mode)
+    builder.add_layout_filter(layouts, layout_mode)
+    builder.add_pip_filters(pips, pip_min)
+    builder.add_stat_filters(
+        loyalty_min, loyalty_max, defense_min, defense_max)
+    builder.add_release_filters(released_from, released_to)
+    builder.add_games_filter(games)
+    builder.add_numeric_filters(
+        cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
+    builder.add_rarity_and_format(rarities, fmt, fmt_status)
+    if not builder.add_printing_filters(
+            set_types, set_codes, lang, paper_only=paper_only):
+        return None
+    return builder
 
 
 class CardSearchQueryMixin:
@@ -496,35 +557,12 @@ class CardSearchQueryMixin:
         ``supertypes`` with a mode of its own, which is exactly the kind of
         silent alternative path a search API should not have.
         """
-        builder = SearchQueryBuilder()
-        # Explicit Content selection is authoritative. Art Series remains excluded
-        # for legacy/default callers, but a caller that deliberately requests the
-        # trusted ``art`` content kind must be able to reach those imported rows.
-        explicit_content = (
-            {str(value).casefold() for value in content_types if str(value)}
-            if content_types is not None else None
-        )
-        builder.add_art_filter(not (explicit_content and "art" in explicit_content))
-        if not builder.add_content_filter(content_types):
-            return []
-        builder.add_name_and_rules(name, names, text, text_mode)
-        builder.add_type_filters(
-            card_types, card_type_mode, supertypes, supertype_mode,
-            subtypes, subtype_mode, keywords, keyword_mode, type_line)
-        builder.add_color_filter(colors, color_mode, color_scope)
-        builder.add_produces_filter(produces, produces_mode)
-        builder.add_trait_filters(traits, trait_mode)
-        builder.add_layout_filter(layouts, layout_mode)
-        builder.add_pip_filters(pips, pip_min)
-        builder.add_stat_filters(
-            loyalty_min, loyalty_max, defense_min, defense_max)
-        builder.add_release_filters(released_from, released_to)
-        builder.add_games_filter(games)
-        builder.add_numeric_filters(
-            cmc_min, cmc_max, power_min, power_max, toughness_min, toughness_max)
-        builder.add_rarity_and_format(rarities, fmt, fmt_status)
-        if not builder.add_printing_filters(
-                set_types, set_codes, lang, paper_only=paper_only):
+        values = locals().copy()
+        values.pop("self", None)
+        values.pop("connection", None)
+        values.pop("columns", None)
+        builder = _configured_search_builder(**values)
+        if builder is None:
             return []
         sql, params = builder.build(set_codes=set_codes, columns=columns)
         if connection is None:
@@ -533,3 +571,30 @@ class CardSearchQueryMixin:
         else:
             rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+    def search_unordered(self, *, connection=None, columns=None, **criteria):
+        """Return a narrow Search projection without result-ordering overhead."""
+        builder = _configured_search_builder(**criteria)
+        if builder is None:
+            return []
+        sql, params = builder.build(
+            set_codes=criteria.get("set_codes"), columns=columns, ordered=False)
+        if connection is None:
+            with self._lock:
+                rows = self.conn.execute(sql, params).fetchall()
+        else:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_search(self, *, connection=None, **criteria):
+        """Count Search matches using SQL COUNT(*) and canonical criteria clauses."""
+        builder = _configured_search_builder(**criteria)
+        if builder is None:
+            return 0
+        sql, params = builder.build_count()
+        if connection is None:
+            with self._lock:
+                row = self.conn.execute(sql, params).fetchone()
+        else:
+            row = connection.execute(sql, params).fetchone()
+        return int(row[0] if row is not None else 0)

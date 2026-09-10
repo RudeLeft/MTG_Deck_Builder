@@ -124,6 +124,65 @@ class CardTaxonomyMixin:
                 "GROUP BY layout ORDER BY total DESC, layout", params).fetchall()
         return [(row["layout"], row["total"]) for row in rows]
 
+    def release_years(self, content_types=None, paper_only=False, games=None):
+        """Observed release years in the current Search scope, newest first."""
+        scope, params = self._scope(content_types, paper_only, games=games)
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT DISTINCT substr(released_at, 1, 4) AS year FROM cards "
+                "WHERE released_at IS NOT NULL AND length(released_at) >= 4 "
+                f"AND {scope} ORDER BY year DESC", params).fetchall()
+        return [
+            str(row["year"]) for row in rows
+            if str(row["year"] or "").isdigit()
+        ]
+
+    def equivalent_layouts(self, content_types=None, paper_only=False, games=None,
+                           *, card_types=(), supertypes=(), subtypes=(), keywords=()):
+        """Layouts exactly redundant with a same-named canonical Search value.
+
+        This is deliberately population equality, not a handwritten Magic rule.
+        A layout is suppressible from Card Form only when every scoped row using
+        it is exactly the same population as an existing Card Type, Supertype,
+        Subtype or Mechanic value.
+        """
+        layouts = self.layouts(content_types, paper_only, games=games)
+        canonical = []
+        canonical.extend((str(value), "type") for value in card_types or ())
+        canonical.extend((str(value), "type") for value in supertypes or ())
+        canonical.extend((str(item[0]), "subtype") for item in subtypes or () if item)
+        canonical.extend((str(item[0]), "keyword") for item in keywords or () if item)
+        by_name = {}
+        for value, kind in canonical:
+            key = " ".join(value.replace("_", " ").casefold().split())
+            if key:
+                by_name.setdefault(key, []).append((value, kind))
+
+        scope, scope_params = self._scope(content_types, paper_only, games=games)
+        equivalent = set()
+        with self._lock:
+            for layout, _count in layouts:
+                normalized = " ".join(str(layout).replace("_", " ").casefold().split())
+                for value, kind in by_name.get(normalized, ()):
+                    if kind == "type":
+                        canonical_sql = "CARD_HAS_TYPE(type_line, ?) = 1"
+                    elif kind == "subtype":
+                        canonical_sql = "CARD_HAS_SUBTYPE(type_line, ?) = 1"
+                    else:
+                        canonical_sql = (
+                            "EXISTS (SELECT 1 FROM json_each(COALESCE(keywords, '[]')) "
+                            "AS kv WHERE kv.value = ? COLLATE NOCASE)")
+                    sql = (
+                        "SELECT 1 FROM cards WHERE " + scope + " AND ("
+                        "(COALESCE(layout, '') = ? AND NOT (" + canonical_sql + ")) OR "
+                        "((" + canonical_sql + ") AND COALESCE(layout, '') <> ?)"
+                        ") LIMIT 1")
+                    params = [*scope_params, str(layout), value, value, str(layout)]
+                    if self.conn.execute(sql, params).fetchone() is None:
+                        equivalent.add(str(layout))
+                        break
+        return tuple(sorted(equivalent, key=str.casefold))
+
     def rarities(self, content_types=None, paper_only=False):
         scope, params = self._scope(content_types, paper_only)
         with self._lock:

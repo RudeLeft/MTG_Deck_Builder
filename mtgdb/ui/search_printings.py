@@ -5,7 +5,8 @@ from __future__ import annotations
 from tkinter import ttk
 
 from mtgdb.ui.components import AppButton
-from mtgdb.ui.set_filters import PrintingFilter
+from mtgdb.ui.set_filters import PrintingFilter, set_type_label
+from mtgdb.ui.tokens import PALETTE
 
 
 class SearchPrintingFilter(PrintingFilter):
@@ -26,6 +27,7 @@ class SearchPrintingFilter(PrintingFilter):
         )
         self._pending_restore_types = None
         self._pending_restore_codes = None
+        self._context_snapshot = None
         printings_label = ttk.Label(parent, text="Printings")
         printings_label.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
         owner._add_standard_filter_tooltip(printings_label, "printings")
@@ -154,10 +156,85 @@ class SearchPrintingFilter(PrintingFilter):
         self._set_catalog_controls_enabled(True)
         return self.selected_set_types()
 
+    def _create_popup(self):
+        super()._create_popup()
+        self._apply_context_to_popup()
+
+    def apply_context_snapshot(self, snapshot):
+        """Decorate existing printing controls with predictive counts only."""
+        self._context_snapshot = snapshot
+        self._apply_context_to_popup()
+        self._update_summary()
+
+    def _apply_context_to_popup(self):
+        snapshot = getattr(self, "_context_snapshot", None)
+        if snapshot is None:
+            return
+        frame = getattr(self, "_set_type_frame", None)
+        if frame is not None:
+            try:
+                values = sorted(self._present_set_types, key=str.casefold)
+                children = list(frame.winfo_children())
+                for value, child in zip(values, children):
+                    count = int((snapshot.set_type_counts or {}).get(value, 0))
+                    label = f"{set_type_label(value)} · {count:,}"
+                    availability = getattr(child, "set_context_availability", None)
+                    if callable(availability):
+                        availability(
+                            count > 0, display_text=label,
+                            allow_selected_clear=True)
+                    else:
+                        selected = bool(
+                            self.set_type_vars.get(value)
+                            and self.set_type_vars[value].get())
+                        child.configure(
+                            text=(label if count > 0 else f"✕ {label}"),
+                            state=("normal" if count > 0 or selected else "disabled"),
+                            fg=(PALETTE["text"] if count > 0 else PALETTE["bad"]),
+                            activeforeground=(
+                                PALETTE["text"] if count > 0 else PALETTE["bad"]),
+                            disabledforeground=PALETTE["bad"],
+                        )
+            except Exception:
+                pass
+        checklist = getattr(self, "_set_checklist", None)
+        if checklist is not None:
+            try:
+                selected = self.selected_set_codes()
+                checklist.set_values(
+                    [
+                        (code, f"{name} ({code.upper()}) · "
+                               f"{int((snapshot.set_counts or {}).get(code, 0)):,}",
+                         {"zero_count": int((snapshot.set_counts or {}).get(code, 0)) <= 0})
+                        for code, name in self._eligible_sets
+                    ],
+                    selected=selected)
+                query = self._set_search_var.get().strip() if self._set_search_var is not None else ""
+                checklist.filter(query)
+                self._visible_set_codes = list(checklist.visible_keys)
+            except Exception:
+                pass
+
     def _update_summary(self):
         text = super()._update_summary()
+        snapshot = getattr(self, "_context_snapshot", None)
         try:
             self.button.configure(text=text)
         except AttributeError:
             pass
+        label = getattr(self, "_status_label", None)
+        if snapshot is not None and label is not None:
+            try:
+                games = " · ".join(
+                    f"{key.title()} {int((snapshot.game_counts or {}).get(key, 0)):,}"
+                    for key in ("paper", "arena", "mtgo"))
+                language = (
+                    f"English {int(snapshot.english_count):,} · "
+                    f"All languages {int(snapshot.all_language_count):,}")
+                label.configure(
+                    text=(f"{len(self.selected_set_codes())} exact sets selected; "
+                          f"{len(self.selected_set_types())} set types selected. "
+                          f"{games} · {language}"))
+            except Exception:
+                pass
         return text

@@ -284,6 +284,10 @@ class WindowServicesMixin:
         if sys.platform != "win32":
             return
         try:
+            # Resolve the Tk handle before touching Windows-only ctypes symbols.
+            # This keeps the platform guard directly testable on non-Windows
+            # hosts and is also the first native datum the real path needs.
+            child_id = int(window.winfo_id())
             import ctypes
             from ctypes import wintypes
 
@@ -296,7 +300,7 @@ class WindowServicesMixin:
             get_ancestor.argtypes = [wintypes.HWND, wintypes.UINT]
             get_ancestor.restype = wintypes.HWND
 
-            child_hwnd = wintypes.HWND(int(window.winfo_id()))
+            child_hwnd = wintypes.HWND(child_id)
             wrapper_hwnd = get_ancestor(child_hwnd, 2)  # GA_ROOT
             parent_hwnd = get_parent(child_hwnd)
             hwnds = []
