@@ -164,15 +164,20 @@ def main():
     checks["top_heavy filter and predictive semantics stay distinct"] = (
         filter_count == 2 and predictive.get("top_heavy") == 1)
 
-    # 4. The apostrophe subtype divides filter vs predictive: "Urza" matches
-    #    "Urza's Saga" as a filter but not as a predictive subtype count.
-    urza_filter = index.popcount(index.filter_bitset(
+    # 4. Subtype matching is whitespace-bounded: "Urza" must NOT match
+    #    "Urza's Saga" (they are different subtypes), while the full subtype
+    #    does -- and the count equals the selectable result (no gap).
+    urza_partial = index.popcount(index.filter_bitset(
         SearchCriteria(content_types=("card",), subtypes=("Urza",),
                        subtype_mode="any")))
-    urza_predictive = index.context_counts(
-        SearchCriteria(content_types=("card",)), vocab)["subtype_counts"]
-    checks["apostrophe subtype: filter matches, predictive does not"] = (
-        urza_filter == 1 and urza_predictive.get("Urza", 0) == 0)
+    saga_full = index.popcount(index.filter_bitset(
+        SearchCriteria(content_types=("card",), subtypes=("Urza's Saga",),
+                       subtype_mode="any")))
+    saga_word = index.popcount(index.filter_bitset(
+        SearchCriteria(content_types=("card",), subtypes=("Saga",),
+                       subtype_mode="any")))
+    checks["subtype match is whitespace-bounded (Urza != Urza's Saga)"] = (
+        urza_partial == 0 and saga_full == 1 and saga_word == 1)
 
     # 5. Non-representable filters decline so the caller keeps the SQLite worker.
     checks["text/pip/format/numeric criteria fall back (None)"] = all(

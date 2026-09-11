@@ -168,18 +168,21 @@ def _card_has_type(type_line, wanted):
 
 
 def _card_has_subtype(type_line, wanted):
-    """Boundary-safe subtype match supporting any present/future phrase.
+    """Whitespace-bounded subtype match supporting any present/future phrase.
 
-    Multi-word subtypes are catalog data, not source-code exceptions.  The
-    selected catalog value is therefore matched as a complete contiguous phrase
-    on each face.  Hyphens remain word characters for boundary purposes so
-    ``Plant`` cannot accidentally match ``Power-Plant``.
+    The selected catalog value is matched as a complete run of whitespace-
+    delimited subtype words on each face.  Every non-space character -- hyphens,
+    apostrophes, question marks and the like -- stays part of its word, so
+    ``Plant`` does not match ``Power-Plant``, ``Urza`` does not match
+    ``Urza's Saga``, and ``Elemental`` does not match the Un-set ``Elemental?``.
+    This mirrors the whitespace tokens the contextual count uses, so the picker's
+    per-subtype count equals the result of selecting it.
     """
     target = " ".join(_type_key(wanted).split())
     if not target:
         return 0
     _left, subtype_texts = _type_line_search_parts(str(type_line or ""))
-    pattern = re.compile(r"(?<![\w-])" + re.escape(target) + r"(?![\w-])")
+    pattern = re.compile(r"(?<!\S)" + re.escape(target) + r"(?!\S)")
     return 1 if any(pattern.search(text) for text in subtype_texts) else 0
 
 

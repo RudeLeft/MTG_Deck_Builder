@@ -151,8 +151,7 @@ class FacetIndex:
         set_code = _Bitsets(n)
         layout = _Bitsets(n)
         card_type = _Bitsets(n)
-        subtype_word = _Bitsets(n)       # [\w-] tokens: CARD_HAS_SUBTYPE filter
-        subtype_ctx_word = _Bitsets(n)   # whitespace tokens: predictive trie count
+        subtype_word = _Bitsets(n)       # whitespace tokens: subtype filter + count
         keyword = _Bitsets(n)
         trait = _Bitsets(n)            # context predictive semantics (_trait_keys)
         trait_filter = _Bitsets(n)     # search-filter semantics (TRAIT_CLAUSES)
@@ -214,19 +213,13 @@ class FacetIndex:
             for seq in left_sequences:
                 for word in seq:
                     card_type.set(word, i)
-            filter_words = set()
-            ctx_words = set()
+            sub_words = set()
             for text in subtype_texts:
-                # Filter (CARD_HAS_SUBTYPE) tokenizes on the [\w-] regex boundary,
-                # so "urza's saga" yields "urza"; the predictive trie count splits
-                # on whitespace instead ("urza's", "saga").  They differ on
-                # apostrophe subtypes, so keep both.
-                filter_words.update(w for w in re.split(r"[^\w-]+", text) if w)
-                ctx_words.update(text.split())
-            for word in filter_words:
+                # Whitespace tokens match both the subtype filter (the
+                # whitespace-bounded CARD_HAS_SUBTYPE) and the predictive count.
+                sub_words.update(text.split())
+            for word in sub_words:
                 subtype_word.set(word, i)
-            for word in ctx_words:
-                subtype_ctx_word.set(word, i)
 
             for value in _keyword_values(row.get("keywords")):
                 keyword.set(value.casefold(), i)
@@ -249,7 +242,6 @@ class FacetIndex:
         self.layout = layout.finish()
         self.card_type = card_type.finish()
         self.subtype_word = subtype_word.finish()
-        self.subtype_ctx_word = subtype_ctx_word.finish()
         self.keyword = keyword.finish()
         self.trait = trait.finish()
         self.trait_filter = trait_filter.finish()
@@ -425,7 +417,7 @@ class FacetIndex:
             self._type_bitset, vocab["supertypes"])
         out["subtype_counts"] = self._predictive(
             relaxed("subtypes"), q.subtypes, q.subtype_mode,
-            self._subtype_context_bitset, vocab["subtypes"])
+            self._subtype_bitset, vocab["subtypes"])
         out["keyword_counts"] = self._predictive(
             relaxed("keywords"), q.keywords, q.keyword_mode,
             lambda v: self.keyword.get(_type_key(v), 0), vocab["keywords"])
@@ -649,32 +641,17 @@ class FacetIndex:
         return result
 
     def _subtype_bitset(self, value):
-        target = " ".join(_type_key(value).split())
-        if not target:
-            return 0
-        # Fast path only for a single boundary-clean token; anything with a
-        # space or punctuation (e.g. "urza's saga") uses the boundary regex.
-        if re.fullmatch(r"[\w-]+", target):
-            return self.subtype_word.get(target, 0)
-        pattern = re.compile(r"(?<![\w-])" + re.escape(target) + r"(?![\w-])")
-        result = 0
-        for i, texts in enumerate(self._subtype_texts):
-            if any(pattern.search(text) for text in texts):
-                result |= 1 << i
-        return result
+        """Whitespace-word subtype membership for both the filter and the count.
 
-    def _subtype_context_bitset(self, value):
-        """Predictive-count subtype membership: whitespace-word trie subsequence.
-
-        Matches _predict_type_line (not CARD_HAS_SUBTYPE): the trie splits subtype
-        text on whitespace, so "Urza" does not match "Urza's Saga" here even
-        though the filter regex does.
+        Matches the whitespace-bounded CARD_HAS_SUBTYPE and the predictive trie:
+        a value's words must appear as a contiguous run of whitespace tokens, so
+        "Urza" does not match "Urza's Saga".
         """
         key = tuple(_type_key(value).split())
         if not key:
             return 0
         if len(key) == 1:
-            return self.subtype_ctx_word.get(key[0], 0)
+            return self.subtype_word.get(key[0], 0)
         width = len(key)
         result = 0
         for i, texts in enumerate(self._subtype_texts):
