@@ -341,24 +341,22 @@ def _color_match(card_members, selected, mode, *, produced=False):
 
 
 def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
-    result = {}
+    # Single pass: a card's colour members are parsed once, then every
+    # candidate is tallied from that set. The candidate-outer form re-parsed
+    # each card once per colour (six times), which dominated this facet's cost.
     selected = set(selected)
     normalized = str(mode or "within").casefold()
-    for candidate in vocabulary:
-        target = set(selected)
-        if candidate not in target:
-            target.add(candidate)
-        count = 0
-        for row in rows:
-            members = _comma_members(row.get(field))
-            matches = _color_match(members, target, mode, produced=produced)
-            if not matches:
+    targets = {candidate: (selected | {candidate}) for candidate in vocabulary}
+    result = {candidate: 0 for candidate in vocabulary}
+    for row in rows:
+        members = _comma_members(row.get(field))
+        for candidate in vocabulary:
+            if not _color_match(members, targets[candidate], mode, produced=produced):
                 continue
-            # Within is a union/broadening mode.  Existing selected colours
-            # must not keep an unrelated candidate above zero; the candidate
-            # needs to occur on a matching card itself.  Colorless card colour
-            # is represented by the empty set, while produced C is a real
-            # stored member.
+            # Within is a union/broadening mode: the candidate must occur on
+            # the card itself, so an already-selected colour cannot keep an
+            # unrelated candidate above zero. Colorless card colour is the
+            # empty set; produced C is a real stored member.
             if normalized == "within":
                 contributes = (
                     (not members) if (candidate == "C" and not produced)
@@ -366,38 +364,46 @@ def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
                 )
                 if not contributes:
                     continue
-            count += 1
-        result[candidate] = count
+            result[candidate] += 1
     return result
 
 
 def _predict_pips(rows, selected, minimum, mode="all"):
-    """Predict one added mana-symbol color under total-symbol semantics."""
+    """Predict one added mana-symbol color under total-symbol semantics.
+
+    Single pass: each cost's physical symbols are parsed once (and the parse
+    itself is cached), then all six candidates are evaluated from that list.
+    The candidate-outer form ran the matcher six times per row.
+    """
     selected = {str(v).upper() for v in selected if str(v).upper() in _PIP_KEYS}
     normalized = str(mode or "all").casefold()
     if normalized not in {"any", "all", "none"}:
         normalized = "all"
-    result = {}
-    for candidate in _PIP_KEYS:
-        target = set(selected)
-        target.add(candidate)
-        target_csv = ",".join(sorted(target))
-        count = 0
-        for row in rows:
-            if not _mana_cost_symbol_match(
-                    row.get("mana_cost"), target_csv, normalized, minimum):
-                continue
-            if normalized == "any":
-                # Any is a union/broadening mode. The candidate itself must
-                # occur on the card, although already-selected colors may
-                # contribute other physical symbols toward the total Minimum.
-                represented = set().union(
-                    *_mana_cost_symbol_colors(str(row.get("mana_cost") or ""))
-                ) if row.get("mana_cost") else set()
-                if candidate not in represented:
+    try:
+        threshold = max(1, int(float(minimum if minimum is not None else 1)))
+    except (TypeError, ValueError):
+        threshold = 1
+    targets = {candidate: (selected | {candidate}) for candidate in _PIP_KEYS}
+    result = {candidate: 0 for candidate in _PIP_KEYS}
+    for row in rows:
+        symbols = _mana_cost_symbol_colors(str(row.get("mana_cost") or ""))
+        represented = set().union(*symbols) if symbols else set()
+        for candidate in _PIP_KEYS:
+            wanted = targets[candidate]
+            if normalized == "none":
+                if wanted & represented:
                     continue
-            count += 1
-        result[candidate] = count
+            else:
+                if normalized == "any":
+                    if not (wanted & represented):
+                        continue
+                elif not wanted.issubset(represented):
+                    continue
+                if sum(1 for colors in symbols if colors & wanted) < threshold:
+                    continue
+                if normalized == "any" and candidate not in represented:
+                    continue
+            result[candidate] += 1
     return result
 
 
