@@ -788,6 +788,44 @@ def main():
         finally:
             mana_value_context.shutdown(timeout=2.0)
             mana_value_db.close()
+
+        # A property clause over a NULL column (power/toughness on a
+        # non-creature) is NULL, and `NOT NULL` is NULL not TRUE, so a bare
+        # `NOT (group)` silently dropped every card with no stats from a
+        # "None" search -- a Land vanished from "top-heavy: None".
+        null_stat_db = CardDB(os.path.join(temporary_directory, "null-stat.db"))
+        null_stat_db.load_cards([
+            dict(_card("ns-land", "Null Stat Land"), type_line="Land",
+                 mana_cost="", cmc=0, colors=[], color_identity=[],
+                 power=None, toughness=None),
+            dict(_card("ns-topheavy", "Top Heavy Beast"),
+                 power="4", toughness="1"),
+            dict(_card("ns-variable", "Variable Beast"),
+                 power="*", toughness="*"),
+        ])
+        try:
+            def _ns(**kwargs):
+                return {row["name"] for row in null_stat_db.search(
+                    columns=("id", "name"), content_types=["card"], **kwargs)}
+            everything = _ns()
+            property_none_includes_null_stats = (
+                "Null Stat Land" in _ns(
+                    special_properties=["top_heavy"],
+                    special_property_mode="none")
+                and "Null Stat Land" in _ns(
+                    special_properties=["variable_stats"],
+                    special_property_mode="none")
+                and _ns(special_properties=["top_heavy"],
+                        special_property_mode="none")
+                    == everything - _ns(special_properties=["top_heavy"])
+                and _ns(special_properties=["variable_stats"],
+                        special_property_mode="none")
+                    == everything - _ns(special_properties=["variable_stats"])
+                and _ns(special_properties=["top_heavy"]) == {"Top Heavy Beast"}
+                and _ns(special_properties=["variable_stats"])
+                    == {"Variable Beast"})
+        finally:
+            null_stat_db.close()
         db.close()
 
     checklist_source = (ROOT / "mtgdb/ui/search_checklist.py").read_text(encoding="utf-8")
@@ -1299,6 +1337,8 @@ def main():
                 set(SearchQueryBuilder.TRAIT_CLAUSES)
                 | {"multi_faced", "single_faced"}
                 | set(CONTENT_TRAIT_KEYS))),
+        "None of a stat property includes cards with no power/toughness":
+            property_none_includes_null_stats,
         "card traits narrow the query and unknown keys are ignored": (
             traits_narrow_the_query
             and unknown_trait_is_ignored_not_widening),

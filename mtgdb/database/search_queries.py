@@ -311,7 +311,17 @@ class SearchQueryBuilder:
         normalized = str(mode).casefold()
         joiner = " OR " if normalized in ("any", "none") else " AND "
         group = "(" + joiner.join(fragments) + ")"
-        self.clauses.append(f"NOT {group}" if normalized == "none" else group)
+        if normalized == "none":
+            # A property clause over a NULL column (power/toughness on a
+            # non-creature) evaluates to NULL, and `NOT NULL` is NULL rather
+            # than TRUE -- so a bare `NOT (group)` would silently exclude every
+            # card the group could not decide, dropping all ~58k cards with no
+            # power/toughness from a "None" search. COALESCE folds that unknown
+            # to "does not match", which is what None means: the property is
+            # not present, so the card belongs in the result.
+            self.clauses.append(f"COALESCE({group}, 0) = 0")
+        else:
+            self.clauses.append(group)
 
     def add_trait_filters(self, traits, trait_mode="any"):
         """Legacy compatibility wrapper for the former global property facet.
