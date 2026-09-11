@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from mtgdb.ui.search import SearchFeatureMixin
 from mtgdb.ui.search_printings import SearchPrintingFilter
-from mtgdb.ui.set_filters import GAME_PLATFORM_LABELS
+from mtgdb.ui.set_filters import GAME_PLATFORM_LABELS, platform_selection_summary
 
 
 class _Repo:
@@ -183,6 +183,21 @@ def main():
     )
     popup_survives_content_change = printing._popup is popup and popup.destroyed == 0
 
+    # Clear must reset the Printing Type checkboxes, not just paper_only.
+    # game_vars is the source of truth selected_games() and the summary read, so
+    # leaving a digital platform ticked would keep a "cleared" search silently
+    # filtering by it and keep the summary showing the stale platform.
+    printing.game_vars["arena"].set(True)
+    printing.game_vars["paper"].set(False)
+    printing._sync_paper_only_from_games()
+    before_clear_digital = printing.selected_games() == ("arena",)
+    printing.clear()
+    clear_resets_platforms = (
+        before_clear_digital
+        and printing.selected_games() == ("paper",)
+        and bool(printing.paper_only.get()) is True
+        and platform_selection_summary(printing.selected_games()) == "Paper Only")
+
     # The repository receives selected observed Set Types rather than a hardcoded
     # set-family mapping.
     set_calls = [call for call in owner.search_repository.calls if call[0] == "sets"]
@@ -257,6 +272,7 @@ def main():
         "clearing Set Types restores all scoped sets": clear_restores_all_paper,
         "Paper-only off exposes digital scoped sets": digital_appears,
         "Paper-only refresh does not destroy/reopen popup": popup_survives_scope_change,
+        "Clear resets Printing Type platforms to paper": clear_resets_platforms,
         "Art Series-only Content narrows Printings vocabulary": art_only_scope,
         "Cards plus Art Series exposes Printings union": card_art_union,
         "Content-scope refresh does not destroy/reopen popup": popup_survives_content_change,

@@ -59,7 +59,13 @@ class SearchPrintingFilter(PrintingFilter):
         self._notify_change()
 
     def clear(self):
-        self.paper_only.set(True)
+        # Reset the platform checkboxes to the paper default and derive
+        # paper_only from them; selected_games() reads game_vars, so clearing
+        # paper_only alone would leave a stale Arena/MTGO selection driving the
+        # summary, the catalog scope, and the captured search criteria.
+        for key, variable in self.game_vars.items():
+            variable.set(key == "paper")
+        self._sync_paper_only_from_games()
         self._pending_restore_types = set()
         self._pending_restore_codes = set()
         for variable in self.set_type_vars.values():
