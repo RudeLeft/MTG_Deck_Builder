@@ -212,6 +212,10 @@ class _ResultsGalleryWindow:
 
     RESIZE_DEBOUNCE_MS = 70
     IMAGE_POLL_MS = 30
+    # Rows of card art to prepare just beyond the viewport in each direction, so
+    # scrolling reaches already-cached images (applied synchronously) instead of
+    # a "Loading image…" blink on first pass.
+    PREFETCH_ROWS = 3
 
     def __init__(self, owner, *, count_fn, card_at_fn, context_menu_fn=None):
         self.owner = owner
@@ -242,6 +246,7 @@ class _ResultsGalleryWindow:
         self._size_after = None
         self._peek_window = None
         self._owner_click_binding = None
+        self._last_prefetch_key = None
 
         self._build_shell()
         self.top.bind("<Button-1>", self._dismiss_peek_from_outside, add="+")
@@ -531,6 +536,9 @@ class _ResultsGalleryWindow:
         self._image_generation += 1
         self._image_requests.clear()
         self._photos.clear()
+        # A full render invalidates any prior prefetch band (layout/data may have
+        # changed), so allow the next bind to prefetch again.
+        self._last_prefetch_key = None
 
         if self._empty_label is not None:
             try:
@@ -646,6 +654,40 @@ class _ResultsGalleryWindow:
             slot["position"] = position
             self._queue_gallery_image(
                 slot_index, card, image_label, generation=generation)
+        self._prefetch_gallery_neighbors(start, end, count, columns)
+
+    def _prefetch_gallery_neighbors(self, start, end, count, columns):
+        """Warm the image cache a few rows beyond the viewport, once per band.
+
+        Requesting the neighbouring rows' art ahead of time means that by the
+        time they scroll into view their futures are already resolved and applied
+        synchronously, so first-pass scrolling stops blinking "Loading image…".
+        The image service dedups by card+size, so a repeated request is cheap.
+        """
+        if ImageTk is None or not self.owner.card_image_service.available:
+            return
+        buffer = max(1, int(columns)) * self.PREFETCH_ROWS
+        key = (start, end)
+        if key == getattr(self, "_last_prefetch_key", None):
+            return
+        self._last_prefetch_key = key
+        positions = list(range(max(0, start - buffer), start))
+        positions += list(range(end, min(int(count), end + buffer)))
+        size = (self._layout["image_w"], self._layout["image_h"])
+        for position in positions:
+            try:
+                card = dict(self._card_at_fn(position) or {})
+            except Exception:
+                continue
+            url = card_face_image_url(card, 0) or _card_image_url(card)
+            if not url:
+                continue
+            try:
+                self.owner.card_image_service.request(
+                    card, url, face_index=0, target_size=size,
+                    channel="results-gallery-prefetch")
+            except Exception:
+                pass
 
     def _ensure_gallery_slots(self, required):
         """Create only the bounded live slot pool; scrolling rebinds these cells."""
@@ -733,12 +775,31 @@ class _ResultsGalleryWindow:
         except Exception:
             label.configure(text="Image unavailable")
             return
+        # A processed-cache hit resolves the future immediately.  Apply it in the
+        # same pass so a re-scrolled cell never blinks through "Loading image…":
+        # that per-row blink is the flicker seen while scrolling back over cards
+        # whose images are already prepared.
+        if future.done():
+            self._apply_gallery_image(slot, label, future, generation)
+            return
         self._image_requests[slot] = (generation, label, future)
         if self._image_after is None:
-            self._image_after = (
-                self.top.after_idle(self._poll_gallery_images)
-                if future.done() else
-                self.top.after(self.IMAGE_POLL_MS, self._poll_gallery_images))
+            self._image_after = self.top.after(
+                self.IMAGE_POLL_MS, self._poll_gallery_images)
+
+    def _apply_gallery_image(self, slot, label, future, generation):
+        """Show one resolved image, ignoring results from a superseded render."""
+        if generation != self._image_generation:
+            return
+        try:
+            photo = ImageTk.PhotoImage(future.result())
+            self._photos[slot] = photo
+            label.configure(image=photo, text="", width=0, height=0)
+        except Exception:
+            try:
+                label.configure(text="Image unavailable", image="")
+            except tk.TclError:
+                pass
 
     def _poll_gallery_images(self):
         self._image_after = None
@@ -747,17 +808,7 @@ class _ResultsGalleryWindow:
             if not future.done():
                 continue
             self._image_requests.pop(slot, None)
-            if generation != self._image_generation:
-                continue
-            try:
-                photo = ImageTk.PhotoImage(future.result())
-                self._photos[slot] = photo
-                label.configure(image=photo, text="", width=0, height=0)
-            except Exception:
-                try:
-                    label.configure(text="Image unavailable", image="")
-                except tk.TclError:
-                    return
+            self._apply_gallery_image(slot, label, future, generation)
         if self._image_requests:
             try:
                 self._image_after = self.top.after(
