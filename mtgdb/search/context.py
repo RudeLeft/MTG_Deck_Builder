@@ -722,11 +722,16 @@ class SearchContextController:
             self._facet_index = None
             self._facet_index_disabled = False
 
-    def _ensure_facet_index(self, reader):
-        """Build (once) and return the in-memory bitset index, or None on failure.
+    def _ensure_facet_index(self):
+        """Build (once) and return the in-memory bitset index, or None this cycle.
 
-        Rebuilt lazily on the worker thread; ``reset_facet_index`` drops it after
-        a database sync so it never serves stale counts.
+        Built lazily on the worker thread over its OWN reader connection, so the
+        latest-wins ``reader.interrupt()`` that cancels a superseded snapshot can
+        never abort the build mid-query.  A transient failure (an interrupt, a
+        busy DB) is not cached: it returns None so this cycle uses the SQLite
+        path and the next request retries.  ``_facet_index_disabled`` remains a
+        manual off switch (tests/oracles); it is never set automatically.
+        ``reset_facet_index`` drops the cache after a database sync.
         """
         with self._condition:
             if self._facet_index is not None:
@@ -736,13 +741,19 @@ class SearchContextController:
         try:
             from mtgdb.search.facet_index import FacetIndex
             columns = ", ".join(FacetIndex.INDEX_COLUMNS)
-            rows = [dict(row) for row in
-                    reader.execute(f"SELECT {columns} FROM cards")]
+            build_reader = self.repository.open_reader()
+            try:
+                rows = [dict(row) for row in
+                        build_reader.execute(f"SELECT {columns} FROM cards")]
+            finally:
+                try:
+                    build_reader.close()
+                except Exception:
+                    pass
             index = FacetIndex(rows)
         except Exception:
-            log.exception("Could not build Search facet index; using SQLite path")
-            with self._condition:
-                self._facet_index_disabled = True
+            log.debug("Facet index build deferred; SQLite path this cycle",
+                      exc_info=True)
             return None
         with self._condition:
             self._facet_index = index
@@ -859,7 +870,7 @@ class SearchContextController:
             if generation == self._generation:
                 self._active_reader = reader
         try:
-            index = self._ensure_facet_index(reader)
+            index = self._ensure_facet_index()
             if not self._is_current(generation):
                 return None
             if index is not None:
