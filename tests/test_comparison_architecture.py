@@ -214,7 +214,7 @@ def main():
         limit._comparison_pending_count() == 8
         and limit._comparison_over_limit is True
         and limit_label.text
-        == f"COMPARE | Cards Selected: 8{COMPARISON_OVER_LIMIT_NOTE}"
+        == f"COMPARE | 8 CARDS SELECTED{COMPARISON_OVER_LIMIT_NOTE}"
         and limit_label.style == "SectionAlert.TLabel")
 
     # The pulse is bounded: it settles on steady bright red and stops.
@@ -231,7 +231,7 @@ def main():
     limit._update_comparison_bar()
     under_limit_restores = (
         limit._comparison_over_limit is False
-        and limit_label.text == "COMPARE | Cards Selected: 7"
+        and limit_label.text == "COMPARE | 7 CARDS SELECTED"
         and limit_label.style == "Section.TLabel")
 
     # Four already compared: three more fit, a fourth does not.
@@ -246,13 +246,13 @@ def main():
     partial._update_comparison_bar()
     three_more_fit = (
         partial._comparison_over_limit is False
-        and partial_label.text == "COMPARE | Cards Selected: 3")
+        and partial_label.text == "COMPARE | 3 CARDS SELECTED")
     partial.selected_result_ids = ("new-1", "new-2", "new-3", "new-4")
     partial._update_comparison_bar()
     fourth_overflows = (
         partial._comparison_over_limit is True
         and partial_label.text
-        == f"COMPARE | Cards Selected: 4{COMPARISON_OVER_LIMIT_NOTE}"
+        == f"COMPARE | 4 CARDS SELECTED{COMPARISON_OVER_LIMIT_NOTE}"
         and partial_label.style == "SectionAlert.TLabel")
 
     # Re-highlighting cards that are already compared must not report overflow:
@@ -263,7 +263,7 @@ def main():
     compared_reselection_not_counted = (
         partial._comparison_pending_count() == 3
         and partial._comparison_over_limit is False
-        and partial_label.text == "COMPARE | Cards Selected: 7")
+        and partial_label.text == "COMPARE | 7 CARDS SELECTED")
 
     # The same rule applies to a mixed Results/deck selection.
     mixed_deck = Deck()
@@ -295,7 +295,7 @@ def main():
         len(steady_label.styles) == settled_styles
         and steady_label.pending == []
         and steady_label.text
-        == f"COMPARE | Cards Selected: 10{COMPARISON_OVER_LIMIT_NOTE}")
+        == f"COMPARE | 10 CARDS SELECTED{COMPARISON_OVER_LIMIT_NOTE}")
 
     # A destroyed label must leave no pending timer behind (CLR-005).
     destroy_label = _FakeSectionLabel()

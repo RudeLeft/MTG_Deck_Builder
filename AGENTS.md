@@ -113,7 +113,7 @@ mtgdb/
     tokens.py            #   palette, typography, spacing, metrics, icon sizes
     styles.py            #   ttk theme registration and state appearance
     assets.py            #   bundled-asset path resolution + PIL availability
-    components.py        #   behavior-neutral controls, classic Tk wrappers, tooltips, shared board label
+    components.py        #   behavior-neutral controls, classic Tk wrappers, Search-filter tooltip primitive, shared board label
     autocomplete.py      #   AutocompleteEntry + hidden-first suggestion popup behavior
     tables.py            #   shared table schema, formatting, sort, columns, reorder
     card_detail.py       #   main card preview, Legality/Rotate/Zoom actions, legality/text fallbacks
@@ -225,22 +225,22 @@ only in the module that owns X.
 | `mtgdb/ui/tokens.py` | Palette, typography, spacing, control metrics, comparison metrics, icon sizes |
 | `mtgdb/ui/styles.py` | Global ttk theme registration and ttk state appearance |
 | `mtgdb/ui/assets.py` | Bundled-asset path resolution (source and frozen) and shared PIL availability |
-| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, tooltips, shared display vocabulary such as the Mainboard/Sideboard board label and format display names |
+| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, the Search-filter tooltip primitive, shared display vocabulary such as the Mainboard/Sideboard board label and format display names |
 | `mtgdb/ui/autocomplete.py` | Hidden-first autocomplete-popup lifecycle/navigation plus the current `AutocompleteEntry` control |
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
-| `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
-| `mtgdb/ui/search.py` | Trusted Search layout/state: standard Type Line (Supertype/Card Type/Subtype), Colors/stats/Printings, reorganized Advanced existing filters, debounced live draft context presentation, validated canonical criteria capture, exact-name presets, complete Clear, strict workspace restore, summaries |
+| `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, virtualized Results Gallery image presentation, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
+| `mtgdb/ui/search.py` | Trusted Search layout/state: standard Type Line (Supertype/Card Type/Subtype), Mana Color/stats, reorganized Advanced existing filters including Printings under Printing & Status, debounced live draft context presentation, validated canonical criteria capture, exact-name presets, complete Clear, strict workspace restore, summaries |
 | `mtgdb/ui/search_filters.py` | Search filter registry: the standard set, each advanced filter's category, label, and match-explaining tooltip, the hand-built filters' tooltips, and one lookup that serves both |
 | `mtgdb/ui/search_printings.py` | Search adaptation of the shared Printings component: Search button/summary wiring, Search-owned callbacks, Search English/content scope |
 | `mtgdb/ui/search_checklist.py` | Hidden-first reusable searchable virtual choice dialog for taxonomy/format/rarity pickers; multi-select uses checkboxes and single-select uses radio controls |
-| `mtgdb/ui/set_filters.py` | Shared `PrintingFilter` controller/popup for Paper-only, English, observed Set Type, cascading Exact Set state/lifecycle, bounded two-column Exact Set virtualization, shared catalog enable/disable state, and set-type rendering/shell primitives; no product grouping/default taxonomy |
+| `mtgdb/ui/set_filters.py` | Shared `PrintingFilter` controller/popup for exact Paper/Arena/MTGO platform selection, English, observed Set Type, cascading Exact Set state/lifecycle, compact summaries that mirror the selected platforms, bounded two-column Exact Set virtualization, shared catalog enable/disable state, and set-type rendering/shell primitives; Search may opt into filter tooltips while non-Search consumers remain tooltip-free; no product grouping/default taxonomy |
 | `mtgdb/ui/table_filters.py` | Results/Mainboard/Sideboard smart-filter editors/actions/popup lifecycle plus async Results-vocabulary UI adaptation |
-| `mtgdb/ui/results.py` | Fixed 128-row Search Results viewport, complete logical scrolling/navigation/selection, focused primary preview, count presentation, async view/vocabulary swap adaptation, exact-printing hydration |
+| `mtgdb/ui/results.py` | Fixed 128-row Search Results viewport, complete logical scrolling/navigation/selection, focused primary preview, count presentation, current-view Results Gallery data/open/sync adaptation, async view/vocabulary swap adaptation, exact-printing hydration |
 | `mtgdb/ui/comparison.py` | Fixed-size modeless large-card grid shared by comparison and read-only sample-hand viewing: larger printing images, source-board quantity labels, contextual deck/comparison actions, count-independent geometry, shared-service image loading |
 | `mtgdb/ui/comparison_controls.py` | Global deck-workspace comparison bar, mixed Results/Mainboard/Sideboard highlighted-card collection and mutations, exact source-session/board provenance, one-copy source removal, Search-origin deck adds, dark notices, reusable card-grid window coordination |
 | `mtgdb/ui/deck.py` | Deck-pane layout, deck tabs, session-to-widget coordination, native extended board selection, batch quantity/remove/move callbacks, deck-table reconciliation |
-| `mtgdb/ui/deck_files.py` | Compose the shared `PrintingFilter` for Open Deck, own TXT open/save dialogs, JSON projection/export, and user-selected deck-file paths |
-| `mtgdb/ui/deck_stats.py` | Stats pane dashboard layout, sectioned scrollable presentation, counted curve/type/color legends, mana presentation, draw odds, current-deck seven-row sample-hand interaction + exact-printing hydration/View hand coordination, basic legality-check presentation |
+| `mtgdb/ui/deck_files.py` | Own filter-independent TXT open/import, TXT save dialogs, JSON projection/export, and user-selected deck-file paths |
+| `mtgdb/ui/deck_stats.py` | Stats pane dashboard layout, sectioned scrollable presentation, counted curve/type/color legends, mana presentation, draw odds, current-deck seven-row sample-hand interaction + exact-printing hydration/View Hand coordination, basic legality-check presentation |
 | `mtgdb/ui/workspace.py` | Workspace/session coordination, detached Tk snapshot capture, retained Mainboard/Sideboard sash capture/restore, restored-result selection, autosave scheduling and writer shutdown/flush |
 | `mtgdb/ui/database_sync.py` | Refresh scheduling, progress-dialog presentation, Tk polling, completion reconciliation, error/shutdown adaptation |
 | `mtgdb/ui/printing.py` | Print destination selection, progress-dialog presentation, Tk polling, completion/error/shutdown adaptation |
@@ -301,20 +301,20 @@ have at least two routing examples.
 | `mtgdb/ui/components.py` | add a reusable behavior-neutral button/field/control wrapper<br>change tooltip, classic-Tk wrapper, or shared display-vocabulary behavior used across screens | `mtgdb/ui/tokens.py`; `mtgdb/ui/styles.py`; consuming UI modules | Feature-specific state/callback semantics stay with the feature owner. |
 | `mtgdb/ui/autocomplete.py` | change autocomplete popup keyboard/focus/dismissal mechanics<br>change `AutocompleteEntry` suggestion/commit behavior | `mtgdb/ui/components.py`; consuming Search UI | Keep popup mechanics centralized; do not duplicate them in individual screens. |
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
-| `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Legality/Rotate/Zoom actions, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
+| `mtgdb/ui/card_detail.py` | change fields/rules shown in the main card preview or the card Legality popup<br>change preview Gallery/Legality/Rotate/Zoom actions, virtualized Results Gallery image presentation, selection generation, latest-preview channel use, or Tk polling/deferred image-completion behavior | `mtgdb/images/service.py`; `mtgdb/deck/legality.py`; `mtgdb/database/constants.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Network/cache workers, legality-payload normalization, decoded-image resize/rotation, queue priority, and disk work stay in their non-UI owners. |
 | `mtgdb/search/context.py` | change contextual facet analysis, zero-result relaxation diagnostics, or latest-wins context worker lifecycle<br>change which existing Search properties are counted for presentation | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Tk-free only; context may reorder/count existing vocabulary but MUST NOT invent taxonomy values or silently change Search criteria. |
 | `mtgdb/ui/search.py` | add/change trusted primary/Advanced Search controls, criteria capture, or scoped taxonomy refresh<br>change strict workspace restore, filter summaries, complete Clear/reset, callbacks, Rules Text editing semantics, or exact-name presets | `mtgdb/search/models.py`; `mtgdb/search/controller.py`; `mtgdb/search/repository.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/search_queries.py` | Shared printing/set state belongs in `ui/set_filters.py` with Search adaptation in `ui/search_printings.py`; UI MUST consume taxonomy vocabulary, never invent/restore it; missing stored fields route through schema/import first. |
 | `mtgdb/ui/search_filters.py` | add an advanced Search filter or change its category/label<br>change the standard set or any Search filter's tooltip wording | `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py` | Declarations only. The control itself, its Tk state, and its query contribution belong to `ui/search.py`; never build widgets or read the database here. |
 | `mtgdb/ui/search_printings.py` | change how Search opens/summarizes the shared Printings picker<br>change Search-specific content/language callbacks into shared printing state | `mtgdb/ui/set_filters.py`; `mtgdb/ui/search.py`; `mtgdb/database/taxonomy.py` | Paper/Set Type/Exact Set popup behavior belongs in `ui/set_filters.py`; do not duplicate the shared controller here. |
 | `mtgdb/ui/search_checklist.py` | change searchable taxonomy/format/rarity choice behavior<br>change hidden-first fixed-row virtualization, filtering, selection, columns, or dismissal | `mtgdb/ui/search.py`; `mtgdb/ui/components.py` | Keep logical values in Python and the physical choice-widget pool bounded; single-select choices use radio controls; table-column filters use `ui/table_filters.py`. |
-| `mtgdb/ui/set_filters.py` | change shared Paper-only/English/Set Type/Exact Set picker state, cascading scope, popup lifecycle, fixed-row Exact Set virtualization, shared loading enable/disable behavior, or modal/nonmodal behavior<br>change human-readable rendering or flat controls for observed Scryfall `set_type` | `mtgdb/ui/search_printings.py`; `mtgdb/ui/deck_files.py`; `mtgdb/database/taxonomy.py` | Search and Open Deck MUST compose this shared controller; subclass adapters must not duplicate common catalog-control behavior or define set-type membership/default groups. |
+| `mtgdb/ui/set_filters.py` | change shared Paper-only/English/Set Type/Exact Set picker state, cascading scope, popup lifecycle, fixed-row Exact Set virtualization, shared loading enable/disable behavior, or modal/nonmodal behavior<br>change human-readable rendering or flat controls for observed Scryfall `set_type` | `mtgdb/ui/search_printings.py`; `mtgdb/database/taxonomy.py` | Search Printings MUST compose this controller; deck TXT import is intentionally filter-independent and MUST NOT consume this state. Subclass adapters must not duplicate common catalog-control behavior or define set-type membership/default groups. |
 | `mtgdb/ui/table_filters.py` | change numeric/text/categorical filter editor behavior or deck-table filter adaptation<br>change async Results vocabulary popup integration, sorting actions, or lifecycle | `mtgdb/ui/tables.py`; `mtgdb/preferences/repository.py`; owning table screen | Shared column definitions/formatters belong in `ui/tables.py`. |
-| `mtgdb/ui/results.py` | change fixed-slot viewport materialization, logical scrolling, or full-count presentation<br>change complete logical multi-selection, focused preview-primary behavior, exact-printing selection preservation, or hydration adaptation | `mtgdb/search/results.py`; `mtgdb/ui/search.py`; `mtgdb/search/repository.py`; `mtgdb/ui/tables.py`; `mtgdb/ui/card_detail.py` | Never use Treeview rows as the Results data store; Search criteria and SQL stay elsewhere. |
+| `mtgdb/ui/results.py` | change fixed-slot viewport materialization, logical scrolling, full-count presentation, or current-view Results Gallery adaptation<br>change complete logical multi-selection, focused preview-primary behavior, exact-printing selection preservation, or hydration adaptation | `mtgdb/search/results.py`; `mtgdb/ui/search.py`; `mtgdb/search/repository.py`; `mtgdb/ui/tables.py`; `mtgdb/ui/card_detail.py` | Never use Treeview rows as the Results data store; Search criteria and SQL stay elsewhere. |
 | `mtgdb/ui/comparison.py` | change fixed comparison/hand-view geometry, scrollbar-free multirow layout, or per-card rendering<br>change image sizing/loading, source-board quantity labels, comparison/deck action buttons, or read-only static-card presentation | `mtgdb/comparison/models.py`; `mtgdb/images/service.py`; `mtgdb/ui/comparison_controls.py`; `mtgdb/ui/deck_stats.py`; `mtgdb/ui/tokens.py` | Collection/deck mutation policy and window coordination belong in `ui/comparison_controls.py`; statistical hand generation stays in deck analysis. |
 | `mtgdb/ui/comparison_controls.py` | change global comparison bar/status, mixed-source highlighted-card collection, Results/deck context comparison actions, dark min/max notices, or exact source-board provenance/one-copy removal<br>change Search-origin deck adds, add/remove/clear/Open Compare, or reusable read-only card-grid window coordination | `mtgdb/comparison/models.py`; `mtgdb/ui/comparison.py`; `mtgdb/ui/deck.py`; `mtgdb/ui/deck_stats.py`; `mtgdb/ui/results.py`; `mtgdb/ui/window.py` | Do not duplicate card-grid rendering, deck mutation internals, or domain limit rules here. |
 | `mtgdb/ui/deck.py` | change deck tabs, board controls, independent Mainboard/Sideboard native multi-selection, or session-to-widget coordination<br>change batch quantity/remove/board-move callbacks, multi-selected exact-name Search routing, global comparison-bar placement, comparison-free deck context menus, deck-table reconciliation, or alternate-printing action invocation | `mtgdb/deck/model.py`; `mtgdb/deck/sessions.py`; `mtgdb/ui/tables.py`; `mtgdb/ui/search.py`; `mtgdb/ui/search_checklist.py`; `mtgdb/ui/comparison_controls.py` | Do not manipulate individual Search controls or perform file IO here. |
-| `mtgdb/ui/deck_files.py` | change how Open Deck composes the shared Printings picker or passes its scope into TXT import<br>change Open/Save/JSON-export projection, prompts, or user-selected file paths | `mtgdb/deck/io.py`; `mtgdb/deck/file_jobs.py`; `mtgdb/database/queries.py`; `mtgdb/ui/set_filters.py` | MUST NOT implement a second Printings picker; TXT parsing/serialization and resolver ranking stay in non-UI owners, and blocking disk/parser work stays off Tk. |
-| `mtgdb/ui/deck_stats.py` | change stats-pane metric-list/curve/mana/type/color presentation or counted legends<br>change draw odds, current-deck sample-hand Draw/View hand interaction, exact-printing hydration, stale-hand cleanup, or basic legality-check presentation | `mtgdb/deck/analysis.py`; `mtgdb/deck/legality.py`; `mtgdb/deck/model.py`; `mtgdb/ui/comparison_controls.py`; `mtgdb/ui/comparison.py` | Hand generation/statistical formulas and legality rules remain Tk-free; large-card grid rendering stays in the comparison view. |
+| `mtgdb/ui/deck_files.py` | change filter-independent Open Deck TXT resolution<br>change Open/Save/JSON-export projection, prompts, or user-selected file paths | `mtgdb/deck/io.py`; `mtgdb/deck/file_jobs.py`; `mtgdb/database/queries.py` | Open Deck MUST resolve TXT names against the complete local card database and MUST NOT consume Search/Printings state. TXT parsing/serialization and resolver ranking stay in non-UI owners, and blocking disk/parser work stays off Tk. |
+| `mtgdb/ui/deck_stats.py` | change stats-pane metric-list/curve/mana/type/color presentation or counted legends<br>change draw odds, current-deck sample-hand Draw/View Hand interaction, exact-printing hydration, stale-hand cleanup, or basic legality-check presentation | `mtgdb/deck/analysis.py`; `mtgdb/deck/legality.py`; `mtgdb/deck/model.py`; `mtgdb/ui/comparison_controls.py`; `mtgdb/ui/comparison.py` | Hand generation/statistical formulas and legality rules remain Tk-free; large-card grid rendering stays in the comparison view. |
 | `mtgdb/ui/workspace.py` | change autosave scheduling, detached snapshot submission, or workspace/session coordination<br>change writer shutdown/flush, retained Mainboard/Sideboard sash capture/restore, or restored-result selection coordination | `mtgdb/workspace/repository.py`; `mtgdb/deck/sessions.py`; `mtgdb/ui/search.py` | Do not know individual Search filter controls or implement JSON persistence. |
 | `mtgdb/ui/database_sync.py` | change database refresh scheduling/prompt/progress presentation<br>change Tk polling, completion reconciliation, sync error, or shutdown adaptation | `mtgdb/database/sync.py`; `mtgdb/search/controller.py`; `mtgdb/ui/search.py` | Download/import logic and worker lifecycle stay in the Tk-free sync service. |
 | `mtgdb/ui/printing.py` | change print destination selection or progress-dialog presentation<br>change Tk polling, completion/error messages, or print shutdown adaptation | `mtgdb/printing/service.py`; `mtgdb/printing/renderer.py` | Rendering, downloading, caching, and worker lifecycle stay outside UI. |
@@ -533,8 +533,8 @@ every feature together and is exempt.
   **Any** radio choice: it MUST display selected whenever no specific format is
   active, and selecting it MUST replace/unselect every specific format. An empty Set
   Type or Exact Set selection means Any. _Verification:_ **AUTO**.
-- **SRCH-034 — MUST:** Present Search with the common filters always on the form and every remaining existing capability behind one **Advanced Filter Options** button. The standard order is Card Name, then one visually explicit **TYPE LINE** block in printed order **Supertype → Card Type → Subtype**, then Colors, Power / Toughness, and Printings. Advanced remains built once and hidden/shown rather than rebuilt on expand. Its organizational groups are Search Scope, Mana, Card, and Printing & Status. Reorganization MUST preserve every existing `SearchCriteria`/query capability and workspace meaning; presentation grouping MUST NOT create a new Search dimension. `Clear` MUST empty standard and Advanced values without removing controls, and workspace capture MUST preserve values plus Advanced open/closed state. _Verification:_ **AUTO**.
-- **SRCH-035 — MUST:** Give every Search filter a concise tooltip explaining what it matches and any important neighbouring distinction, using American spelling. User-facing taxonomy names MUST use real Magic/Scryfall concepts when such a concept exists; organizational UI headings MAY be plain-language group names but MUST NOT masquerade as Magic taxonomy. **Card Shape** and **Card Traits** MUST NOT appear as user-facing filter categories: Scryfall `layout` is presented as **Card Form**, and the existing trait predicates are presented in Search Scope, Mana Cost Features, Faces, Color Indicator, P/T Properties, and Product / Status while retaining their existing query semantics. Tooltips MUST reach the operated controls, not only labels. _Verification:_ **AUTO**.
+- **SRCH-034 — MUST:** Present Search with the common filters always on the form and every remaining existing capability behind one **Advanced Filter Options** button. The standard order is Card Name, then one visually explicit **TYPE LINE** block in printed order **Supertype → Card Type → Subtype**, then Mana Color and Power / Toughness. **Printings belongs in Advanced under Printing & Status.** The Advanced Filter Options button MUST span the Search pane width and use a distinct section-control treatment rather than reading like another ordinary filter picker. Advanced remains built once and hidden/shown rather than rebuilt on expand. Its organizational groups are Search Scope, Mana, Card, and Printing & Status. Stable boolean predicates are divided into independent **Mana Cost Features**, **Special Properties**, and **Product / Status** facets; each facet owns its own Any/All/None mode and ANDs with the other facets. The legacy `traits`/`trait_mode` query path remains compatibility-only and MUST NOT be populated by the interactive Search UI. New workspace saves MUST persist each property's owning facet and mode; legacy workspace trait selections MUST be partitioned into their owning facets on restore, with an isolated legacy Single-faced selection translated to the equivalent Has multiple faces + None state. `Clear` MUST empty standard and Advanced values without removing controls, and workspace capture MUST preserve values plus Advanced open/closed state. _Verification:_ **AUTO**.
+- **SRCH-035 — MUST:** Tooltips are a Search-filter teaching aid, not general application chrome. Attach application-owned tooltips only to Search filter labels, Search filter controls, and the mode/choice controls inside Search filter pickers; Search/Clear actions, the Advanced Filter Options section button, Results controls, deck controls, preview controls, Gallery controls, and other non-filter UI MUST NOT receive tooltips. Every Search filter tooltip MUST explain the user-visible filtering behavior and any important neighboring distinction in plain American English. Tooltip copy MUST NOT mention implementation or provenance such as Scryfall, a database, snapshots, APIs, trusted-vocabulary machinery, storage fields, or internal query names. Mana Color, Mana Produced, and Mana Symbols in Cost MUST be explained as distinct concepts. Mana Color tooltips MUST explain **Use: Color Identity vs Card Colors**, **Match: Within / Contains / Exactly**, and the special meaning of Colorless; Mana Produced MUST explain that `C` is actual colorless mana production; Mana Symbols in Cost MUST explain its Any/All/None Match mode, that Minimum is the total number of qualifying physical mana symbols, and that one hybrid/mixed symbol can represent multiple selected colors for Match while counting only once toward Minimum. Any/All/None tooltips MUST describe how adding choices broadens or narrows the filter where applicable. Live context SHOULD append useful predictive information to filter choices: discrete choices MAY show the number of cards compatible with that choice under the other current filters, numeric filters SHOULD show the applicable card count and current numeric range, and zero-result controls MUST explain why they are unavailable. Predictive wording MUST NOT claim an exact post-selection total for an Any/union choice when selected peers can broaden the final union. A selected value that has become incompatible MUST stay removable and its tooltip MUST explain that it can be deselected. User-facing taxonomy names MUST use real Magic concepts when such a concept exists; organizational UI headings MAY be plain-language group names but MUST NOT masquerade as Magic taxonomy. **Card Shape** and **Card Traits** MUST NOT appear as user-facing filter categories: layout is presented as **Card Form**, and stable boolean predicates are presented through Search Scope, Mana Cost Features, **Special Properties**, and Product / Status. Special Properties consolidates Power greater than toughness, Variable power or toughness, Has a color indicator, and Has multiple faces. Tooltips MUST reach the operated controls, not only labels. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
   column, never from colour identity or rules text. Colour identity answers a
   different question — Birds of Paradise has identity `G` and produces every
@@ -546,21 +546,21 @@ every feature together and is exempt.
   needle in `COLORS` order makes every multi-colour `Exactly` search return
   nothing. Colourless is an empty colour identity but an explicit `C` member of
   produced mana, so the Produces filter offers `C` as a real choice while the
-  Colors filter MUST release it as soon as a colour is selected — a card
+  Mana Color filter MUST release it as soon as a colour is selected — a card
   cannot be colourless and a colour, and silently dropping the `C` from the
   query made White plus Colorless return exactly the mono-white result.
   _Verification:_ **AUTO**.
-- **SRCH-039 — MUST:** Let the Colors filter choose which colour column it
+- **SRCH-039 — MUST:** Let the Mana Color filter choose which colour column it
   reads: colour identity, or the colours the card itself is. The two disagree
   often enough to be separate questions — a colourless card can have a
   coloured identity, and W+U exactly returns 1,582 printings by identity
-  against 1,062 by card colours. The mode row above the pips MUST name the
+  against 1,062 by card colours. The mode row below the pips MUST name the
   column currently selected, so `Color identity:` never sits above a search of
   the other one. A criterion the query layer supports MUST NOT sit without a
   control: colour scope and Artist both kept working SQL, a criterion and a
   passing gate after their controls were gone, which is a feature no user can
   run, proved by a test. _Verification:_ **AUTO**.
-- **SRCH-040 — MUST:** Derive multi-faced/single-faced from Scryfall `card_faces`, never from a maintained layout list. Preserve the existing Scryfall `layout` query capability under the user-facing **Card Form** label. Card Form vocabulary MUST be observed Scryfall layout values; a card has one layout, so the existing Any/None modes remain. A layout MAY be suppressed from Card Form only when background taxonomy analysis proves its complete scoped printing population is exactly equal to a same-named existing Card Type, Supertype, Subtype, or Mechanic population. This equivalence MUST be data-derived rather than a handwritten list, and a legacy saved selected layout MUST remain visible until cleared so restore never changes query meaning. _Verification:_ **AUTO**.
+- **SRCH-040 — MUST:** Derive face structure from Scryfall `card_faces`, never from a maintained layout list. Interactive Search exposes only **Has multiple faces** inside Special Properties; selecting that property with Match None is the user-facing route to single-faced cards, while legacy `single_faced` query compatibility remains intact. Preserve the existing Scryfall `layout` query capability under the user-facing **Card Form** label. Card Form vocabulary MUST be observed Scryfall layout values; a card has one layout, so the existing Any/None modes remain. A layout MAY be suppressed from Card Form only when background taxonomy analysis proves its complete scoped printing population is exactly equal to a same-named existing Card Type, Supertype, Subtype, or Mechanic population. This equivalence MUST be data-derived rather than a handwritten list, and a legacy saved selected layout MUST remain visible until cleared so restore never changes query meaning. _Verification:_ **AUTO**.
 - **SRCH-041 — MUST:** Store per-row what a search would otherwise aggregate.
   Coloured pip counts are computed at import, not per query: counted in SQL
   they can use no index and cannot see hybrid halves. A hybrid symbol counts
@@ -592,7 +592,8 @@ every feature together and is exempt.
   MUST select the last row, not the whole list, and MUST NOT leave the
   selection count larger than the store.
   _Verification:_ **AUTO**.
-- **SRCH-045 — MUST:** Treat Search context as a live draft facet system rather than post-result decoration. Every valid committed filter change MUST debounce into one latest-wins Tk-free `SearchCriteria` context request before the user presses Search; foreground Results remain manual. Manual Search and live context MUST capture criteria through the same adapter. Every existing Search dimension MUST participate through contextual compatibility counts, observed numeric/release ranges, or the live total; context MUST respect the dimension's actual Any/All/None, Within/Contains/Exactly, legality, pip-threshold, platform, content-scope, and global property semantics. For an `Any` multi-select facet, each value's displayed compatibility count MUST be measured against all other Search dimensions while excluding the facet's other selected values, so an already-selected OR value cannot make an otherwise incompatible peer appear usable. Union-style existing dimensions such as Search Scope, Printing Type, and `Within` color/mana sets MUST likewise count a candidate's own compatible contribution rather than letting already-selected peers keep every option above zero. `All`/`None` facets and narrowing set modes such as `Contains` MAY retain prospective add-value counts because those modes narrow the current facet. An unselected authoritative value with a zero compatibility count MUST remain visible, MUST carry an explicit red `✕` unavailable marker, and MUST NOT be selectable by direct or bulk actions. A selected value that later becomes zero MUST remain visible and removable so context never traps the user in a conflict. Context MUST NOT add a filter dimension, silently change a selection, or remove an authoritative value. Stale analysis MUST be canceled or ignored, broad totals MUST use canonical `COUNT(*)` rather than materializing ordered result IDs, context row projections MUST be narrow/unordered, and repeated snapshots MUST use a bounded cache invalidated with the database. Zero-result relaxation suggestions MAY only remove or change modes of existing filters. _Verification:_ **AUTO**.
+- **SRCH-045 — MUST:** Treat Search context as a live draft facet system rather than post-result decoration. Every valid committed filter change MUST debounce into one latest-wins Tk-free `SearchCriteria` context request before the user presses Search; foreground Results remain manual. Manual Search and live context MUST capture criteria through the same adapter. Every existing Search dimension MUST participate through contextual compatibility counts, observed numeric/release ranges, or the live total; context MUST respect the dimension's actual Any/All/None, Within/Contains/Exactly, legality, mana-symbol total threshold, platform, content-scope, and independent property-facet semantics. Mana Symbols in Cost MUST use its own Any/All/None mode: All requires every selected symbol color to be represented, Any requires at least one, and None excludes every selected color. For All/Any, Minimum is a total count of qualifying physical brace-delimited mana symbols, not a per-color threshold; a hybrid/mixed symbol can satisfy multiple selected-color presence requirements but MUST count only once toward that total. Mana Cost Features, Special Properties, and Product / Status MUST each relax and predict only their own property facet so one group's selection or Match mode cannot inflate, suppress, or otherwise alter another group's candidate counts except through normal cross-filter intersection. For an `Any` multi-select facet, each value's displayed compatibility count MUST be measured against all other Search dimensions while excluding the facet's other selected values, so an already-selected OR value cannot make an otherwise incompatible peer appear usable. Union-style existing dimensions such as Search Scope, Printing Type, and `Within` color/mana sets MUST likewise count a candidate's own compatible contribution rather than letting already-selected peers keep every option above zero. `All`/`None` facets and narrowing set modes such as `Contains` MAY retain prospective add-value counts because those modes narrow the current facet. An unselected authoritative value with a zero compatibility count MUST remain visible, MUST carry an explicit red `✕` unavailable marker, and MUST NOT be selectable by direct or bulk actions. A selected value that later becomes zero MUST remain visible and removable so context never traps the user in a conflict. Empty Mana Value, Power, Toughness, Loyalty, Defense, and Released range controls MUST gray/disable when their relaxed facet has no applicable values, but a range containing a user value MUST remain editable so the conflict can be cleared. The UI MUST consume those live applicability signals for every range; it MUST NOT infer applicability from Card Type, layout, or a maintained incompatibility table. For Mana Value specifically, numeric zero alone MUST NOT establish applicability: a row MUST count as Mana Value-applicable only when it has a meaningful mana cost on the card or one of its faces; a literal `{0}` cost is meaningful, while a no-cost object whose rules-derived mana value defaults to 0 MUST NOT by itself keep Mana Value enabled. Unselected zero-result Mana Color, Mana Produced, and Mana Symbols in Cost choices MUST likewise gray/disable, while selected zero-result choices remain clearable. Mana Color Colorless means the selected card-color/identity set is empty, while Mana Produced `C` means explicit colorless mana production; contextual availability MUST preserve that distinction rather than sharing one `C` rule between the two facets. Context MUST NOT add a filter dimension, silently change a selection, or remove an authoritative value. Stale analysis MUST be canceled or ignored, broad totals MUST use canonical `COUNT(*)` rather than materializing ordered result IDs, context row projections MUST be narrow/unordered, and repeated snapshots MUST use a bounded cache invalidated with the database. Zero-result relaxation suggestions MAY only remove or change modes of existing filters. _Verification:_ **AUTO**.
+- **SRCH-046 — MUST:** The Card Preview `Gallery` action MUST open a modeless, user-resizable and maximizable, continuously scrollable dense image gallery over the complete current visible Results view and order, including accepted Results table filtering/sorting. Its header MUST present `RESULTS GALLERY | <count> CARDS`, and it MUST provide a live card-size slider that changes the actual target card-art width while recomputing columns and visible coverage. The initial target width MUST be 280 pixels, and the Gallery MUST NOT display a separate persistent numeric `px` readout beside the slider. Larger windows or smaller card sizes MUST materially show more cards rather than stretching gutters. Vertical Gallery movement MUST be pixel-continuous rather than row-snapped or page-snapped: mouse-wheel and scrollbar movement MUST permit partially clipped cards at the top and bottom edges, the viewport MUST remain filled to its bottom edge whenever additional logical results exist, and no blank band MAY be reserved merely to fit only complete card rows. Image cells MUST remain tightly spaced with no persistent caption row beneath each card. A primary click on a Gallery card MUST open an enlarged temporary card image that dismisses when focus leaves it. A Gallery card context click MUST expose the same dark `Add to Mainboard` / `Add to Sideboard` actions as Results and route those actions through the existing Results/deck command path rather than duplicating deck mutation logic. The gallery MUST virtualize to a bounded reusable set of live card slots independent of logical result count, including only enough buffered rows to cover partial viewport edges; it MUST hydrate exact printings only for visible/buffered slots through `ui/results.py`, request images and enlarged previews through `CardImageService`, and never construct one Tk card cell or one image request per logical result. _Verification:_ **AUTO**.
 - **SRCH-044 — MUST:** Give every table column one display value, produced by
   `search/results.table_value`, and filter on that same value. Every column
   heading opens a filter, so a column with no value has a filter that cannot
@@ -620,7 +621,7 @@ every feature together and is exempt.
   `search/results.py` and only its fixed-slot viewport adaptation in `ui/results.py`;
   preserve selection by exact Scryfall printing ID outside Tk, never by physical
   slot or row index, and restore workspace selection only after the matching logical
-  view is available. _Verification:_ **AUTO**.
+  view is available. The Results Gallery MUST consume that same complete current visible view/order rather than creating a second Search result store. _Verification:_ **AUTO**.
 - **SRCH-014 — MUST:** Make `SearchController.invalidate()` invalidate every
   queued or in-flight prior generation, allow a current-database search to start,
   and reject stale worker events without restoring their cache.
@@ -665,7 +666,7 @@ every feature together and is exempt.
   a single selected row uses the same preset path with one exact name. The Card Name field
   MAY display the batch summary, but SQL ownership remains in
   `database/search_queries.py`. _Verification:_ **AUTO**.
-- **SRCH-021 — MUST:** Keep the standard Search surface compact and stable: Card Name; the Type Line block Supertype, Card Type, Subtype; Colors; Power / Toughness; and Printings. Keep all other existing filters in Advanced under SRCH-034. Search Scope contains exactly the existing Cards, Tokens, Emblems, and Art Series choices. There is no `More Types`, `Characteristics`, `Card Shape`, or `Card Traits` user-facing filter; named Scryfall keyword/ability data is presented as `Mechanics`, and observed Scryfall layouts are presented as `Card Form`. _Verification:_ **AUTO**.
+- **SRCH-021 — MUST:** Keep the standard Search surface compact and stable: Card Name; the Type Line block Supertype, Card Type, Subtype; Mana Color; and Power / Toughness. Keep all other existing filters, including Printings, in Advanced under SRCH-034. Search Scope contains exactly the existing Cards, Tokens, Emblems, and Art Series choices. There is no `More Types`, `Characteristics`, `Card Shape`, or `Card Traits` user-facing filter; named Scryfall keyword/ability data is presented as `Mechanics`, and observed Scryfall layouts are presented as `Card Form`. _Verification:_ **AUTO**.
 - **SRCH-022 — MUST:** Rebuild trusted filter vocabulary when Content or Paper-only
   scope changes and prune selected values that no longer exist in that scope.
   Workspace restore MAY select values already in the current vocabulary but MUST
@@ -684,9 +685,8 @@ every feature together and is exempt.
   bulk-clear action `Clear Selected`; the Exact Set bulk-select action MUST also read
   `Select All`. These label changes do not broaden the established visible/filtered
   action scope. Search Printings MUST display no introductory instruction directly
-  below its title; Open Deck Printings
-  MAY retain its resolver-specific introductory guidance, and Exact Set guidance/status
-  below the Exact Set section remains unchanged.
+  below its title; Exact Set guidance/status below the Exact Set section remains
+  unchanged. Deck TXT import MUST NOT open a Printings picker.
   _Verification:_ **AUTO**.
 
 - **SRCH-032 — SHOULD:** Word the Mechanics and Subtype picker helper text as
@@ -708,7 +708,7 @@ every feature together and is exempt.
 - **SRCH-025 — MUST:** `SearchResultStore` owns every logical broad-result row and
   the current complete ordered index. Treeview slots are disposable presentation;
   there is no result cap or artificial paging, and Preview, Compare, Add Mainboard,
-  and Add Sideboard hydrate exact printings only when needed. _Verification:_ **AUTO**.
+  Add Sideboard, and the Results Gallery hydrate exact printings only when needed. _Verification:_ **AUTO**.
 - **SRCH-026 — MUST:** Prepare Results filtering/sorting and categorical column
   vocabularies off the Tk thread with latest-generation protection. The old logical
   view remains usable until an accepted replacement swaps atomically; stale worker
@@ -716,8 +716,11 @@ every feature together and is exempt.
 - **SRCH-027 — MUST:** Discover trusted Card Type/Supertype/Subtype/Mechanic/Format/
   Rarity/Set Type/Exact Set taxonomy asynchronously after first paint and on cold
   Content/Paper/Set-Type scopes. Database replacement MUST invalidate bounded
-  taxonomy caches and use the same worker path. While unavailable, UI vocabulary
-  remains empty/loading rather than guessed. _Verification:_ **AUTO**.
+  taxonomy caches and use the same worker path. Card Type and Supertype MAY use the
+  last successfully published trusted labels as presentation-only warm-start chips,
+  but those chips MUST remain disabled until the current asynchronous scope is
+  accepted; a true first-run cold start MAY use unlabeled disabled chip shells and
+  MUST NOT invent taxonomy labels. _Verification:_ **AUTO**.
 - **SRCH-028 — MUST:** Bound Search taxonomy snapshot caches and result vocabulary
   caches with LRU eviction. Cache scope MUST include every authority-changing
   Content/Paper/Set-Type input so stale vocabulary cannot cross scopes.
@@ -731,10 +734,15 @@ every feature together and is exempt.
   100k logical view. _Verification:_ **AUTO**.
 - **SRCH-030 — MUST:** Preserve the last complete trusted Search controls while a
   cold taxonomy scope is prepared; loading MUST disable/rebind stable controls
-  rather than collapse the visible layout into temporary widget trees. A failed
-  async taxonomy request MUST re-enable the last stable controls, restore stable
-  Printings summary text, and discard pending restore state that could later
-  overwrite new user edits.
+  rather than collapse the visible layout into temporary widget trees. Supertype
+  and Card Type MUST NOT replace their chip rows with transient loading/empty-state
+  prose: keep trusted warm-start chips visible but grayed out, or unlabeled disabled
+  chip shells when no trusted warm-start exists yet. Card Type/Supertype chip rows
+  MUST NEVER contain loading, empty-state, or authority-failure prose; accepted
+  authority failures MUST be reported outside those rows (for example the status
+  surface/log) while the affected chips remain disabled. A failed async taxonomy
+  request MUST re-enable the last stable controls, restore stable Printings summary
+  text, and discard pending restore state that could later overwrite new user edits.
   _Verification:_ **AUTO**.
 - **SRCH-031 — MUST:** A user Search requested while trusted taxonomy is loading
   MUST be retained as one pending intent and automatically execute exactly once after
@@ -955,7 +963,7 @@ every feature together and is exempt.
   board selection/mutation callbacks, table reconciliation, and metadata
   presentation in `ui/deck.py`. _Verification:_ **AUTO**.
 - **DUI-002 — MUST:** Keep stats-pane construction, curve/mana rendering, draw
-  odds, sample-hand interaction, and legality presentation in `ui/deck_stats.py`.
+  odds, sample-hand interaction, and legality presentation in `ui/deck_stats.py`. Mana Curve Total/By Type/By Color radio choices MUST use the header-matched choice style so they do not render a separate dark rectangle behind the controls.
   _Verification:_ **AUTO**.
 - **DUI-003 — MUST:** Compose `DeckBuilderApp` with `DeckEditorMixin`,
   `DeckFileWorkflowMixin`, and `DeckStatsMixin`; do not redefine their owned
@@ -980,16 +988,16 @@ every feature together and is exempt.
 - **DUI-009 — MUST NOT:** Implement deck TXT serialization, workspace
   persistence, print export, or DB schema behavior in `ui/deck.py` or
   `ui/deck_stats.py`. _Verification:_ **AUTO**.
-- **DUI-010 — MUST:** Keep deck import-set selection, deck open/save dialogs,
+- **DUI-010 — MUST:** Keep filter-independent deck TXT open/import, deck save dialogs,
   and JSON projection/export in `ui/deck_files.py`; keep shutdown and cross-feature
   composition in `ui/app.py`; route print export through `ui/printing.py`, workspace
   persistence through `workspace/repository.py`, Search-state adaptation through
   `ui/search.py`, and workspace/session/geometry adaptation through `ui/workspace.py`.
   _Verification:_ **AUTO**.
 - **DUI-011 — MUST:** Keep mana pip drawing, bundled mana-symbol loading,
-  fallback-symbol rendering, and mana-cost Tk image composition in `ui/mana.py`,
+  fallback-symbol rendering, mana-filter disabled-image state, and mana-cost Tk image composition in `ui/mana.py`,
   composed through `ManaSymbolsMixin` by `DeckBuilderApp`. _Verification:_ **AUTO**.
-- **DUI-012 — MUST:** Place `View hand` beside `Draw hand`, keep it disabled until
+- **DUI-012 — MUST:** Place `View Hand` beside `Draw Hand`, keep it disabled until
   a sample hand exists, and open the current hand through the shared fixed
   `CardComparisonWindow` read-only card-grid path without adding the hand to or
   removing anything from `ComparisonCollection`; duplicate copies in the seven-card
@@ -1020,18 +1028,20 @@ every feature together and is exempt.
   when it is absent from the current catalog, but it MUST NOT be appended to or
   authorize the trusted Search/deck picker vocabulary. _Verification:_ **AUTO**.
 
-- **DUI-015 — MUST:** Open Deck MUST compose the same `PrintingFilter` from
-  `ui/set_filters.py` used by Search Printings instead of maintaining a second
-  Paper/English/Set Type/Exact Set dialog. Open Deck's printing scope MUST remain
-  Cards-only and MUST NOT expose Search-only Tokens, Emblems, or Art Series as deck
-  resolver content. Untagged TXT cards MUST honor that
-  selected scope through `deck/io.py` and `database/queries.py`; explicit `[SET]`
-  and `[SET:COLLECTOR]` tags remain authoritative and MUST bypass picker scope.
+- **DUI-015 — MUST:** Opening a deck TXT from either File -> Open Deck or the
+  deck-pane `+` -> Open Deck TXT action MUST use the same `_open_deck` workflow and
+  resolve untagged card names against the complete local card database, independent
+  of all current Search criteria, Search Printings selections, platform/language
+  scope, Set Type, Exact Set, or any other interactive filter state. The import path
+  MUST NOT open or consume a Printings/filter picker. Resolver ranking MAY choose the
+  best conventional printing from the unrestricted candidate set, while explicit
+  `[SET]` and `[SET:COLLECTOR]` tags remain authoritative exact-printing requests.
+  Import MUST remain Cards-only through the resolver's normal non-card-layout guard.
   _Verification:_ **AUTO**.
 
 - **DUI-016 — MUST:** Do not render a duplicate `N main · N side` count above the
-  deck boards. The section headings MUST display `MAINBOARD | Cards: N` and
-  `SIDEBOARD | Cards: N` using current board quantities after every deck refresh.
+  deck boards. The section headings MUST display `MAINBOARD | N CARDS` and
+  `SIDEBOARD | N CARDS` using current board quantities after every deck refresh.
   _Verification:_ **AUTO**.
 - **DUI-017 — MUST:** Keep user-selected file dialogs on Tk but execute deck TXT
   reading/resolution, TXT serialization/durability, and JSON export disk work on
@@ -1199,7 +1209,7 @@ every feature together and is exempt.
   silently truncating it. Count the highlighted Results/Mainboard/Sideboard
   printings that are not already compared; when that count plus the compared
   count exceeds the seven-card maximum, `ui/comparison_controls.py` MUST disable
-  `Add Selected`, append ` (Too Many Cards Selected)` to the `Cards Selected:`
+  `Add Selected`, append ` (TOO MANY CARDS SELECTED)` to the canonical comparison count
   heading, and colour that heading palette alert red through a shared
   `ui/styles.py` label style rather than a local font or colour. Re-highlighting
   an already-compared printing MUST NOT count toward the overflow, because adding
@@ -1249,8 +1259,8 @@ every feature together and is exempt.
   subdirectory using the same partial-file convention, and its orphans carry
   distinct per-card names, so a top-level-only scan lets them accumulate
   permanently. _Verification:_ **AUTO**.
-- **IMG-011 — MUST:** Expose `Legality`, `Rotate`, and `Zoom` actions in the main
-  card preview. The preview surface MUST NOT reserve a persistent inline legality
+- **IMG-011 — MUST:** Expose `Gallery`, `Legality`, `Rotate`, and `Zoom` actions in the main
+  card preview. `Gallery` MUST use the compact primary/gold action role beside Legality and open the current Results image grid defined by SRCH-046. The preview surface MUST NOT reserve a persistent inline legality
   text row. `Legality` opens a small app-owned dark popup listing the previewed
   card's playable formats, including the restricted distinction; Rotate cycles
   clockwise quarter turns while preserving the card's automatic base posture and
@@ -1384,9 +1394,9 @@ every feature together and is exempt.
   a shared card-data table field requires inspecting both `ui/tables.py` and
   `search/repository.py` so the narrow Results projection supplies the value.
   _Verification:_ **AUTO**.
-- **TBL-010 — MUST:** A column-filter popup MUST expose `Clear this` as its
+- **TBL-010 — MUST:** A column-filter popup MUST expose `Clear This` as its
   scoped reset and MUST NOT expose a second all-table clear action inside the popup.
-  `Clear this` removes only that column's filter. Each table header's `Clear Filters`
+  `Clear This` removes only that column's filter. Each table header's `Clear Filters`
   action MUST remove every column filter for that owning Results/Mainboard/Sideboard
   view. The main Search-row `Clear` action MUST also clear every Results column filter
   and dismiss any open Results filter editor so no hidden column text/value filter survives
@@ -1430,9 +1440,30 @@ every feature together and is exempt.
   as six independent conditionals across the deck pane, comparison view,
   comparison controls, and stats panel, which is how such text drifts apart.
   _Verification:_ **AUTO**.
-- **UI-003 — MUST:** Use `TokenBubbleEntry` for multi-value rules-text input, the
-  `ui/autocomplete.py` components for autocomplete fields, and `ToolTip` for
-  application-owned tooltips. _Verification:_ **AUTO**.
+- **UI-012 — MUST:** Treat `Close` as navigation/window-management rather than an
+  affirmative action. Every visible `Close` button MUST use the secondary compact
+  role; gold primary roles are reserved for affirmative actions such as Search,
+  Apply, Done, OK, Gallery, or mutation commands that intentionally carry primary
+  emphasis. _Verification:_ **AUTO**.
+- **UI-013 — MUST:** Use Title Case for action-button labels. Count headings use one
+  canonical grammar: `RESULTS | N CARDS`, `MAINBOARD | N CARDS`,
+  `SIDEBOARD | N CARDS`, `RESULTS GALLERY | N CARDS`, and
+  `COMPARE | N CARDS SELECTED`. Status text after a heading separator MAY remain
+  sentence case because it is a state message rather than a count.
+  _Verification:_ **AUTO**.
+- **UI-014 — MUST:** Render major app-owned popup titles through the shared gold
+  dialog-title ttk styles: `DialogTitle.TLabel` on `surface` and
+  `RaisedDialogTitle.TLabel` on `surface2`. Feature code MUST NOT recreate the
+  dialog-title font/color tuple locally. _Verification:_ **AUTO**.
+- **UI-015 — MUST:** Render the Results Gallery card-size control as themed ttk
+  `Gallery.Horizontal.TScale`; do not use a raw `tk.Scale` whose platform chrome
+  can drift from the charcoal/gold component system. The slider MUST reserve a
+  15-pixel gap on its right edge before the Gallery Close action so the controls
+  never visually touch. _Verification:_ **AUTO**.
+- **UI-003 — MUST:** Use `TokenBubbleEntry` for multi-value rules-text input and the
+  `ui/autocomplete.py` components for autocomplete fields. `ToolTip` is the shared
+  primitive only for Search-filter tooltips permitted by **SRCH-035**; feature UI
+  outside Search MUST NOT introduce application-owned tooltips. _Verification:_ **AUTO**.
 - **UI-004 — MUST NOT:** Instantiate `tk.Button`, `tk.Entry`, `tk.Checkbutton`,
   or `tk.Radiobutton` outside `ui/components.py`. _Verification:_ **AUTO**.
 - **UI-005 — MUST NOT:** Bypass the shared form roles with raw ttk Entry,
@@ -1513,12 +1544,18 @@ every feature together and is exempt.
   release receives a brief palette-based pulse before returning to its normal role
   styling. The feedback MUST NOT alter the control command or create timers that
   persist after the control is destroyed. _Verification:_ **AUTO**.
+- **CLR-006 — MUST:** Keep classic-Tk and ttk secondary button families visually
+  equivalent: normal secondary controls use `surface2`, hover/active uses the
+  lighter `surface3`, text stays `text`, and pressed/click-pulse feedback uses the
+  shared `select`/accent outline treatment. A classic secondary button MUST NOT
+  darken on hover while its ttk counterpart lightens. _Verification:_ **AUTO**.
 - **TYP-001 — MUST:** Define and consume typography through shared tokens, using
   Segoe UI at the size/weight assigned per role; no local font tuples in feature
   code. _Verification:_ **AUTO**.
 - **TYP-002 — MUST:** Reserve bold for titles, headings, semantic primary
   actions, and intentional active state; regular for body and secondary actions.
-  _Verification:_ **AUTO**.
+  Major app-owned popup titles use the shared 15-point bold dialog title role and
+  gold `accent` foreground. _Verification:_ **AUTO**.
 - **SIZ-001 — MUST:** Give primary and secondary variants of one family the same
   font size, vertical padding, border width, and requested height.
   _Verification:_ **AUTO**.
@@ -1558,9 +1595,9 @@ every feature together and is exempt.
   _Verification:_ **AUTO**.
 - **LAY-004 — MUST:** Place one dedicated default dark `surface` comparison bar, with no gold
   outline/box, in the deck workspace below deck name/Format and above
-  Mainboard/Sideboard. It MUST show `COMPARE | Cards Selected: N` as one left-aligned
+  Mainboard/Sideboard. It MUST show `COMPARE | N CARDS SELECTED` as one left-aligned
   `Section.TLabel` using the exact same ttk widget/style role and left edge as
-  `MAINBOARD | Cards: N`, rather than manually imitating its font/color, plus
+  `MAINBOARD | N CARDS`, rather than manually imitating its font/color, plus
   standard-density `Add Selected`, compared-count/manage, `Compare`, and `Clear` controls. The action controls MUST responsively
   wrap from four columns to two columns to one column as pane width requires so
   they never clip at supported display scales. While CMP-016's over-limit alert is
@@ -1578,15 +1615,55 @@ every feature together and is exempt.
   presentation-only layout as the frame resizes without recreating filter state.
   _Verification:_ **AUTO**.
 - **LAY-007 — MUST:** Present the primary name label as **Card Name** and let its
-  editable field span the remaining Search-form width. Lay out Supertypes in five
-  compact columns. Keep the shared English-only Search criterion in the top-right
+  editable field span the remaining Search-form width. Search standard and Advanced
+  rows MUST share one 144-pixel primary label rail so every primary control begins at
+  the same horizontal position regardless of label length. Unused space inside that label
+  rail MUST carry the Search Style B association cue: a palette-derived two-pixel horizontal
+  line with a broad center-weighted fade from the dark surface toward the standard border
+  color, begins after a compact text gap, and draws whenever a small usable gap remains.
+  The cue MUST NOT move the label or control rails, increase row height, or extend beneath a
+  field control. Hovering any standard or Advanced filter row MUST add a subtle
+  palette-derived warm-charcoal row-surface tint behind that logical label/control relationship
+  and brighten that row's association cue toward the dedicated champagne-gold hover glow. The
+  logical row itself MUST NOT receive a light outline. The hover treatment MUST use overlay/style
+  changes only and MUST NOT change row geometry. Supertype and Card Type chip controls MUST each
+  retain a visible one-pixel border; while their owning row is hovered, each unselected chip MUST
+  brighten to the warm-white text color, while a selected chip MUST immediately return to the normal
+  border so its gold selected state remains the only selection cue. Secondary relationship rows
+  such as Look at, Within/Contains/Exactly, and the mana-symbol threshold MUST share one
+  124-pixel mode-label rail before their controls. Any/All/None subrows MUST NOT repeat a
+  redundant secondary text label below a primary filter label; they MUST distribute their
+  radio controls across the full Search control width in equal-width columns with identical
+  inter-option spacing, and each radio widget MUST fill its assigned choice column so Any,
+  All, and None have identical clickable widths. Search checklist-dialog mode rows MAY retain
+  their explanatory mode label but MUST use the same equal-column radio presentation. Every Search range
+  control MUST place its lower field, centered `to` separator, and upper field on the
+  same shared 64/30/64-pixel mini-grid; release-year comboboxes and numeric spinboxes
+  MUST use those same rails rather than their requested text widths. Power and Toughness
+  MUST occupy adjacent primary rows so their lower/separator/upper fields begin on the
+  same global rails as Mana Value, Loyalty, Defense, and Released. Every Search picker
+  button MUST use the Search-specific picker style whose requested height matches the
+  28-pixel form-field height at default Tk scaling, and every picker row MUST stretch
+  its picker to the full right edge of the shared Search control area; in particular the
+  Advanced Printings picker MUST stretch to the same full Search control-area right edge
+  as the other Advanced picker rows. The Advanced Filter Options section button MUST span
+  the full Search pane width. A visual-only horizontal boundary MUST separate the filter/Advanced
+  region from the Search/Clear/deck-action/Results region without introducing a sash, nested pane,
+  fixed geometry, or other window-locking behavior. Mana Color, Mana Produced, and Mana Symbols in Cost MUST use the same
+  compact left-packed W/U/B/R/G/C choice spacing rather than distributing the choices
+  across equal-width columns. Lay out Supertypes in
+  five compact columns. Keep the shared English-only Search criterion in the top-right
   of the Printings popup rather than consuming primary Search-row width.
   _Verification:_ **AUTO**.
 - **LAY-008 — MUST:** Keep the primary Search rows on one uniform vertical-spacing
-  token, keep Format and Rarity in the advanced panel's Printing category, and omit redundant pane titles
+  token. Primary Search rows MUST use 2-pixel vertical padding, Advanced rows MUST use
+  1-pixel vertical padding, and secondary mode/helper rows MUST use one compact 1-pixel
+  top gap. TYPE LINE, Advanced, and Advanced-category headings MUST retain small explicit
+  separation so tighter row density does not collapse category hierarchy. Keep Format and
+  Rarity in the advanced panel's Printing category, and omit redundant pane titles
   `Card Search`, `Current Deck`, `Card Preview`, and `Deck Stats` while retaining the
   uppercase bold `MAINBOARD` and `SIDEBOARD` section labels. Results MUST present its
-  count in that same gold section-heading role as `RESULTS | N Cards` (transient Search
+  count in that same gold section-heading role as `RESULTS | N CARDS` (transient Search
   states MAY replace the numeric portion while work is pending). Search and
   deck-workspace outer panes and the center Card Preview/Deck Stats panes MUST use
   flat borderless dark surfaces; thin field-style outlines matching Rules Text belong
@@ -1678,9 +1755,10 @@ every feature together and is exempt.
   yields no invented fallback vocabulary; arbitrary novelty/legacy words such as
   subtype text, `Emblem`, or parody type words MUST NOT be promoted to Card Type
   choices. When the authoritative `card-types` catalog itself is unavailable, the
-  UI MUST say that the Scryfall Card Type taxonomy is unavailable and direct the
-  user to Database > Update Database, rather than presenting the state as a normal
-  empty scope. _Verification:_ **AUTO**.
+  UI MUST report that the Scryfall Card Type taxonomy is unavailable and direct the
+  user to Database > Update Database outside the Card Type chip row, rather than
+  presenting the state as a normal empty scope or inline filter-row prose.
+  _Verification:_ **AUTO**.
 - **DATA-005 — MUST:** Present this filter as **Supertype**. Define no
   hardcoded Supertype picker vocabulary in production taxonomy/filter source.
   Rule-specific domain logic that independently needs a named supertype MUST NOT
@@ -1715,9 +1793,9 @@ every feature together and is exempt.
   Set selections MUST be removed. Art-Series-only Content MUST expose only locally
   observed Art Series Set Types/Exact Sets, while Cards + Art Series MUST expose
   their union. Recommended-set defaults, product families, and
-  grouped set taxonomies MUST NOT affect Search results. Search Printings and Open
-  Deck MUST consume the same `PrintingFilter` implementation so future Paper/Set
-  Type/Exact Set behavior changes cannot drift between those workflows.
+  grouped set taxonomies MUST NOT affect Search results. These Printings controls
+  belong to interactive Search only; deck TXT import MUST remain independent of
+  their state and resolve against the complete local card database.
   _Verification:_ **AUTO**.
 - **DATA-010 — MUST:** Store the complete Scryfall `games` list and offer Paper,
   Arena, and MTGO as a `PRINTING TYPE` section of the shared Printings picker,

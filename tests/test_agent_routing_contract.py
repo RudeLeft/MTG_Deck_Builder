@@ -67,7 +67,7 @@ SOURCE_MARKERS = {
     "mtgdb/ui/comparison.py": ("class CardComparisonWindow", "def _build_cards("),
     "mtgdb/ui/comparison_controls.py": ("class ComparisonFeatureMixin", "def _open_comparison_window("),
     "mtgdb/ui/deck.py": ("class DeckEditorMixin", "def _build_deck_pane("),
-    "mtgdb/ui/deck_files.py": ("class DeckFileWorkflowMixin", "def _choose_import_sets("),
+    "mtgdb/ui/deck_files.py": ("class DeckFileWorkflowMixin", "def _open_deck("),
     "mtgdb/ui/deck_stats.py": ("class DeckStatsMixin", "def _render_legality("),
     "mtgdb/ui/workspace.py": ("WORKSPACE_AUTOSAVE_MS", "class WorkspaceMixin"),
     "mtgdb/ui/database_sync.py": ("class DatabaseSyncMixin", "def _poll_sync_events("),

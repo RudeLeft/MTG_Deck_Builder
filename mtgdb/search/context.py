@@ -19,7 +19,8 @@ import time
 from mtgdb.core.background_jobs import spawn_daemon
 from mtgdb.database.constants import COLORS
 from mtgdb.database.semantics import (
-    _card_content_kind, _type_key, _type_line_search_parts,
+    _card_content_kind, _mana_cost_symbol_colors, _mana_cost_symbol_match,
+    _type_key, _type_line_search_parts,
 )
 from mtgdb.search.models import SearchCriteria
 
@@ -36,6 +37,17 @@ CONTEXT_COLUMNS = (
 _CONTENT_KEYS = ("card", "token", "emblem", "art")
 _GAME_KEYS = ("paper", "arena", "mtgo")
 _PIP_KEYS = (*COLORS, "C")
+_MANA_FEATURE_KEYS = ("hybrid_mana", "phyrexian_mana", "has_x_cost")
+_SPECIAL_PROPERTY_KEYS = (
+    "top_heavy", "variable_stats", "color_indicator", "multi_faced",
+)
+_STATUS_PROPERTY_KEYS = (
+    "not_universes_beyond", "universes_beyond", "reserved", "game_changer",
+)
+_LEGACY_TRAIT_KEYS = (
+    *_STATUS_PROPERTY_KEYS, "single_faced", "multi_faced",
+    *_MANA_FEATURE_KEYS, "color_indicator", "top_heavy", "variable_stats",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +67,11 @@ class SearchContextSnapshot:
     numeric_applicability: dict = field(default_factory=dict)
     release_years: tuple[str, ...] = ()
     release_year_counts: dict = field(default_factory=dict)
+    # Legacy global trait counts remain for compatibility-only criteria.
     trait_counts: dict = field(default_factory=dict)
+    mana_feature_counts: dict = field(default_factory=dict)
+    special_property_counts: dict = field(default_factory=dict)
+    status_property_counts: dict = field(default_factory=dict)
     pip_counts: dict = field(default_factory=dict)
     content_counts: dict = field(default_factory=dict)
     game_counts: dict = field(default_factory=dict)
@@ -355,21 +371,32 @@ def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
     return result
 
 
-def _predict_pips(rows, selected, minimum):
+def _predict_pips(rows, selected, minimum, mode="all"):
+    """Predict one added mana-symbol color under total-symbol semantics."""
     selected = {str(v).upper() for v in selected if str(v).upper() in _PIP_KEYS}
-    try:
-        threshold = max(1, int(minimum if minimum is not None else 1))
-    except (TypeError, ValueError):
-        threshold = 1
+    normalized = str(mode or "all").casefold()
+    if normalized not in {"any", "all", "none"}:
+        normalized = "all"
     result = {}
     for candidate in _PIP_KEYS:
-        required = set(selected)
-        required.add(candidate)
+        target = set(selected)
+        target.add(candidate)
+        target_csv = ",".join(sorted(target))
         count = 0
         for row in rows:
-            if all(int(row.get(f"pips_{color.casefold()}") or 0) >= threshold
-                   for color in required):
-                count += 1
+            if not _mana_cost_symbol_match(
+                    row.get("mana_cost"), target_csv, normalized, minimum):
+                continue
+            if normalized == "any":
+                # Any is a union/broadening mode. The candidate itself must
+                # occur on the card, although already-selected colors may
+                # contribute other physical symbols toward the total Minimum.
+                represented = set().union(
+                    *_mana_cost_symbol_colors(str(row.get("mana_cost") or ""))
+                ) if row.get("mana_cost") else set()
+                if candidate not in represented:
+                    continue
+            count += 1
         result[candidate] = count
     return result
 
@@ -401,10 +428,44 @@ def _predict_content(rows, selected):
     return result
 
 
+def _has_meaningful_mana_cost(row):
+    """Return whether Mana Value is a meaningful live filter for this row.
+
+    A rules-derived mana value of 0 on an object with no mana cost (for example
+    a Dungeon or ordinary land) is not enough to keep the interactive Mana
+    Value range enabled.  A literal {0} cost is meaningful, and multi-face
+    cards remain applicable when a real mana cost lives on one of their faces.
+    """
+    if str(row.get("mana_cost") or "").strip():
+        return True
+    raw_faces = row.get("card_faces")
+    if isinstance(raw_faces, (tuple, list)):
+        faces = raw_faces
+    elif raw_faces:
+        try:
+            faces = json.loads(raw_faces)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            faces = ()
+    else:
+        faces = ()
+    if not isinstance(faces, (tuple, list)):
+        return False
+    return any(
+        isinstance(face, dict) and str(face.get("mana_cost") or "").strip()
+        for face in faces
+    )
+
+
 def _numeric_range(rows, field):
     values = [number for row in rows for number in (_finite(row.get(field)),)
               if number is not None]
-    return ((min(values), max(values)) if values else None, len(values))
+    applicable = len(values)
+    if field == "cmc":
+        applicable = sum(
+            1 for row in rows
+            if _finite(row.get(field)) is not None and _has_meaningful_mana_cost(row)
+        )
+    return ((min(values), max(values)) if values else None, applicable)
 
 
 def _release_context(rows):
@@ -450,10 +511,13 @@ def _active_relaxations(criteria):
     add("Card Type", bool(criteria.card_types), card_types=())
     add("Subtype", bool(criteria.subtypes), subtypes=())
     add("Mechanics", bool(criteria.keywords), keywords=())
-    add("Colors", bool(criteria.colors), colors=())
+    add("Mana Color", bool(criteria.colors), colors=())
     add("Mana Produced", bool(criteria.produces), produces=())
     add("Card Form", bool(criteria.layouts), layouts=())
     add("Card properties", bool(criteria.traits), traits=())
+    add("Mana Cost Features", bool(criteria.mana_features), mana_features=())
+    add("Special Properties", bool(criteria.special_properties), special_properties=())
+    add("Product / Status", bool(criteria.status_properties), status_properties=())
     add("Mana Symbols in Cost", bool(criteria.pips), pips=(), pip_min=None)
     add("Mana Value", criteria.cmc_min is not None or criteria.cmc_max is not None,
         cmc_min=None, cmc_max=None)
@@ -498,6 +562,14 @@ def _mode_relaxations(criteria):
         layout_mode="any")
     add("Card properties", criteria.trait_mode, "any", bool(criteria.traits),
         trait_mode="any")
+    add("Mana Cost Features", criteria.mana_feature_mode, "any",
+        bool(criteria.mana_features), mana_feature_mode="any")
+    add("Special Properties", criteria.special_property_mode, "any",
+        bool(criteria.special_properties), special_property_mode="any")
+    add("Product / Status", criteria.status_property_mode, "any",
+        bool(criteria.status_properties), status_property_mode="any")
+    add("Mana Symbols in Cost", criteria.pip_mode, "any", bool(criteria.pips),
+        pip_mode="any")
     return tuple(candidates)
 
 
@@ -516,6 +588,12 @@ def _relaxed(criteria, facet):
         return replace(criteria, produces=())
     if facet == "traits":
         return replace(criteria, traits=())
+    if facet == "mana_features":
+        return replace(criteria, mana_features=())
+    if facet == "special_properties":
+        return replace(criteria, special_properties=())
+    if facet == "status_properties":
+        return replace(criteria, status_properties=())
     if facet == "layouts":
         return replace(criteria, layouts=())
     if facet == "pips":
@@ -549,18 +627,6 @@ def _relaxed(criteria, facet):
     return criteria
 
 
-# Flat facets whose count is a single-valued GROUP BY over one column.
-# They are answered in the engine only when relaxing them would otherwise
-# force a dedicated row pull (i.e. the user has that dimension filtered);
-# otherwise they ride a shared row scan the complex facets already need.
-_FLAT_GROUP_COLUMNS = {
-    "rarities": "rarity",
-    "set_types": "set_type",
-    "set_codes": "set_code",
-    "layouts": "layout",
-}
-
-
 _FACET_COLUMNS = {
     "card_types": ("type_line",),
     "supertypes": ("type_line",),
@@ -571,8 +637,11 @@ _FACET_COLUMNS = {
     "traits": (
         "mana_cost", "card_faces", "universes_beyond", "reserved",
         "game_changer", "color_indicator", "power", "toughness"),
+    "mana_features": ("mana_cost",),
+    "special_properties": ("card_faces", "color_indicator", "power", "toughness"),
+    "status_properties": ("universes_beyond", "reserved", "game_changer"),
     "layouts": ("layout",),
-    "pips": ("pips_w", "pips_u", "pips_b", "pips_r", "pips_g", "pips_c"),
+    "pips": ("mana_cost", "pips_w", "pips_u", "pips_b", "pips_r", "pips_g", "pips_c"),
     "cmc": ("cmc",),
     "power": ("power",),
     "toughness": ("toughness",),
@@ -694,12 +763,9 @@ class SearchContextController:
         with self._condition:
             return generation == self._generation and not self._closed
 
-    def _rows_by_facet(self, generation, reader, criteria, skip=()):
+    def _rows_by_facet(self, generation, reader, criteria):
         grouped = defaultdict(lambda: {"criteria": None, "facets": [], "columns": set()})
-        skip = set(skip)
         for facet, columns in _FACET_COLUMNS.items():
-            if facet in skip:
-                continue
             relaxed = _relaxed(criteria, facet)
             bucket = grouped[relaxed.signature()]
             bucket["criteria"] = relaxed
@@ -739,49 +805,15 @@ class SearchContextController:
                 "keyword_counts": {}, "color_counts": {}, "produces_counts": {},
                 "layout_counts": {}, "rarity_counts": {}, "numeric_ranges": {},
                 "numeric_applicability": {}, "release_years": (),
-                "release_year_counts": {}, "trait_counts": {}, "pip_counts": {},
+                "release_year_counts": {}, "trait_counts": {},
+                "mana_feature_counts": {}, "special_property_counts": {},
+                "status_property_counts": {}, "pip_counts": {},
                 "content_counts": {}, "game_counts": {}, "set_type_counts": {},
                 "set_counts": {}, "format_counts": {}, "english_count": 0,
                 "all_language_count": 0,
             }
 
-            layout_any = str(criteria.layout_mode or "any").casefold() == "any"
-            flat_eligible = {"rarities", "set_types", "set_codes", "games"}
-            if layout_any:
-                flat_eligible.add("layouts")
-            complex_sigs = {
-                _relaxed(criteria, facet).signature()
-                for facet in _FACET_COLUMNS if facet not in flat_eligible
-            }
-            sql_facets = {
-                facet for facet in flat_eligible
-                if _relaxed(criteria, facet).signature() not in complex_sigs
-            }
-
-            flat_outputs = {
-                "rarities": (rarities, "rarity_counts"),
-                "set_types": (set_types, "set_type_counts"),
-                "set_codes": (set_codes, "set_counts"),
-                "layouts": (layouts, "layout_counts"),
-            }
-            for facet in sql_facets:
-                if not self._is_current(generation):
-                    return None
-                if facet == "games":
-                    output["game_counts"] = self.repository.platform_counts(
-                        _relaxed(criteria, "games"), reader)
-                    continue
-                vocab = _catalog_values(flat_outputs[facet][0])
-                if not vocab:
-                    continue
-                counts = self.repository.group_counts(
-                    _relaxed(criteria, facet), reader,
-                    _FLAT_GROUP_COLUMNS[facet])
-                output[flat_outputs[facet][1]] = {
-                    value: int(counts.get(value, 0)) for value in vocab}
-
-            for facets, rows in self._rows_by_facet(
-                    generation, reader, criteria, skip=sql_facets):
+            for facets, rows in self._rows_by_facet(generation, reader, criteria):
                 facets = set(facets)
                 if not self._is_current(generation):
                     return None
@@ -820,22 +852,38 @@ class SearchContextController:
                         criteria.produces_mode, produced=True)
                 if "traits" in facets:
                     predictor = _PredictiveMembershipCounts(
-                        (
-                            "not_universes_beyond", "universes_beyond", "reserved",
-                            "game_changer", "single_faced", "multi_faced",
-                            "hybrid_mana", "phyrexian_mana", "has_x_cost",
-                            "color_indicator", "top_heavy", "variable_stats",
-                        ), criteria.traits, criteria.trait_mode)
+                        _LEGACY_TRAIT_KEYS, criteria.traits, criteria.trait_mode)
                     for row in rows:
                         predictor.add(_trait_keys(row))
                     output["trait_counts"] = predictor.finish()
+                if "mana_features" in facets:
+                    predictor = _PredictiveMembershipCounts(
+                        _MANA_FEATURE_KEYS, criteria.mana_features,
+                        criteria.mana_feature_mode)
+                    for row in rows:
+                        predictor.add(_trait_keys(row))
+                    output["mana_feature_counts"] = predictor.finish()
+                if "special_properties" in facets:
+                    predictor = _PredictiveMembershipCounts(
+                        _SPECIAL_PROPERTY_KEYS, criteria.special_properties,
+                        criteria.special_property_mode)
+                    for row in rows:
+                        predictor.add(_trait_keys(row))
+                    output["special_property_counts"] = predictor.finish()
+                if "status_properties" in facets:
+                    predictor = _PredictiveMembershipCounts(
+                        _STATUS_PROPERTY_KEYS, criteria.status_properties,
+                        criteria.status_property_mode)
+                    for row in rows:
+                        predictor.add(_trait_keys(row))
+                    output["status_property_counts"] = predictor.finish()
                 if "layouts" in facets:
                     output["layout_counts"] = _predict_set_candidates(
                         rows, "layout", layouts, criteria.layouts,
                         criteria.layout_mode)
                 if "pips" in facets:
                     output["pip_counts"] = _predict_pips(
-                        rows, criteria.pips, criteria.pip_min)
+                        rows, criteria.pips, criteria.pip_min, criteria.pip_mode)
                 for facet in ("cmc", "power", "toughness", "loyalty", "defense"):
                     if facet in facets:
                         bounds, applicable = _numeric_range(rows, facet)

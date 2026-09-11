@@ -9,7 +9,7 @@ from tkinter import ttk
 from mtgdb.ui.components import ClassicButton, ClassicCheckbutton, ClassicEntry
 from mtgdb.ui.search_checklist import VirtualChecklistView
 from mtgdb.ui.tokens import (
-    FONT_DIALOG_TITLE, FONT_HELPER, FONT_HELPER_BOLD, PALETTE,
+    FONT_HELPER, FONT_HELPER_BOLD, PALETTE,
     POPUP_FOOTER_PADDING, POPUP_PADDING,
 )
 
@@ -41,6 +41,26 @@ GAME_PLATFORM_LABELS = (
     ("arena", "Arena (Digital Release)"),
     ("mtgo", "MTGO (Digital Release)"),
 )
+
+GAME_PLATFORM_SUMMARY_LABELS = {
+    "paper": "Paper",
+    "arena": "Arena",
+    "mtgo": "MTGO",
+}
+
+
+def platform_selection_summary(games):
+    """Describe the exact Printing Type checkbox selection for compact UI text."""
+    selected = tuple(
+        key for key, _label in GAME_PLATFORM_LABELS
+        if key in {str(value) for value in (games or ())}
+    )
+    if not selected:
+        return "Any Platform"
+    labels = [GAME_PLATFORM_SUMMARY_LABELS[key] for key in selected]
+    if len(labels) == 1:
+        return f"{labels[0]} Only"
+    return " + ".join(labels)
 
 # This popup decides what every other filter has to offer, so it is the one
 # place where saying nothing costs the most: a user who narrows here and then
@@ -92,13 +112,14 @@ SET_TYPE_DESCRIPTIONS = {
     "vanguard": "Oversized avatar cards for the Vanguard format.",
 }
 SET_TYPE_HELP = (
-    "Groups of sets as the publisher classifies them: expansion, core, "
-    "masters, commander, promo and so on. Leave it empty to search every kind "
-    "of set. Choosing types here shortens the Exact Set list below.")
+    "Groups of sets such as expansion, core, masters, commander, or promo. "
+    "Selecting several Set Types includes any of them. Leave this empty for every "
+    "Set Type allowed by the current Printing Type choices. Choosing a Set Type also "
+    "narrows the Exact Set choices below.")
 EXACT_SET_HELP = (
-    "Individual sets by name. Leave it empty for every set allowed by the "
-    "choices above; a set only appears here if it has cards in the current "
-    "platform and set-type scope.")
+    "Individual sets by name. Selecting several Exact Sets includes any of them. "
+    "Leave this empty for every set allowed by the Printing Type and Set Type "
+    "choices above.")
 ENGLISH_HELP = (
     "Searches English printings only. Turning it off adds every other "
     "language, which mostly means the same cards several times over.")
@@ -117,7 +138,8 @@ class PrintingFilter:
             self, owner, *, repository=None, content_types_getter=None,
             english_variable=None, english_change_callback=None,
             change_callback=None, scope_change_callback=None,
-            popup_title="Printings", header_text="PRINTINGS", intro_text=None):
+            popup_title="Printings", header_text="PRINTINGS", intro_text=None,
+            tooltips_enabled=False):
         self.owner = owner
         self.repository = repository or owner.search_repository
         self._content_types_getter = content_types_getter
@@ -127,6 +149,7 @@ class PrintingFilter:
         self._scope_change_callback = scope_change_callback
         self._popup_title = str(popup_title or "Printings")
         self._header_text = str(header_text or "PRINTINGS")
+        self._tooltips_enabled = bool(tooltips_enabled)
         self._intro_text = str(
             ("Optional printing filters. Leaving Set Type and Set empty means "
              "any observed Scryfall set in the current content scope.")
@@ -328,7 +351,8 @@ class PrintingFilter:
         if self._present_set_types:
             self.owner._build_set_type_controls(
                 frame, self._present_set_types, self.set_type_vars,
-                self._on_set_type_change, columns=4)
+                self._on_set_type_change, columns=4,
+                tooltips_enabled=self._tooltips_enabled)
         else:
             tk.Label(
                 frame, text="No set types are available for the current scope.",
@@ -406,8 +430,9 @@ class PrintingFilter:
 
         popup_head = tk.Frame(outer, bg=p["surface2"])
         popup_head.pack(fill="x")
-        tk.Label(popup_head, text=self._header_text, bg=p["surface2"],
-                 fg=p["accent"], font=FONT_DIALOG_TITLE).pack(side="left")
+        ttk.Label(
+            popup_head, text=self._header_text, style="RaisedDialogTitle.TLabel"
+        ).pack(side="left")
         if self._english_variable is not None:
             english = ClassicCheckbutton(
                 popup_head, text="English only", variable=self._english_variable,
@@ -475,10 +500,6 @@ class PrintingFilter:
         self._set_search_var = tk.StringVar(master=self.owner)
         entry = ClassicEntry(findrow, textvariable=self._set_search_var)
         entry.pack(side="left", fill="x", expand=True)
-        self._tooltip(
-            entry,
-            "Narrows the list below by set name or code. It only filters what "
-            "is shown; it does not select anything on its own.")
         self.owner._bind_editable_focus_behavior(entry)
         self.owner._trace_write_debounced(
             self._set_search_var, self._render_individual_set_checks,
@@ -511,16 +532,31 @@ class PrintingFilter:
             command=lambda: self._finish_popup(True)).pack(side="right")
 
     def _tooltip(self, widget, text):
-        """Attach an owner tooltip when the owner provides them."""
+        """Attach help only when this shared control is acting as a Search filter."""
+        if not self._tooltips_enabled:
+            return
         add = getattr(self.owner, "_add_tooltip", None)
         if callable(add):
             add(widget, text, wraplength=380)
 
     def selected_games(self):
-        """Platforms currently ticked, in a stable order."""
+        """Platforms currently ticked, in a stable order.
+
+        Legacy/shared probes that predate per-platform state expose only the
+        old ``paper_only`` BooleanVar. Preserve that compatibility while all
+        current UI instances report the exact checkbox selection.
+        """
+        game_vars = getattr(self, "game_vars", None)
+        if not game_vars:
+            paper_only = getattr(self, "paper_only", None)
+            try:
+                return ("paper",) if bool(paper_only.get()) else tuple(
+                    key for key, _label in GAME_PLATFORM_LABELS)
+            except Exception:
+                return ("paper",)
         return tuple(
             key for key, _label in GAME_PLATFORM_LABELS
-            if bool(self.game_vars[key].get()))
+            if bool(game_vars[key].get()))
 
     def _sync_paper_only_from_games(self):
         """Keep the taxonomy scope in step with the platform checkboxes.
@@ -685,7 +721,7 @@ class PrintingFilter:
     def summary_text(self):
         selected_types = self.selected_set_types()
         selected_sets = self.selected_set_codes()
-        parts = ["Paper only" if self.paper_only.get() else "Paper + digital"]
+        parts = [platform_selection_summary(self.selected_games())]
         if selected_types:
             parts.append(
                 f"{len(selected_types)} set type" +
@@ -756,10 +792,12 @@ class SetFilterSupportMixin:
         }
 
     def _build_set_type_controls(
-            self, parent, present, variables, on_change, *, columns=4):
+            self, parent, present, variables, on_change, *, columns=4,
+            tooltips_enabled=False):
         """Render only set types observed in the current local Scryfall data."""
         values = sorted({str(value) for value in present if str(value)}, key=str.casefold)
-        add_tooltip = getattr(self, "_add_tooltip", None)
+        add_tooltip = (getattr(self, "_add_tooltip", None)
+                       if tooltips_enabled else None)
         for index, set_type in enumerate(values):
             check = ClassicCheckbutton(
                 parent, text=set_type_label(set_type), variable=variables[set_type],

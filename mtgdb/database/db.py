@@ -13,7 +13,8 @@ from mtgdb.database.schema import (
 )
 from mtgdb.database.taxonomy import CardTaxonomyMixin
 from mtgdb.database.semantics import (
-    _card_content_kind, _card_has_subtype, _card_has_type, _type_key,
+    _card_content_kind, _card_has_subtype, _card_has_type,
+    _mana_cost_symbol_match, _type_key,
 )
 
 
@@ -21,6 +22,7 @@ _SQL_FUNCTIONS = (
     ("CARD_CONTENT_KIND", 2, _card_content_kind),
     ("CARD_HAS_TYPE", 2, _card_has_type),
     ("CARD_HAS_SUBTYPE", 2, _card_has_subtype),
+    ("MANA_COST_SYMBOL_MATCH", 4, _mana_cost_symbol_match),
 )
 
 

@@ -12,6 +12,7 @@ import mtgdb.ui.components as C
 
 import mtgdb.ui.styles as S
 import mtgdb.ui.search as SearchUI
+import mtgdb.ui.search_checklist as SearchChecklistUI
 
 import mtgdb.ui.tokens as T
 
@@ -145,6 +146,9 @@ def _card_type_grid_contract():
         (chip.grid.get("row"), chip.grid.get("column"))
         for chip in owner._card_type_chip_widgets
     ]
+    wide_first = owner._card_type_chip_widgets[0].grid.get("padx")
+    wide_middle = owner._card_type_chip_widgets[2].grid.get("padx")
+    wide_last = owner._card_type_chip_widgets[4].grid.get("padx")
 
     owner._card_type_chip_frame.width = 400
     SearchUI.SearchFeatureMixin._layout_card_type_chips(owner)
@@ -154,6 +158,9 @@ def _card_type_grid_contract():
         for chip in owner._card_type_chip_widgets
     ]
 
+    narrow_first = owner._card_type_chip_widgets[0].grid.get("padx")
+    narrow_last = owner._card_type_chip_widgets[3].grid.get("padx")
+
     return (
         SearchUI.CARD_TYPE_MIN_COLUMNS == 4
         and SearchUI.CARD_TYPE_MAX_COLUMNS == 5
@@ -161,12 +168,23 @@ def _card_type_grid_contract():
         and wide_positions[5] == (1, 0)
         and narrow_columns == 4
         and narrow_positions[4] == (1, 0)
+        and wide_first == (0, SearchUI.CHIP_GRID_X_GAP // 2)
+        and wide_middle == (SearchUI.CHIP_GRID_X_GAP // 2,
+                            SearchUI.CHIP_GRID_X_GAP // 2)
+        and wide_last == (SearchUI.CHIP_GRID_X_GAP // 2, 0)
+        and narrow_first == (0, SearchUI.CHIP_GRID_X_GAP // 2)
+        and narrow_last == (SearchUI.CHIP_GRID_X_GAP // 2, 0)
+        and all(
+            owner._card_type_chip_frame.columns[column].get("uniform")
+            == "search-card-type-chip"
+            for column in range(narrow_columns))
     )
 
 
 def main():
     paths = [os.path.join(ROOT, name) for name in (
-        "mtgdb/ui/app.py", "mtgdb/ui/search.py", "mtgdb/ui/search_checklist.py",
+        "mtgdb/ui/app.py", "mtgdb/ui/components.py", "mtgdb/ui/search.py",
+        "mtgdb/ui/search_checklist.py",
         "mtgdb/ui/search_printings.py", "mtgdb/ui/set_filters.py",
         "mtgdb/ui/table_filters.py", "mtgdb/ui/results.py",
         "mtgdb/ui/tables.py", "mtgdb/ui/card_detail.py", "mtgdb/ui/comparison.py",
@@ -194,7 +212,9 @@ def main():
         C._BUTTON_STYLES[role]
         for role in ("primary", "compact_primary", "dense_primary")
     }
-    secondary_styles = set(C._BUTTON_STYLES.values()) - primary_styles
+    section_styles = {C._BUTTON_STYLES["search_section"]}
+    secondary_styles = (
+        set(C._BUTTON_STYLES.values()) - primary_styles - section_styles)
     primary_contract = all(
         fake_style.configured[name].get("background") == T.PALETTE["accent"]
         and fake_style.configured[name].get("foreground") == T.PALETTE["on_accent"]
@@ -233,8 +253,8 @@ def main():
     advanced_format_rarity_alignment = all(fragment in sources["search.py"] for fragment in (
         'def _build_filter_format(',
         'def _build_filter_rarity(',
-        'self._format_btn.grid(row=0, column=1, sticky="ew", pady=2)',
-        'self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=2)',
+        'self._format_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)',
+        'self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)',
         'frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)',
     ))
     button_family_pairs = (
@@ -250,6 +270,13 @@ def main():
         "classic primary buttons use the same gold contrast": (
             classic_primary_contract),
         "every semantic secondary button is dark with light text": secondary_contract,
+        "Search section button is dark with gold section emphasis": (
+            fake_style.configured["SearchSection.TButton"].get("background")
+                == T.PALETTE["surface3"]
+            and fake_style.configured["SearchSection.TButton"].get("foreground")
+                == T.PALETTE["accent"]
+            and fake_style.configured["SearchSection.TButton"].get("bordercolor")
+                == T.PALETTE["accent2"]),
         "selected filter chips use on-accent text": (
             selected_chip.configured.get("fg") == T.PALETTE["on_accent"]),
         "selected entry text uses on-accent contrast": (
@@ -282,14 +309,14 @@ def main():
             all(fake_style.configured[name].get("bordercolor") == T.PALETTE["border"]
                 and fake_style.configured[name].get("relief") == "solid"
                 for name in ("TButton", "Compact.TButton", "DeckControl.TButton",
-                             "Picker.TButton", "SearchRow.TButton"))
+                             "Picker.TButton", "SearchPicker.TButton", "SearchRow.TButton"))
             and all(
                 ("disabled", T.PALETTE["border"])
                     in fake_style.mapped[name].get("bordercolor", ())
                 and ("active", T.PALETTE["border"])
                     in fake_style.mapped[name].get("bordercolor", ())
                 for name in ("TButton", "Compact.TButton", "DeckControl.TButton",
-                             "Picker.TButton", "SearchRow.TButton"))
+                             "Picker.TButton", "SearchPicker.TButton", "SearchRow.TButton"))
             and fake_style.configured["Picker.TMenubutton"].get("bordercolor")
                 == T.PALETTE["border"]
             and fake_style.configured["Picker.TMenubutton"].get("relief") == "solid"
@@ -317,11 +344,170 @@ def main():
                 in fake_style.mapped["TButton"].get("background", ())
             and ("alternate", T.PALETTE["accent"])
                 in fake_style.mapped["TButton"].get("bordercolor", ())),
+        "inapplicable Search fields and mana choices use a muted disabled treatment": (
+            all(("disabled", T.PALETTE["surface3"])
+                    in fake_style.mapped[name].get("fieldbackground", ())
+                and ("disabled", T.PALETTE["muted"])
+                    in fake_style.mapped[name].get("foreground", ())
+                for name in ("Form.TEntry", "Form.TCombobox", "Form.TSpinbox"))
+            and ("disabled", T.PALETTE["muted"])
+                in fake_style.mapped["Color.TCheckbutton"].get("foreground", ())
+            and ("disabled", T.PALETTE["muted"])
+                in fake_style.mapped["SearchHover.Color.TCheckbutton"].get("foreground", ())),
         "picker and editable-field vertical padding match": (
             T.PAD_PICKER[1] == T.FORM_CONTROL_PADDING[1]
             == T.CLASSIC_ENTRY_IPADY),
+        "Search filter pickers use the field-height picker role": (
+            C._BUTTON_STYLES.get("search_picker") == "SearchPicker.TButton"
+            and T.PAD_SEARCH_PICKER[1] == T.FORM_CONTROL_PADDING[1] - 1
+            and fake_style.configured["SearchPicker.TButton"].get("padding")
+                == T.PAD_SEARCH_PICKER
+            and 'role="picker"' not in sources["search.py"]
+            and 'role="picker"' not in sources["search_printings.py"]),
+        "Search picker rows share the full right control edge": (
+            'self._subtype_btn.grid(\n            row=4, column=1, columnspan=3, sticky="ew"' in sources["search.py"]
+            and 'self.button.grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)'
+                in sources["search_printings.py"]
+            and 'button.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)'
+                in sources["search.py"]),
         "Advanced Format and Rarity use the shared aligned control column": (
             advanced_format_rarity_alignment),
+        "Search primary labels reserve one 144px alignment rail": (
+            SearchUI.FILTER_LABEL_WIDTH == 144),
+        "Search primary labels use a zero-geometry stronger Style B fade rail": (
+            SearchUI.ASSOCIATION_RAIL_LINE_WIDTH == 2
+            and SearchUI.ASSOCIATION_RAIL_MIN_WIDTH == 10
+            and SearchUI.ASSOCIATION_RAIL_FADE_POWER == 0.72
+            and SearchUI.ASSOCIATION_RAIL_MAX_BLEND == 1.0
+            and SearchUI._association_rail_color(0.0) == T.PALETTE["surface"]
+            and SearchUI._association_rail_color(1.0) == T.PALETTE["surface"]
+            and SearchUI._association_rail_color(0.5) == T.PALETTE["border"]
+            and SearchUI._association_rail_color(0.25)
+                == SearchUI._association_rail_color(0.75)
+            and 'def _build_search_row_label(' in sources["search.py"]
+            and 'label.grid(' in sources["search.py"]
+            and 'available = FILTER_LABEL_WIDTH - FILTER_LABEL_GAP'
+                in sources["search.py"]
+            and 'rail.place(' in sources["search.py"]
+            and 'rail.pack(' not in sources["search.py"]
+            and 'holder = ttk.Frame(parent)' not in sources["search.py"]
+            and 'width=ASSOCIATION_RAIL_LINE_WIDTH' in sources["search.py"]
+            and 'if width < ASSOCIATION_RAIL_MIN_WIDTH:' in sources["search.py"]
+            and 'owner._build_search_row_label(' in sources["search_printings.py"]),
+        "Search row hover stays geometry-neutral while unselected chips get the white cue": (
+            SearchUI.SEARCH_ROW_HOVER_COLOR == T.PALETTE["search_hover"]
+            and SearchUI.SEARCH_CHIP_HOVER_BORDER == T.PALETTE["text"]
+            and 'self._search_row_hover_regions = []' in sources["search.py"]
+            and 'self._register_search_row_hover(form, row, last_column=3)'
+                in sources["search.py"]
+            and 'self._register_search_row_hover(frame, 0, last_column=1)'
+                in sources["search.py"]
+            and 'band.place(' in sources["search.py"]
+            and 'band.grid(' not in sources["search.py"]
+            and 'band.pack(' not in sources["search.py"]
+            and 'highlightthickness=0' in sources["search.py"]
+            and 'widget._ui_search_row_hover_active = bool(active)'
+                in sources["search.py"]
+            and 'widget._ui_search_chip_hover_border = SEARCH_CHIP_HOVER_BORDER'
+                in sources["search.py"]
+            and 'widget._sync_chip_contrast()' in sources["search.py"]
+            and 'hover_border if hover_active and not selected'
+                in sources["components.py"]
+            and 'else PALETTE["border"]' in sources["components.py"]
+            and fake_style.configured["SearchHover.TFrame"].get("background")
+                == T.PALETTE["search_hover"]
+            and fake_style.configured["SearchHover.TLabel"].get("background")
+                == T.PALETTE["search_hover"]
+            and fake_style.configured["SearchHoverMuted.TLabel"].get("background")
+                == T.PALETTE["search_hover"]
+            and fake_style.configured["SearchHover.Color.TCheckbutton"].get("background")
+                == T.PALETTE["search_hover"]
+            and SearchUI.ASSOCIATION_RAIL_HOVER_MAX_BLEND == 1.0
+            and SearchUI._association_rail_color(0.5, active=True)
+                == T.PALETTE["search_hover_glow"]
+            and 'label._mtg_search_association_rail = rail' in sources["search.py"]
+            and 'self._draw_association_rail(rail, active=active)' in sources["search.py"]),
+        "Advanced Filter Options spans the pane with distinct section styling": (
+            'header, text=self.ADVANCED_COLLAPSED_TEXT, role="search_section",'
+                in sources["search.py"]
+            and 'self._advanced_btn.pack(fill="x")' in sources["search.py"]
+            and C._BUTTON_STYLES.get("search_section") == "SearchSection.TButton"),
+        "Search filters have a stronger visual-only boundary before actions and Results": (
+            SearchUI.SEARCH_RESULTS_BOUNDARY_HEIGHT == 2
+            and 'self._search_results_boundary = tk.Frame(' in sources["search.py"]
+            and 'bg=PALETTE["accent2"], height=SEARCH_RESULTS_BOUNDARY_HEIGHT'
+                in sources["search.py"]
+            and 'self._search_results_boundary.pack(fill="x", pady=(8, 6))'
+                in sources["search.py"]
+            and 'ttk.Panedwindow' not in sources["search.py"]),
+        "Mana pip quantity uses the compact secondary helper hierarchy": (
+            SearchUI.SECONDARY_LABEL_WIDTH == 42
+            and SearchUI.SECONDARY_CONTROL_GAP == 6
+            and SearchUI.SECONDARY_HELPER_GAP == 6
+            and 'text="Minimum"' in sources["search.py"]
+            and 'text="total selected symbols"' in sources["search.py"]
+            and 'self._build_mode_row(' in sources["search.py"]
+            and 'box, self.q_pip_mode, "mana-symbol colors"' in sources["search.py"]
+            and 'text="At least:"' not in sources["search.py"]
+            and 'text="per selected color"' not in sources["search.py"]),
+        "Any/All/None rows use one compact unified Match cluster": (
+            SearchUI.MATCH_MODE_LABEL == "Match"
+            and SearchUI.MATCH_MODE_LABEL_WIDTH == 42
+            and SearchUI.MATCH_MODE_CHOICE_GAP == 8
+            and 'text=MATCH_MODE_LABEL' in sources["search.py"]
+            and 'minsize=MATCH_MODE_LABEL_WIDTH' in sources["search.py"]
+            and 'MATCH_MODE_CHOICE_GAP' in sources["search.py"]
+            and 'uniform="search-mode-choice"' not in sources["search.py"]
+            and 'def _build_filter_property_match' not in sources["search.py"]
+            and 'mode_var=self.q_special_property_mode' in sources["search.py"]
+            and 'mode_var=self.q_mana_feature_mode' in sources["search.py"]
+            and 'mode_var=self.q_status_property_mode' in sources["search.py"]),
+        "Search picker helper rows use the same compact title and spacing": (
+            SearchChecklistUI.HELPER_LABEL_WIDTH == SearchUI.SECONDARY_LABEL_WIDTH
+            and SearchChecklistUI.HELPER_CONTROL_GAP == SearchUI.SECONDARY_CONTROL_GAP
+            and SearchChecklistUI.HELPER_CHOICE_GAP == SearchUI.MATCH_MODE_CHOICE_GAP
+            and 'mode_label="Match"' in sources["search_checklist.py"]
+            and 'uniform="picker-mode-choice"' not in sources["search_checklist.py"]
+            and 'mode_label=MATCH_MODE_LABEL' in sources["search.py"]
+            and 'mode_label="Legality"' in sources["search.py"]
+            and 'Selected subtypes:' not in sources["search.py"]
+            and 'Selected mechanics:' not in sources["search.py"]
+            and 'Selected forms:' not in sources["search.py"]
+            and 'Property matching:' not in sources["search.py"]),
+        "Mana Color, Mana Produced, and Mana Symbols use one compact pip layout": (
+            SearchUI.MANA_CHOICE_GAP == 8
+            and 'def _pack_mana_choice(widget):' in sources["search.py"]
+            and sources["search.py"].count('_pack_mana_choice(') == 4
+            and 'widget.pack(side="left", padx=(0, MANA_CHOICE_GAP))'
+                in sources["search.py"]
+            and 'uniform="search-color-choice"' not in sources["search.py"]
+            and 'uniform="search-produced-choice"' not in sources["search.py"]
+            and 'form, "Mana Color", row=row' in sources["search.py"]),
+        "Color secondary rows use compact Use and Match labels": (
+            SearchUI.COLOR_SCOPE_LABEL == "Use"
+            and 'text=COLOR_SCOPE_LABEL' in sources["search.py"]
+            and '(("Color Identity", "identity"), ("Card Colors", "colors"))'
+                in sources["search.py"]
+            and 'text=MATCH_MODE_LABEL' in sources["search.py"]
+            and 'uniform="search-color-scope"' not in sources["search.py"]
+            and 'uniform="search-color-mode"' not in sources["search.py"]
+            and 'uniform="search-produced-mode"' not in sources["search.py"]
+            and 'text="Look at:"' not in sources["search.py"]
+            and 'text="Produces mana:"' not in sources["search.py"]
+            and 'COLOR_SCOPE_LABELS' not in sources["search.py"]),
+        "Search numeric ranges share one 64/30/64px mini-grid": (
+            SearchUI.RANGE_FIELD_WIDTH_PX == 64
+            and SearchUI.RANGE_SEPARATOR_WIDTH_PX == 30
+            and 'def _layout_numeric_range(box, low, high):' in sources["search.py"]
+            and 'box.columnconfigure(0, minsize=RANGE_FIELD_WIDTH_PX)' in sources["search.py"]
+            and 'box.columnconfigure(1, minsize=RANGE_SEPARATOR_WIDTH_PX)' in sources["search.py"]
+            and 'box.columnconfigure(2, minsize=RANGE_FIELD_WIDTH_PX)' in sources["search.py"]
+            and 'self._layout_numeric_range(\n            box, self.q_released_min, self.q_released_max)' in sources["search.py"]),
+        "Power and Toughness use adjacent primary rows on the same range rails": (
+            'def _build_filter_stats(self, parent, *, row=0):' in sources["search.py"]
+            and '("Power", "q_power"), ("Toughness", "q_toughness")' in sources["search.py"]
+            and 'row=row + offset, column=1, columnspan=3, sticky="w"' in sources["search.py"]
+            and 'self._build_printing_filter(form, row=8)' not in sources["search.py"]),
         "Format Any is an explicit mutually-exclusive radio selection": (
             'selected = {current}' in sources["search.py"]
             and 'selected = {current} if current else set()' not in sources["search.py"]
@@ -368,17 +554,51 @@ def main():
         "Supertypes use one compact five-column row": (
             SearchUI.SUPERTYPE_COLUMNS == 5
             and 'columns=SUPERTYPE_COLUMNS,' in sources["search.py"]),
+        "trusted Type Line chips use equal cells, real border shells, and edge-clean gutters": (
+            C._CHECK_ROLES["chip"]["highlightthickness"] == 0
+            and C._CHECK_ROLES["chip"]["highlightbackground"] == T.PALETTE["border"]
+            and C._CHECK_ROLES["chip"]["highlightcolor"] == T.PALETTE["text"]
+            and 'shell = tk.Frame(' in sources["search.py"]
+            and 'chip._ui_chip_border_shell = shell' in sources["search.py"]
+            and 'chip.pack(fill="both", expand=True, padx=1, pady=1)' in sources["search.py"]
+            and 'shell.grid(' in sources["search.py"]
+            and 'def _set_chip_border(self, color):' in sources["components.py"]
+            and 'shell.configure(bg=color)' in sources["components.py"]
+            and 'self._set_chip_border(chip_border)' in sources["components.py"]
+            and 'getattr(widget, "_ui_check_role", None) == "chip"' in sources["search.py"]
+            and SearchUI.CHIP_GRID_X_GAP == 4
+            and SearchUI.CHIP_GRID_Y_GAP == 2
+            and SearchUI._chip_grid_padx(0, 5) == (0, 2)
+            and SearchUI._chip_grid_padx(2, 5) == (2, 2)
+            and SearchUI._chip_grid_padx(4, 5) == (2, 0)
+            and SearchUI._chip_grid_pady(0, 3) == (0, 1)
+            and SearchUI._chip_grid_pady(1, 3) == (1, 1)
+            and SearchUI._chip_grid_pady(2, 3) == (1, 0)
+            and 'anchor="center"' in sources["search.py"]
+            and 'uniform="search-trusted-chip"' in sources["search.py"]),
         "redundant pane titles are removed while section labels remain": (
             all(title not in combined_source for title in (
                 'text="Card Search"', 'text="Current Deck"',
                 'text="Card Preview"', 'text="Deck Stats"'))
-            and 'MAINBOARD | Cards:' in combined_source
-            and 'SIDEBOARD | Cards:' in combined_source
-            and 'text="RESULTS | 0 Cards", style="Section.TLabel"' in combined_source),
-        "primary Search rows share one vertical spacing token": (
-            sources["search.py"].count("pady=SEARCH_ROW_PADY") >= 6),
+            and 'MAINBOARD | ' in combined_source
+            and 'SIDEBOARD | ' in combined_source
+            and 'text="RESULTS | 0 CARDS", style="Section.TLabel"' in combined_source),
+        "primary Search rows share one tightened vertical spacing token": (
+            SearchUI.SEARCH_ROW_PADY == 2
+            and sources["search.py"].count("pady=SEARCH_ROW_PADY") >= 6),
+        "Advanced Search rows use the tighter one-pixel row spacing": (
+            SearchUI.ADVANCED_ROW_PADY == 1
+            and sources["search.py"].count("pady=ADVANCED_ROW_PADY") >= 10),
+        "mode/helper rows use one compact shared top gap": (
+            SearchUI.MODE_ROW_PADY == (1, 0)
+            and sources["search.py"].count("pady=MODE_ROW_PADY") >= 4),
+        "Search section headings keep compact but visible separation": (
+            SearchUI.TYPE_LINE_HEADING_PADY == (5, 1)
+            and SearchUI.ADVANCED_HEADER_PADY == (4, 0)
+            and SearchUI.ADVANCED_SECTION_HEADING_PADY == (6, 1)),
         "Card Name uses full remaining row width": (
-            'text="Card Name"' in sources["search.py"]
+            'form, "Card Name", row=0, pady=SEARCH_ROW_PADY, tooltip_key="name"'
+            in sources["search.py"]
             and 'row=0, column=1, columnspan=3, sticky="ew"'
             in sources["search.py"]),
         "Printings owns the English-only control placement": (
@@ -409,8 +629,8 @@ def main():
             and 'self._bind_debounced_wrap(self._comparison_selection_lbl)'
                 in comparison_controls_source
             and 'font=FONT_HELPER_BOLD' not in comparison_controls_source
-            and 'text="COMPARE | Cards Selected: 0"' in comparison_controls_source
-            and 'text=f"COMPARE | Cards Selected: {selected_count}{over_limit_note}"'
+            and 'text="COMPARE | 0 CARDS SELECTED"' in comparison_controls_source
+            and 'text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}"'
                 in comparison_controls_source),
         "picker list radio rows carry a themed, state-distinguishing indicator": (
             # UI-010.  The real failure this guards is a radio whose selected and
@@ -450,7 +670,9 @@ def main():
             and 'PALETTE["surface"]' in comparison_controls_source
             and 'role="compact_primary"' in comparison_controls_source),
         "comparison and sample-hand window titles use gold dialog typography": (
-            'fg=p["accent"], font=FONT_DIALOG_TITLE' in comparison_source),
+            'style="DialogTitle.TLabel"' in comparison_source
+            and fake_style.configured.get("DialogTitle.TLabel", {}).get("foreground")
+                == T.PALETTE["accent"]),
         "comparison view contains no horizontal or vertical scrollbar": (
             "Scrollbar" not in comparison_source
             and "tk.Canvas" not in comparison_source),
@@ -492,6 +714,50 @@ def main():
                 T.FONT_HELPER_BOLD, T.FONT_MICRO, T.FONT_MICRO_BOLD,
                 T.FONT_PANE_TITLE, T.FONT_DIALOG_TITLE,
                 T.FONT_PROGRESS_TITLE,
+            )),
+        "classic and ttk secondary buttons share one hover direction": (
+            C._CLASSIC_BUTTON_ROLES["secondary"]["bg"] == T.PALETTE["surface2"]
+            and C._CLASSIC_BUTTON_ROLES["secondary"]["activebackground"]
+                == T.PALETTE["surface3"]
+            and C._CLASSIC_BUTTON_ROLES["secondary"]["activeforeground"]
+                == T.PALETTE["text"]
+            and C._CLASSIC_BUTTON_ROLES["compact"]["bg"] == T.PALETTE["surface2"]
+            and C._CLASSIC_BUTTON_ROLES["compact"]["activebackground"]
+                == T.PALETTE["surface3"]),
+        "major popup titles use shared gold dialog styles": (
+            fake_style.configured.get("DialogTitle.TLabel", {}).get("foreground")
+                == T.PALETTE["accent"]
+            and fake_style.configured.get("RaisedDialogTitle.TLabel", {}).get("foreground")
+                == T.PALETTE["accent"]
+            and fake_style.configured.get("RaisedDialogTitle.TLabel", {}).get("background")
+                == T.PALETTE["surface2"]
+            and combined_source.count('style="DialogTitle.TLabel"') >= 6
+            and combined_source.count('style="RaisedDialogTitle.TLabel"') >= 2),
+        "Close is consistently a compact secondary action": (
+            'text="Close", role="compact_primary"' not in combined_source
+            and 'text="Close", role="primary"' not in combined_source
+            and combined_source.count('text="Close", role="compact"') >= 4),
+        "count headings use one canonical card-count grammar": (
+            'text="RESULTS | 0 CARDS"' in combined_source
+            and 'MAINBOARD | {self.deck.total(\'main\')} CARDS' in combined_source
+            and 'SIDEBOARD | {self.deck.total(\'side\')} CARDS' in combined_source
+            and 'text="COMPARE | 0 CARDS SELECTED"' in comparison_controls_source
+            and 'RESULTS GALLERY | {count:,} CARDS' in sources["card_detail.py"]
+            and 'Cards Selected:' not in comparison_controls_source
+            and 'MAINBOARD | Cards:' not in combined_source
+            and 'SIDEBOARD | Cards:' not in combined_source),
+        "Gallery size control uses the shared themed scale role": (
+            'self.card_size_scale = ttk.Scale(' in sources["card_detail.py"]
+            and 'style="Gallery.Horizontal.TScale"' in sources["card_detail.py"]
+            and 'self.card_size_scale.pack(side="right", padx=(5, 15))' in sources["card_detail.py"]
+            and "Gallery.Horizontal.TScale" in fake_style.configured
+            and 'self.card_size_scale = tk.Scale(' not in sources["card_detail.py"]),
+        "obsolete one-off shared styles stay removed": all(
+            name not in fake_style.configured for name in (
+                "Card.TFrame", "Raised.TFrame", "Status.TLabel",
+                "Header.TLabel", "PreviewHeader.TLabel",
+                "PreviewMuted.TLabel", "Preview.TSeparator",
+                "SearchBoundary.TSeparator",
             )),
     }
 

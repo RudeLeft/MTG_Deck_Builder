@@ -11,7 +11,7 @@ from mtgdb.deck.legality import legality_problems
 from mtgdb.ui.components import AppButton, ClassicButton, deck_board_label
 from mtgdb.ui.tokens import (
     DECK_COLOR_SEGMENT_COLORS, DECK_TYPE_SEGMENT_COLORS, FONT_BODY,
-    FONT_DIALOG_TITLE, FONT_HELPER_BOLD, FONT_MICRO, MANA_NAMES,
+    FONT_HELPER_BOLD, FONT_MICRO, MANA_NAMES,
     PALETTE,
 )
 
@@ -120,6 +120,7 @@ class DeckStatsMixin:
                                ("By color", "color")):
                 ttk.Radiobutton(
                     controls, text=label, value=val, variable=self.curve_mode,
+                    style="DialogChoice.TRadiobutton",
                     command=self._on_curve_mode).pack(side="left", padx=(7, 0))
 
         curve = dashboard_section("MANA CURVE", actions=curve_actions)
@@ -142,10 +143,10 @@ class DeckStatsMixin:
 
         def hand_actions(header):
             AppButton(
-                header, text="Draw hand", role="compact",
+                header, text="Draw Hand", role="compact",
                 command=self._draw_hand).pack(side="right")
             self.hand_view_btn = AppButton(
-                header, text="View hand", role="compact", command=self._view_hand)
+                header, text="View Hand", role="compact", command=self._view_hand)
             self.hand_view_btn.pack(side="right", padx=(0, 6))
             self.hand_view_btn.state(["disabled"])
 
@@ -559,9 +560,9 @@ class DeckStatsMixin:
         shell = tk.Frame(popup, bg=p["surface"], padx=18, pady=16)
         shell.pack(fill="both", expand=True, padx=1, pady=1)
 
-        tk.Label(
-            shell, text="BASIC FORMAT CHECK", bg=p["surface"], fg=p["accent"],
-            font=FONT_DIALOG_TITLE).pack(anchor="w", pady=(0, 10))
+        ttk.Label(
+            shell, text="BASIC FORMAT CHECK", style="DialogTitle.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
 
         list_shell = tk.Frame(
             shell, bg=p["border"], highlightthickness=1,
@@ -595,7 +596,7 @@ class DeckStatsMixin:
         foot = tk.Frame(shell, bg=p["surface"])
         foot.pack(fill="x", pady=(12, 0))
         ClassicButton(
-            foot, text="Close", role="compact_primary", command=popup.destroy
+            foot, text="Close", role="compact", command=popup.destroy
         ).pack(side="right")
 
         popup.bind("<Escape>", lambda _e: popup.destroy())

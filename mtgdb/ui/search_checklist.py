@@ -10,10 +10,14 @@ from mtgdb.ui.components import (
     ClassicButton, ClassicCheckbutton, ClassicEntry, ClassicRadiobutton,
 )
 from mtgdb.ui.tokens import (
-    FONT_DIALOG_TITLE, FONT_HELPER, PALETTE, POPUP_PADDING,
+    FONT_HELPER, PALETTE, POPUP_PADDING,
 )
 
 log = logging.getLogger("mtg")
+
+HELPER_LABEL_WIDTH = 42
+HELPER_CONTROL_GAP = 6
+HELPER_CHOICE_GAP = 8
 
 
 class VirtualChecklistView(tk.Frame):
@@ -366,7 +370,7 @@ class SearchChecklistDialog:
     MODE_CHOICES = (("Any", "any"), ("All", "all"), ("None", "none"))
 
     def __init__(self, owner, *, title, values, selected, apply_callback,
-                 mode_var=None, mode_default="any", mode_label="Selected values:",
+                 mode_var=None, mode_default="any", mode_label="Match",
                  mode_choices=None, mode_command=None,
                  help_text="Type to narrow the list.", single_select=False):
         self.owner = owner
@@ -387,9 +391,8 @@ class SearchChecklistDialog:
             self.popup, bg=p["surface2"], padx=POPUP_PADDING[0], pady=POPUP_PADDING[1],
             highlightbackground=p["border"], highlightthickness=1)
         outer.pack(fill="both", expand=True)
-        self._title_label = tk.Label(
-            outer, text=title.upper(), bg=p["surface2"], fg=p["accent"],
-            font=FONT_DIALOG_TITLE)
+        self._title_label = ttk.Label(
+            outer, text=title.upper(), style="RaisedDialogTitle.TLabel")
         self._title_label.pack(anchor="w")
         self._help_label = tk.Label(
             outer, text=help_text, bg=p["surface2"], fg=p["muted"],
@@ -401,25 +404,36 @@ class SearchChecklistDialog:
         if mode_var is not None:
             mode = tk.Frame(outer, bg=p["surface2"])
             mode.pack(fill="x", pady=(0, 7))
+            mode.columnconfigure(0, minsize=HELPER_LABEL_WIDTH)
+            resolved_mode_choices = tuple(mode_choices or self.MODE_CHOICES)
             self._mode_label = tk.Label(
                 mode, text=mode_label, bg=p["surface2"], fg=p["text"],
                 font=FONT_HELPER)
-            self._mode_label.pack(side="left")
-            scope = mode_label.rstrip(":").lower()
+            self._mode_label.grid(row=0, column=0, sticky="w")
             meanings = {
-                "any": f"Any: a card only needs to match one of the selected {scope}.",
-                "all": f"All: a card must match every selected {scope}.",
-                "none": f"None: exclude every card matching any of the selected {scope}.",
-                "playable": "Playable: legal or restricted in the chosen format.",
-                "banned": "Banned: explicitly banned in the chosen format.",
-                "restricted": "Restricted: limited to one copy in the chosen format.",
+                "any": (
+                    "Any: a card only needs to match one selected choice. Selecting "
+                    "additional choices can broaden this filter."),
+                "all": (
+                    "All: a card must match every selected choice. Selecting additional "
+                    "choices narrows this filter."),
+                "none": "None: exclude cards that match any selected choice.",
+                "playable": (
+                    "Playable: include cards that are legal or restricted in the chosen "
+                    "format."),
+                "banned": "Banned: include only cards explicitly banned in the chosen format.",
+                "restricted": (
+                    "Restricted: include only cards limited to one copy in the chosen format."),
             }
-            for label, value in (mode_choices or self.MODE_CHOICES):
+            for column, (label, value) in enumerate(
+                    resolved_mode_choices, start=1):
                 radio = ttk.Radiobutton(
                     mode, text=label, variable=self.popup_mode, value=value,
                     style="DialogChoice.TRadiobutton",
                     command=self._on_mode_changed)
-                radio.pack(side="left", padx=(7, 0))
+                radio.grid(
+                    row=0, column=column, sticky="w",
+                    padx=(HELPER_CONTROL_GAP if column == 1 else HELPER_CHOICE_GAP, 0))
                 meaning = meanings.get(value)
                 if meaning:
                     owner._add_tooltip(radio, meaning)
@@ -464,7 +478,7 @@ class SearchChecklistDialog:
             help_text=help_text, mode_command=mode_command)
 
     def show(self, *, title, values, selected, apply_callback, mode_var=None,
-             mode_default="any", mode_label="Selected values:", help_text="",
+             mode_default="any", mode_label="Match", help_text="",
              mode_command=None):
         self.title = title
         self.apply_callback = apply_callback
@@ -571,7 +585,7 @@ def open_search_checklist(owner, **options):
             apply_callback=options.get("apply_callback"),
             mode_var=options.get("mode_var"),
             mode_default=options.get("mode_default", "any"),
-            mode_label=options.get("mode_label", "Selected values:"),
+            mode_label=options.get("mode_label", "Match"),
             help_text=options.get("help_text", "Type to narrow the list."),
             mode_command=options.get("mode_command"),
         )

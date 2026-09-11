@@ -15,6 +15,7 @@ from mtgdb.database.db import CardDB
 from mtgdb.search.controller import SearchController
 from mtgdb.search.models import SearchCriteria
 from mtgdb.database.search_queries import SearchQueryBuilder
+from mtgdb.database.semantics import _mana_cost_symbol_match
 from mtgdb.database.schema import _CARD_COLUMN_NAMES
 from mtgdb.search.repository import SEARCH_RESULT_COLUMNS, SearchRepository
 from mtgdb.search.results import SearchResultStore
@@ -29,10 +30,14 @@ from mtgdb.ui.search_filters import (
     is_standard,
 )
 from mtgdb.ui.components import format_display_name
+from mtgdb.ui.set_filters import (
+    ENGLISH_HELP, EXACT_SET_HELP, PLATFORM_HELP, PLATFORM_SECTION_HELP,
+    SET_TYPE_DESCRIPTIONS, SET_TYPE_HELP,
+)
 from mtgdb.search.catalogs import SearchCatalogController
 from mtgdb.search.context import (
     SearchContextController, SearchContextSnapshot, _PredictiveMembershipCounts,
-    _predict_colors, _predict_content, _predict_games,
+    _predict_colors, _predict_content, _predict_games, _predict_pips,
 )
 
 
@@ -199,6 +204,31 @@ class _FakeLabel:
             self.text = kwargs["text"]
 
 
+class _FakeContextControl:
+    def __init__(self, value=""):
+        self.value = value
+        self.disabled = False
+        self._mtg_context_available = True
+
+    def get(self):
+        return self.value
+
+    def state(self, spec):
+        for item in spec:
+            if item == "disabled":
+                self.disabled = True
+            elif item == "!disabled":
+                self.disabled = False
+
+
+class _FakeBoolVar:
+    def __init__(self, value=False):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+
 class _LoadingSearchOwner:
     def __init__(self):
         self._search_catalog_loading = True
@@ -334,15 +364,44 @@ def main():
             and "Owl Adventure" in _opt(traits=["multi_faced"])
             and _opt(traits=["multi_faced"]) | _opt(traits=["single_faced"])
             == _opt())
-        pips_count_per_colour = (
-            "Sagacious Owl" in _opt(pips=["G"], pip_min=2)
-            and "Sagacious Owl" not in _opt(pips=["G"], pip_min=3)
-            # A hybrid symbol counts for both of its colours, which is what
-            # devotion does and what "costs two green" is asked to mean.
-            and "Owl Adventure" in _opt(pips=["G"], pip_min=2)
-            and "Owl Adventure" in _opt(pips=["W"], pip_min=2)
-            # Two colours at once is an AND, not a colour-identity question.
-            and _opt(pips=["G", "W"], pip_min=2) == {"Owl Adventure"})
+        mana_symbol_total_semantics = (
+            # One hybrid can represent both selected colors for Match All, but
+            # is still only one physical symbol toward the total Minimum.
+            _mana_cost_symbol_match("{W/B}", "W,B", "all", 1) == 1
+            and _mana_cost_symbol_match("{W/B}", "W,B", "all", 2) == 0
+            and _mana_cost_symbol_match("{W/B}{W/B}", "W,B", "all", 2) == 1
+            and _mana_cost_symbol_match("{W}{B}", "W,B", "all", 2) == 1
+            and _mana_cost_symbol_match("{W}{W}", "W,B", "all", 2) == 0
+            # Any permits either selected color while the total can be supplied
+            # by multiple qualifying symbols. None ignores Minimum and excludes.
+            and _mana_cost_symbol_match("{W}{W}", "W,B", "any", 2) == 1
+            and _mana_cost_symbol_match("{W}{B}", "W,B", "none", 9) == 0
+            and _mana_cost_symbol_match("{U}{U}", "W,B", "none", 9) == 1
+            # Generic symbols never count; hybrid/Phyrexian symbols represent
+            # their selected color but each brace-delimited symbol counts once.
+            and _mana_cost_symbol_match("{W/B}{1}", "W,B", "all", 2) == 0
+            and _mana_cost_symbol_match("{W/P}{B/P}", "W,B", "all", 2) == 1
+            # The canonical SQL path uses the same semantics. With G+W and a
+            # total minimum of two, the all-hybrid Adventure satisfies All;
+            # the mono-green Saga only appears under Any.
+            and "Owl Adventure" in _opt(
+                pips=["G", "W"], pip_mode="all", pip_min=2)
+            and "Sagacious Owl" not in _opt(
+                pips=["G", "W"], pip_mode="all", pip_min=2)
+            and {"Owl Adventure", "Sagacious Owl"} <= _opt(
+                pips=["G", "W"], pip_mode="any", pip_min=2)
+            # Live candidate prediction uses the same physical-symbol total.
+            # Under Any, Black must occur itself; selected White cannot revive
+            # a Black candidate that never appears on a card.
+            and _predict_pips([
+                {"mana_cost": "{W/B}"}, {"mana_cost": "{W}{B}"},
+                {"mana_cost": "{W}{W}"}, {"mana_cost": "{U}{U}"},
+            ], ["W"], 2, "any")["B"] == 1
+            and _predict_pips([
+                {"mana_cost": "{W/B}"}, {"mana_cost": "{W}{B}"},
+                {"mana_cost": "{W}{W}"},
+            ], ["W"], 2, "all")["B"] == 1
+            and "pip_mode" in {field.name for field in fields(SearchCriteria)})
         colorless_adds_nothing_beside_a_colour = (
             _opt(colors=["W", "C"], color_mode="exact")
             == _opt(colors=["W"], color_mode="exact"))
@@ -385,6 +444,27 @@ def main():
         trait_mode_widens = (
             len(_opt(traits=["reserved", "single_faced"], trait_mode="any"))
             >= len(_opt(traits=["reserved", "single_faced"], trait_mode="all")))
+
+        # SRCH-034/045. Interactive property families are separate facets.
+        # Their groups AND with each other while each group owns its own mode.
+        independent_property_groups = (
+            _opt(mana_features=["hybrid_mana"]) == {"Owl Adventure"}
+            and _opt(special_properties=["multi_faced"]) == {"Owl Adventure"}
+            and _opt(
+                mana_features=["hybrid_mana"],
+                special_properties=["multi_faced"]) == {"Owl Adventure"}
+            and _opt(
+                special_properties=["multi_faced"],
+                special_property_mode="none") == _opt(traits=["single_faced"])
+            and _opt(
+                special_properties=["multi_faced", "top_heavy"],
+                special_property_mode="any") == {"Owl Adventure"}
+            and _opt(
+                special_properties=["multi_faced", "top_heavy"],
+                special_property_mode="all") == set()
+            and _opt(
+                special_properties=["multi_faced", "top_heavy"],
+                special_property_mode="none") == _opt() - {"Owl Adventure"})
 
         # SRCH-037. Negation was the largest remaining gap: nothing could ask
         # for a green non-creature, which is why hand-built negative traits
@@ -566,6 +646,33 @@ def main():
                 ).get("G") == 0
             )
 
+            # Independent property facets must stay active while a peer facet
+            # is relaxed for predictive counts. Owl Adventure is both hybrid
+            # and multi-faced; there is no top-heavy card in this fixture.
+            grouped_criteria = SearchCriteria.from_mapping({
+                "mana_features": ["hybrid_mana"],
+                "special_properties": ["multi_faced"],
+                "special_property_mode": "all",
+                "content_types": ["card"],
+            })
+            grouped_generation = context_controller.request(grouped_criteria)
+            deadline = time.monotonic() + 5.0
+            grouped_event = None
+            while time.monotonic() < deadline and grouped_event is None:
+                grouped_event = context_controller.poll_latest()
+                if grouped_event is None:
+                    time.sleep(0.01)
+            independent_property_context = (
+                grouped_event is not None
+                and grouped_event.generation == grouped_generation
+                and grouped_event.kind == "done"
+                and grouped_event.payload.result_count == 1
+                and grouped_event.payload.mana_feature_counts.get("hybrid_mana") == 1
+                and grouped_event.payload.special_property_counts.get("multi_faced") == 1
+                and grouped_event.payload.special_property_counts.get("top_heavy") == 0
+                and grouped_event.payload.status_property_counts.get(
+                    "not_universes_beyond") == 1)
+
             context_controller.request(
                 context_criteria, subtypes=[("Bird", "Creature")])
             latest_criteria = SearchCriteria.from_mapping({
@@ -586,63 +693,101 @@ def main():
                 and latest_event.signature == latest_criteria.signature()
                 and latest_event.kind == "done"
                 and latest_event.payload.result_count == 1)
-            # Flat single-column facets are answered by an in-engine GROUP BY
-            # whenever the user has that dimension filtered (which otherwise
-            # forces a dedicated row pull just to count the facet). The
-            # aggregate path MUST return exactly what applying each value
-            # returns; a chosen set type and rarity route set_type, rarity,
-            # set_code and games through SQL here.
-            flat_criteria = SearchCriteria.from_mapping({
-                "set_types": ["expansion"], "rarities": ["common"],
-                "games": ["paper"], "content_types": ["card"],
-            })
-            flat_generation = context_controller.request(
-                flat_criteria,
-                rarities=["common", "uncommon", "rare"],
-                set_types=["expansion", "alchemy"],
-                sets=[("tst", "Test Set"), ("ana", "Arena Set"),
-                      ("tst2", "Second Test Set")])
-            deadline = time.monotonic() + 5.0
-            flat_event = None
-            while time.monotonic() < deadline and flat_event is None:
-                flat_event = context_controller.poll_latest()
-                if flat_event is None:
-                    time.sleep(0.01)
-
-            def _flat_truth(field, value, **extra):
-                base = {"rarities": ["common"], "set_types": ["expansion"],
-                        "games": ["paper"], "content_types": ["card"],
-                        "columns": ("id",)}
-                base.pop(field, None)
-                base.update(extra)
-                base[field] = [value]
-                return len(db.search(**base))
-
-            flat_sql_matches_reality = (
-                flat_event is not None
-                and flat_event.generation == flat_generation
-                and flat_event.kind == "done"
-                # set_type: relaxing it drops set_types, so each value's count
-                # is that value applied against the rest (rarity=common).
-                and all(
-                    flat_event.payload.set_type_counts.get(value, 0)
-                    == _flat_truth("set_types", value)
-                    for value in ("expansion", "alchemy"))
-                and all(
-                    flat_event.payload.rarity_counts.get(value, 0)
-                    == _flat_truth("rarities", value)
-                    for value in ("common", "uncommon", "rare"))
-                # set_code counts come from the GROUP BY path too.
-                and all(
-                    flat_event.payload.set_counts.get(value, 0)
-                    == _flat_truth("set_codes", value)
-                    for value in ("tst", "ana", "tst2"))
-                and all(
-                    flat_event.payload.game_counts.get(value, 0)
-                    == _flat_truth("games", value)
-                    for value in ("paper", "arena", "mtgo")))
         finally:
             context_controller.shutdown(timeout=2.0)
+
+        # SRCH-045. Dungeon is a compact real-world applicability probe: its
+        # rules-derived mana value is 0, but it has no meaningful mana cost, so
+        # the interactive Mana Value range is inapplicable. It also has no P/T,
+        # loyalty, defense, mana production, or mana symbols. It is colorless as
+        # a card, so the Mana Color C candidate remains compatible even though
+        # Mana Produced C does not. Keeping this in a separate database avoids
+        # perturbing the broad fixture counts above.
+        dungeon_db = CardDB(os.path.join(temporary_directory, "dungeon.db"))
+        dungeon_db.load_cards([dict(
+            _card("d1", "Lost Mine of Phandelver"),
+            type_line="Dungeon", layout="dungeon", mana_cost="", cmc=0,
+            colors=[], color_identity=[], produced_mana=[],
+            power=None, toughness=None, loyalty=None, defense=None,
+        )])
+        dungeon_context = SearchContextController(SearchRepository(dungeon_db))
+        try:
+            dungeon_criteria = SearchCriteria.from_mapping({
+                "card_types": ["Dungeon"], "content_types": ["card"],
+            })
+            dungeon_generation = dungeon_context.request(
+                dungeon_criteria, card_types=["Dungeon"])
+            deadline = time.monotonic() + 5.0
+            dungeon_event = None
+            while time.monotonic() < deadline and dungeon_event is None:
+                dungeon_event = dungeon_context.poll_latest()
+                if dungeon_event is None:
+                    time.sleep(0.01)
+            dungeon_snapshot = (
+                dungeon_event.payload
+                if dungeon_event is not None
+                and dungeon_event.generation == dungeon_generation
+                and dungeon_event.kind == "done"
+                else None
+            )
+            dungeon_dynamic_applicability = bool(
+                dungeon_snapshot is not None
+                and dungeon_snapshot.result_count == 1
+                and dungeon_snapshot.numeric_ranges.get("cmc") == (0.0, 0.0)
+                and dungeon_snapshot.numeric_applicability.get("cmc") == 0
+                and dungeon_snapshot.numeric_applicability.get("power") == 0
+                and dungeon_snapshot.numeric_applicability.get("toughness") == 0
+                and dungeon_snapshot.numeric_applicability.get("loyalty") == 0
+                and dungeon_snapshot.numeric_applicability.get("defense") == 0
+                and dungeon_snapshot.release_years == ("2026",)
+                and dungeon_snapshot.color_counts.get("C") == 1
+                and all(dungeon_snapshot.color_counts.get(c, 0) == 0
+                        for c in "WUBRG")
+                and all(dungeon_snapshot.produces_counts.get(c, 0) == 0
+                        for c in "WUBRGC")
+                and all(dungeon_snapshot.pip_counts.get(c, 0) == 0
+                        for c in "WUBRGC")
+            )
+        finally:
+            dungeon_context.shutdown(timeout=2.0)
+            dungeon_db.close()
+
+        mana_value_db = CardDB(os.path.join(temporary_directory, "mana-value-applicability.db"))
+        mana_value_db.load_cards([
+            dict(_card("z0", "Zero Cost Spell"), type_line="Artifact",
+                 mana_cost="{0}", cmc=0, colors=[], color_identity=[]),
+            dict(_card("dfc", "Front // Back"), type_line="Creature",
+                 mana_cost="", cmc=2, colors=["U"], color_identity=["U"],
+                 card_faces=[{"name": "Front", "mana_cost": "{1}{U}"},
+                             {"name": "Back", "mana_cost": ""}]),
+            dict(_card("land0", "No-Cost Land"), type_line="Land",
+                 mana_cost="", cmc=0, colors=[], color_identity=[]),
+        ])
+        mana_value_context = SearchContextController(SearchRepository(mana_value_db))
+        try:
+            mana_value_generation = mana_value_context.request(
+                SearchCriteria.from_mapping({"content_types": ["card"]}))
+            deadline = time.monotonic() + 5.0
+            mana_value_event = None
+            while time.monotonic() < deadline and mana_value_event is None:
+                mana_value_event = mana_value_context.poll_latest()
+                if mana_value_event is None:
+                    time.sleep(0.01)
+            mana_value_snapshot = (
+                mana_value_event.payload
+                if mana_value_event is not None
+                and mana_value_event.generation == mana_value_generation
+                and mana_value_event.kind == "done"
+                else None
+            )
+            meaningful_mana_value_applicability = bool(
+                mana_value_snapshot is not None
+                and mana_value_snapshot.numeric_ranges.get("cmc") == (0.0, 2.0)
+                and mana_value_snapshot.numeric_applicability.get("cmc") == 2
+            )
+        finally:
+            mana_value_context.shutdown(timeout=2.0)
+            mana_value_db.close()
         db.close()
 
     checklist_source = (ROOT / "mtgdb/ui/search_checklist.py").read_text(encoding="utf-8")
@@ -776,8 +921,8 @@ def main():
             search_source, "_initialize_search_filter_state")
         for name in ("q_rules", "_format_btn", "_rarity_btn", "_subtype_btn",
                      "_keyword_btn", "_search_scope_btn", "_card_form_btn",
-                     "_mana_cost_features_btn", "_faces_btn",
-                     "_pt_properties_btn", "_status_properties_btn",
+                     "_mana_cost_features_btn", "_special_properties_btn",
+                     "_status_properties_btn",
                      "_property_chip_frame")
     )
 
@@ -802,7 +947,38 @@ def main():
         "if widget is None:" in _method_body(
             search_source, "_set_search_entry_text"))
 
+    context_owner = object.__new__(SearchFeatureMixin)
+    empty_low = _FakeContextControl()
+    empty_high = _FakeContextControl()
+    context_owner._set_context_field_pair_availability(
+        (empty_low, empty_high), False)
+    filled_low = _FakeContextControl("3")
+    filled_high = _FakeContextControl()
+    context_owner._set_context_field_pair_availability(
+        (filled_low, filled_high), False)
+    unavailable_pip = _FakeContextControl()
+    selected_pip = _FakeContextControl()
+    SearchFeatureMixin._set_context_check_availability(
+        unavailable_pip, _FakeBoolVar(False), False)
+    SearchFeatureMixin._set_context_check_availability(
+        selected_pip, _FakeBoolVar(True), False)
+
     checks = {
+        "Dungeon live context treats no-cost mana value 0 as inapplicable": (
+            dungeon_dynamic_applicability),
+        "Mana Value applicability accepts literal zero costs and face-derived costs": (
+            meaningful_mana_value_applicability),
+        "live context grays inapplicable ranges and mana choices without trapping selections": (
+            empty_low.disabled and empty_high.disabled
+            and not filled_low.disabled and not filled_high.disabled
+            and unavailable_pip.disabled and not selected_pip.disabled
+            and not unavailable_pip._mtg_context_available
+            and not selected_pip._mtg_context_available
+            and 'if key in {"cmc", "power", "toughness", "loyalty", "defense"}' in search_source
+            and 'bool(snapshot.release_years)' in search_source
+            and 'snapshot.color_counts' in search_source
+            and 'snapshot.produces_counts' in search_source
+            and 'snapshot.pip_counts' in search_source),
         "Supertypes has a visible mode row and defaults to Any": (
             # It defaulted to All with no control to change it, so selecting
             # two supertypes silently reduced the search to the 17 cards that
@@ -810,16 +986,39 @@ def main():
             'self.q_supertype_mode = tk.StringVar(value="any")' in search_source
             and "self._build_mode_row(" in _method_body(
                 search_source, "_build_standard_type_line_filters")),
-        "every Any/All/None row comes from one builder": (
-            # Card Type hand-built its row and silently kept only Any and All
-            # when None was added everywhere else. One construction point means
-            # a new mode reaches every row at once.
+        "every Any/All/None row comes from one compact Match builder": (
+            # Card Type once hand-built its row and silently kept only Any and
+            # All when None was added elsewhere. One construction point still
+            # owns the modes, but the Search form now clusters them instead of
+            # stretching three radio buttons across the full control width.
             ("None", "none") in SearchFeatureMixin.MODE_ROW_CHOICES
             and ("None", "none") in SearchChecklistDialog.MODE_CHOICES
             and "self._build_mode_row(" in _method_body(
                 search_source, "_build_card_type_filters")
             and "self._build_mode_row(" in _method_body(
                 search_source, "_build_standard_type_line_filters")
+            and "mode_var=self.q_mana_feature_mode" in _method_body(
+                search_source, "_build_filter_mana_cost_features")
+            and "mode_var=self.q_special_property_mode" in _method_body(
+                search_source, "_build_filter_special_properties")
+            and "mode_var=self.q_status_property_mode" in _method_body(
+                search_source, "_build_filter_status_properties")
+            and 'text=MATCH_MODE_LABEL' in _method_body(
+                search_source, "_build_mode_row")
+            and 'minsize=MATCH_MODE_LABEL_WIDTH' in _method_body(
+                search_source, "_build_mode_row")
+            and 'MATCH_MODE_CHOICE_GAP' in _method_body(
+                search_source, "_build_mode_row")
+            and 'uniform="search-mode-choice"' not in _method_body(
+                search_source, "_build_mode_row")
+            and 'mode_box.grid(row=1, column=0, sticky="ew"' in _method_body(
+                search_source, "_build_rules_text_filter")
+            # Picker dialogs use the same compact helper hierarchy rather than
+            # stretching their mode choices across the popup.
+            and 'HELPER_LABEL_WIDTH = 42' in (
+                ROOT / "mtgdb/ui/search_checklist.py").read_text(encoding="utf-8")
+            and 'uniform="picker-mode-choice"' not in (
+                ROOT / "mtgdb/ui/search_checklist.py").read_text(encoding="utf-8")
             # The triple appears exactly once: as MODE_ROW_CHOICES itself.
             and search_source.count(
                 '(("Any", "any"), ("All", "all"), ("None", "none"))') == 1),
@@ -835,9 +1034,11 @@ def main():
             legality_states_are_distinct),
         "printing type re-scopes the set vocabulary": (
             platform_scopes_the_vocabulary),
-        "card traits combine with Any by default": (
+        "property groups combine internally with Any by default": (
             trait_mode_widens
-            and 'self.q_trait_mode = tk.StringVar(value="any")' in search_source),
+            and 'self.q_mana_feature_mode = tk.StringVar(value="any")' in search_source
+            and 'self.q_special_property_mode = tk.StringVar(value="any")' in search_source
+            and 'self.q_status_property_mode = tk.StringVar(value="any")' in search_source),
         "Search Clear returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
                 search_source, "_clear_search")),
@@ -870,13 +1071,48 @@ def main():
                 word in text.casefold()
                 for text in ([entry["tooltip"] for entry in FILTER_DEFINITIONS]
                              + list(STANDARD_FILTER_TOOLTIPS.values()))
-                for word in ("scryfall", "database", "snapshot"))
+                for word in ("scryfall", "database", "snapshot", "api", "trusted vocabulary"))
             # Every standard filter is explained too, whether its wording
             # comes from the registry or from the hand-built dict, and one
             # lookup serves both so neither can be described twice.
             and all(filter_tooltip(key) for key in STANDARD_FILTERS)
             and set(STANDARD_FILTER_TOOLTIPS) <= set(STANDARD_FILTERS)
             and "_add_standard_filter_tooltip" in printings_source),
+        "tooltips belong only to Search filters, not Search actions": (
+            "_add_tooltip(" not in _method_body(search_source, "_build_search_actions")
+            and "_add_tooltip(" not in _method_body(search_source, "_build_advanced_filter_zone")
+            and "_add_tooltip(" in _method_body(search_source, "_build_color_filters")
+            and "_add_tooltip(" in _method_body(search_source, "_build_mode_row")
+            # Shared Printings presentation defaults tooltips off; Search is the
+            # interactive filter caller that explicitly enables them.
+            and "tooltips_enabled=False" in printings_source
+            and "if not self._tooltips_enabled:" in printings_source
+            and "tooltips_enabled=True" in printings_source),
+        "Search filter tooltip controls do not expose implementation provenance": (
+            not any(
+                forbidden in body.casefold()
+                for body in (
+                    _method_body(search_source, "_build_color_filters"),
+                    _method_body(search_source, "_build_produces_filter"),
+                    _method_body(search_source, "_build_filter_mana_pips"),
+                    _method_body(search_source, "_numeric_pair"),
+                    _method_body(search_source, "_build_mode_row"),
+                    _method_body(search_source, "_context_choice_text"),
+                    _method_body(search_source, "_context_range_text"),
+                )
+                for forbidden in (
+                    "scryfall", "database", "snapshot", " api ",
+                    "trusted vocabulary", "storage field", "query name",
+                )
+            )),
+        "live tooltip context explains counts and unavailable choices": (
+            'tooltip_key="card_type"' in search_source
+            and 'tooltip_key="supertypes"' in search_source
+            and "_context_choice_text" in search_source
+            and "match this" in _method_body(search_source, "_context_choice_text")
+            and "Not available with the current filters" in search_source
+            and "It stays available so you can deselect it" in search_source
+            and "cards have numeric" in _method_body(search_source, "_context_range_text")),
         "format names are spelled out rather than run together": (
             format_display_name("paupercommander") == "Pauper Commander"
             and format_display_name("standardbrawl") == "Standard Brawl"
@@ -934,7 +1170,7 @@ def main():
         "the standard set is on the form in the order a search is built": (
             STANDARD_FILTERS
             == ("name", "supertypes", "card_type", "subtype",
-                "colors", "stats", "printings")
+                "colors", "stats")
             # Power/Toughness is a standard row now, so it is built by the
             # form rather than reached through the advanced panel.
             and "self._build_standard_type_line_filters(form)" in _method_body(
@@ -944,14 +1180,18 @@ def main():
             and all(is_standard(key) for key in STANDARD_FILTERS)),
         "advanced holds every other filter, grouped and in registry order": (
             set(catalog_keys) | set(STANDARD_FILTERS)
-            == set(FILTER_BY_KEY) | {"name", "colors", "card_type", "printings"}
+            == set(FILTER_BY_KEY) | {"name", "colors", "card_type"}
             and not (set(catalog_keys) & set(STANDARD_FILTERS))
             # Category order is the registry's, so a filter is always in the
             # same place rather than wherever it was opened first.
             and [category for category, _entries in catalog]
             == [c for c in CATEGORY_ORDER]
             and advanced_filter_keys()[:4]
-            == ("search_scope", "mana_value", "produces", "mana_pips")),
+            == ("search_scope", "mana_value", "produces", "mana_pips")
+            and any(
+                category == "Printing & Status"
+                and entries and entries[0]["key"] == "printings"
+                for category, entries in catalog)),
         "advanced rows are built once and only hidden": (
             "def _build_advanced_filter_rows(" in search_source
             and "self._advanced_host.pack_forget()" in _method_body(
@@ -1013,35 +1253,45 @@ def main():
         "range boxes and pip counts say how they combine": (
             "RANGE_BOUNDS_HELP" in search_source
             and "PIP_SELECTION_HELP" in search_source
-            and "Both numbers are included" in search_source
-            # Colored pips is the one colour control that means and, not or.
-            and "rather than or" in search_source),
+            and "Min and Max are inclusive" in search_source
+            and "Minimum is the total number" in search_source
+            and "counts as one symbol toward Minimum" in search_source
+            and 'self.q_pip_mode' in search_source),
         "tooltips say what is matched, not what the control is": (
-            # Each of these names the boundary its filter is confused with:
-            # Produces against colour, Mechanics against rules text, Rarity
-            # against the card rather than the printing.
-            "not the same as its color" in tooltips["produces"]
-            and "rules text" in tooltips["mechanics"]
+            # Confusable filter families explain their boundaries explicitly.
+            "separate from" in tooltips["produces"]
+            and "Rules Text" in tooltips["mechanics"]
             and "rules text" in tooltips["rules_text"]
-            and "planeswalker" in tooltips["loyalty"]
-            and "printing" in tooltips["rarity"]
-            # Loyalty and Defense are separate because no card has both;
-            # the tooltip has to say so or the split looks arbitrary.
-            and "no card has both" in tooltips["defense"]
-            # A tooltip that describes a control has to describe the one that
-            # is there: Colors grew a second row, Rules text grew a third
-            # mode, and Card traits carries the only route to tokens.
-            and "Look at" in filter_tooltip("colors")
-            # 58 paper cards carry Legendary only on the back face and are
-            # matched, which the wording has to admit.
+            and "planeswalkers" in tooltips["loyalty"]
+            and "qualifying printing" in tooltips["rarity"]
+            and "separate characteristics" in tooltips["defense"]
+            # Mana Color explains both secondary control rows and the colorless distinction.
+            and "Color Identity" in filter_tooltip("colors")
+            and "Card Colors" in filter_tooltip("colors")
+            and "Within" in filter_tooltip("colors")
+            and "Contains" in filter_tooltip("colors")
+            and "Exactly" in filter_tooltip("colors")
+            # Multi-faced type-line behavior and negative rules-text matching are explicit.
             and "either face" in tooltips["supertypes"]
-            and "none of them" in tooltips["rules_text"]
+            and "None excludes" in tooltips["rules_text"]
             and "Tokens" in tooltips["search_scope"]
-            # The labels on the controls are American; the tooltips beside
-            # them cannot be British.
+            # The labels on the controls are American; the tooltips beside them cannot be British.
             and not any(
                 "colour" in filter_tooltip(key).casefold()
-                for key in STANDARD_FILTERS + advanced_filter_keys())),
+                for key in STANDARD_FILTERS + advanced_filter_keys())
+            # Search Printings help follows the same behavior-only rule.
+            and not any(
+                forbidden in text.casefold()
+                for text in (
+                    tuple(PLATFORM_HELP.values())
+                    + (PLATFORM_SECTION_HELP, SET_TYPE_HELP, EXACT_SET_HELP, ENGLISH_HELP)
+                    + tuple(SET_TYPE_DESCRIPTIONS.values())
+                )
+                for forbidden in (
+                    "scryfall", "database", "snapshot", " api ",
+                    "trusted vocabulary", "storage field", "query name",
+                )
+            )),
         "every card trait has a query clause or selects content": (
             # Content traits choose which objects the search covers instead of
             # adding a clause, so they are satisfied by content_types.
@@ -1052,6 +1302,17 @@ def main():
         "card traits narrow the query and unknown keys are ignored": (
             traits_narrow_the_query
             and unknown_trait_is_ignored_not_widening),
+        "property families are independent facets with local modes": (
+            independent_property_groups
+            and "mana_features" in SearchCriteria.__dataclass_fields__
+            and "special_properties" in SearchCriteria.__dataclass_fields__
+            and "status_properties" in SearchCriteria.__dataclass_fields__
+            and "builder.add_property_filters(mana_features, mana_feature_mode)"
+                in search_query_source
+            and "builder.add_property_filters(special_properties, special_property_mode)"
+                in search_query_source
+            and "builder.add_property_filters(status_properties, status_property_mode)"
+                in search_query_source),
         "release bounds are inclusive years": release_bounds_are_inclusive,
         "the content scope can narrow as well as widen": (
             # While Cards could not be turned off, asking to see the tokens
@@ -1079,13 +1340,17 @@ def main():
                 search_source, "_choose_search_scope")
             and "self._content_types_from_traits()" in _method_body(
                 search_source, "_choose_search_scope")),
-        "search scope is separate from the property mode row": (
-            # Tokens/Emblems/Art Series choose the searched universe and are
-            # explicitly excluded from the trait clauses Any/All/None governs.
-            "keys - set(CONTENT_TRAIT_KEYS)" in _method_body(
-                search_source, "_selected_trait_keys")
-            and "q_trait_mode" not in _method_body(
-                search_source, "_choose_search_scope")),
+        "search scope is separate from property match modes": (
+            # Tokens/Emblems/Art Series choose the searched universe and never
+            # enter any of the independent boolean-property facets.
+            "q_mana_feature_mode" not in _method_body(
+                search_source, "_choose_search_scope")
+            and "q_special_property_mode" not in _method_body(
+                search_source, "_choose_search_scope")
+            and "q_status_property_mode" not in _method_body(
+                search_source, "_choose_search_scope")
+            and 'traits=(), trait_mode="any"' in _method_body(
+                search_source, "_capture_search_criteria")),
         "Produces is restored after its row exists": (
             # Its checkboxes belong to an optional row, so a restore that runs
             # before the rebuild is discarded with the widgets that held it.
@@ -1113,7 +1378,7 @@ def main():
                               "Loyalty", "Defense", "Released"))
             and _method_body(search_source, "_capture_search_criteria").count(
                 "self._validate_search_range(") >= 4),
-        "Colors can look at either colour column": (
+        "Mana Color can look at either color column": (
             colour_scope_selects_the_column
             and "self.q_color_scope = tk.StringVar(value=\"identity\")"
             in search_source
@@ -1121,9 +1386,15 @@ def main():
                 search_source, "_capture_search_criteria")
             and '"color_scope": self.q_color_scope.get(),' in _method_body(
                 search_source, "_capture_search_workspace_state")
-            # The mode row names the column it compares, so "Color identity:"
-            # cannot sit above a search of the card's own colours.
-            and "COLOR_SCOPE_LABELS" in search_source),
+            # The Search form uses one stable secondary hierarchy regardless
+            # of which color field is active: Use chooses the field and Match
+            # chooses Within / Contains / Exactly.
+            and 'COLOR_SCOPE_LABEL = "Use"' in search_source
+            and 'text=COLOR_SCOPE_LABEL' in _method_body(
+                search_source, "_build_color_filters")
+            and 'text=MATCH_MODE_LABEL' in _method_body(
+                search_source, "_build_color_filters")
+            and 'COLOR_SCOPE_LABELS' not in search_source),
         "colorless releases itself instead of being dropped in silence": (
             # W plus Colorless returned exactly the mono-white result: an
             # identity cannot be both, so the query ignored the C.
@@ -1157,13 +1428,13 @@ def main():
             faces_decide_multi_faced
             and "MULTI_FACE_LAYOUTS" not in search_query_source
             and "HAS_FACES_CLAUSE" in search_query_source),
-        "colored pips are counted at import, once per colour": (
-            pips_count_per_colour
+        "mana symbols use physical-symbol totals without double-counting hybrids": (
+            mana_symbol_total_semantics
             and all(f"pips_{c}" in _CARD_COLUMN_NAMES for c in "wubrgc")
-            # Counting them in SQL cannot use an index and cannot see the
-            # hybrid halves; the parser at import can do both.
+            # Import-time per-color counts remain cheap presence prefilters,
+            # while the cost parser owns the physical-symbol total semantics.
             and "_mana_pips" in bulk_import_source
-            and "LENGTH(mana_cost)" not in search_query_source),
+            and "MANA_COST_SYMBOL_MATCH" in search_query_source),
         "a removed filter leaves nothing of itself behind": (
             # Printed in was built and then not wanted. A criterion with no
             # control is the orphan SRCH-039 forbids, and a stored column with
@@ -1227,12 +1498,12 @@ def main():
             and cached.kind == "unchanged"),
         "context worker prepares data-derived facets off the Search path": (
             context_worker_prepares_facets),
-        "context answers flat facets in SQL without changing counts": (
-            flat_sql_matches_reality),
         "Any facet compatibility does not let a selected OR peer revive zero options": (
             any_peer_does_not_inflate_zero),
         "union-style facets do not let selected peers revive zero options": (
             union_facets_do_not_inflate_zero),
+        "independent property facets preserve cross-filter predictive counts": (
+            independent_property_context),
         "context worker publishes only the newest requested generation": (
             context_worker_is_latest_wins),
         "live draft context uses the same criteria adapter as manual Search": (
@@ -1248,7 +1519,8 @@ def main():
                 "card_type_counts", "supertype_counts", "subtype_counts",
                 "keyword_counts", "color_counts", "produces_counts",
                 "layout_counts", "rarity_counts", "numeric_ranges",
-                "release_years", "trait_counts", "pip_counts",
+                "release_years", "trait_counts", "mana_feature_counts",
+                "special_property_counts", "status_property_counts", "pip_counts",
                 "content_counts", "game_counts", "set_type_counts",
                 "set_counts", "format_counts", "english_count"))),
         "broad live totals use canonical SQL count rather than result materialization": (
@@ -1327,7 +1599,8 @@ def main():
             and "self._build_name_filter(form)" in search_source
             and "self._build_standard_type_line_filters(form)" in search_source
             and "self._build_color_filters(form, row=5)" in search_source
-            and "self._build_printing_filter(form, row=7)" in search_source
+            and "self._build_printing_filter(form, row=8)" not in search_source
+            and "def _build_filter_printings(" in search_source
             and "self._build_advanced_filter_zone(parent)" in search_source
             # Every registry filter still has a builder: Advanced is where the
             # rows live now, not a second way of declaring them.
@@ -1352,7 +1625,8 @@ def main():
             and subtype_eleven_summary.endswith("+1")
             and "single_line=True" in search_source),
         "Card Name spans the primary row and English only lives in Printings": (
-            'text="Card Name"' in search_source
+            'form, "Card Name", row=0, pady=SEARCH_ROW_PADY, tooltip_key="name"'
+            in search_source
             and 'row=0, column=1, columnspan=3, sticky="ew"' in search_source
             and 'text="English only"' not in search_source
             and 'text="English only"' in printings_source

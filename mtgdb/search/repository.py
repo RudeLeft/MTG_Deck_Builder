@@ -47,16 +47,6 @@ class SearchRepository:
         return self._db.count_search(
             connection=connection, **criteria.query_arguments())
 
-    def group_counts(self, criteria: SearchCriteria, connection, column):
-        """Per-value counts for one stored column via SQL GROUP BY."""
-        return self._db.group_count_search(
-            connection=connection, column=column, **criteria.query_arguments())
-
-    def platform_counts(self, criteria: SearchCriteria, connection):
-        """Per-platform (paper/arena/mtgo) counts via one aggregate query."""
-        return self._db.platform_count_search(
-            connection=connection, **criteria.query_arguments())
-
     def card_by_id(self, card_id):
         return self._db.get_card(card_id)
 

@@ -7,6 +7,7 @@ controls are intentionally not part of this view.
 """
 
 import tkinter as tk
+from tkinter import ttk
 
 from mtgdb.comparison.models import (
     # MAX_COMPARISON_CARDS is re-exported for the UI component contract test,
@@ -27,7 +28,6 @@ from mtgdb.ui.tokens import (
     COMPARISON_WINDOW_MIN_SIZE,
     COMPARISON_WINDOW_SIZE,
     FONT_BODY,
-    FONT_DIALOG_TITLE,
     FONT_HELPER,
     FONT_MICRO,
     PALETTE,
@@ -112,13 +112,12 @@ class CardComparisonWindow:
         p = PALETTE
         header = tk.Frame(self.top, bg=p["surface"], padx=12, pady=9)
         header.pack(fill="x")
-        self.title_label = tk.Label(
-            header, text=self._view_title.upper(), bg=p["surface"],
-            fg=p["accent"], font=FONT_DIALOG_TITLE
+        self.title_label = ttk.Label(
+            header, text=self._view_title.upper(), style="DialogTitle.TLabel"
         )
         self.title_label.pack(side="left")
         AppButton(
-            header, text="Close", role="compact_primary", command=self.close
+            header, text="Close", role="compact", command=self.close
         ).pack(side="right")
         self.clear_button = None
         if self._static_cards is None:

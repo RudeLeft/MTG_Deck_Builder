@@ -315,7 +315,7 @@ def main():
     )
     global_comparison_bar = (
         'text="Add Selected"' in controls_source
-        and 'text="COMPARE | Cards Selected: 0"' in controls_source
+        and 'text="COMPARE | 0 CARDS SELECTED"' in controls_source
         and 'self._build_comparison_bar(parent)' in deck_source
         and '_build_comparison_bar' not in search_source
     )
@@ -359,11 +359,11 @@ def main():
         "global comparison bar accepts mixed Results and deck selections": mixed_sources_compare,
         "comparison selected count matches the exact mixed-source union": mixed_selection_count == 3,
         "comparison selected label sits beside COMPARE with explicit wording": (
-            'text="COMPARE | Cards Selected: 0"' in controls_source
-            and 'text=f"COMPARE | Cards Selected: {selected_count}{over_limit_note}"'
+            'text="COMPARE | 0 CARDS SELECTED"' in controls_source
+            and 'text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}"'
                 in controls_source),
         "an over-limit selection appends the explicit too-many wording": (
-            'COMPARISON_OVER_LIMIT_NOTE = " (Too Many Cards Selected)"'
+            'COMPARISON_OVER_LIMIT_NOTE = " (TOO MANY CARDS SELECTED)"'
                 in controls_source
             and 'over_limit_note = COMPARISON_OVER_LIMIT_NOTE if over_limit else ""'
                 in controls_source),

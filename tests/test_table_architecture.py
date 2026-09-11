@@ -196,6 +196,9 @@ def main():
         path.write_text(json.dumps({"unrelated": {"keep": True}}), encoding="utf-8")
         repository = UIPreferencesRepository(path)
         repository.save_table_columns(migrated)
+        repository.save_search_type_line_catalogs(
+            ["Creature", "Land"], ["Legendary", "Basic"])
+        warm_catalogs = repository.load_search_type_line_catalogs()
         stored = json.loads(path.read_text(encoding="utf-8"))
         no_temporary_file = not path.with_name(path.name + ".tmp").exists()
         path.write_text("not valid json", encoding="utf-8")
@@ -354,6 +357,13 @@ def main():
             and stored["table_columns_version"] == TABLE_COLUMNS_VERSION
             and stored["table_columns"] == migrated
             and no_temporary_file),
+        "trusted Type Line warm-start labels persist without becoming taxonomy": (
+            warm_catalogs == {
+                "card_types": ("Creature", "Land"),
+                "supertypes": ("Legendary", "Basic"),
+            }
+            and stored.get("search_type_line_catalogs", {}).get("card_types")
+                == ["Creature", "Land"]),
         "invalid preference files safely fall back": invalid_fallback == {},
         "preference persistence is Tk-free": "tkinter" not in preference_source,
         "column popup is built hidden before mapping": (
@@ -373,7 +383,7 @@ def main():
         "column Reset restores default order visibility and widths in one click": reset_geometry_ok,
         "column popup clear is scoped while header clear removes all view filters": (
             'text="Clear table filters"' not in filter_source
-            and 'text="Clear this"' in filter_source
+            and 'text="Clear This"' in filter_source
             and 'self._clear_table_filter(view, key)' in filter_source
             and 'self._clear_table_filter("results")' in search_source
             and 'self._clear_table_filter("main")' in deck_source

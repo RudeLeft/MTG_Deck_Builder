@@ -117,9 +117,11 @@ def deck_from_text(text, resolver, name="Imported Deck", fmt="commander",
     """Parse a TXT decklist and return ``(deck, unresolved_names)``.
 
     A trailing ``[SET]`` or ``[SET:COLLECTOR]`` tag is authoritative and
-    bypasses picker restrictions. Untagged cards honor the supplied Paper,
-    language, Set Type, and Exact Set scope from the shared Printings picker.
-    Mainboard, sideboard, and ignored section semantics match the legacy importer.
+    bypasses optional resolver restrictions. Untagged cards honor any explicit
+    scope arguments supplied by the caller; the interactive Open Deck workflow
+    deliberately supplies no such restrictions and resolves against the complete
+    local card database. Mainboard, sideboard, and ignored section semantics
+    match the legacy importer.
     """
     if deck_class is None:
         from mtgdb.deck.model import Deck

@@ -31,11 +31,47 @@ log = logging.getLogger("mtg")
 CARD_TYPE_MIN_COLUMNS = 4
 CARD_TYPE_MAX_COLUMNS = 5
 SUPERTYPE_COLUMNS = 5
+CARD_TYPE_LOADING_SLOTS = CARD_TYPE_MIN_COLUMNS * 3
+SUPERTYPE_LOADING_SLOTS = SUPERTYPE_COLUMNS
 CHIP_GRID_X_GAP = 4
-SEARCH_ROW_PADY = 3
+CHIP_GRID_Y_GAP = 2
+SEARCH_ROW_PADY = 2
+ADVANCED_ROW_PADY = 1
+MODE_ROW_PADY = (1, 0)
+MATCH_MODE_LABEL = "Match"
+COLOR_SCOPE_LABEL = "Use"
+SECONDARY_LABEL_WIDTH = 42
+SECONDARY_CONTROL_GAP = 6
+SECONDARY_HELPER_GAP = 6
+MATCH_MODE_LABEL_WIDTH = SECONDARY_LABEL_WIDTH
+MATCH_MODE_CHOICE_GAP = 8
+TYPE_LINE_HEADING_PADY = (5, 1)
+ADVANCED_HEADER_PADY = (4, 0)
+ADVANCED_SECTION_HEADING_PADY = (6, 1)
 # Keeps every advanced filter label on the same x-position as the standard
 # rows above them, so the control column does not step in and out.
-FILTER_LABEL_WIDTH = 76
+FILTER_LABEL_WIDTH = 144
+FILTER_LABEL_GAP = 10
+# Style B association rail: a two-pixel center-weighted fade that occupies only
+# unused space inside the fixed label column.  It never changes control rails.
+ASSOCIATION_RAIL_TEXT_GAP = 8
+ASSOCIATION_RAIL_MIN_WIDTH = 10
+ASSOCIATION_RAIL_SEGMENTS = 24
+ASSOCIATION_RAIL_LINE_WIDTH = 2
+ASSOCIATION_RAIL_CANVAS_HEIGHT = 3
+ASSOCIATION_RAIL_MAX_BLEND = 1.0
+ASSOCIATION_RAIL_FADE_POWER = 0.72
+SEARCH_ROW_HOVER_COLOR = PALETTE["search_hover"]
+SEARCH_CHIP_HOVER_BORDER = PALETTE["text"]
+SEARCH_RESULTS_BOUNDARY_HEIGHT = 2
+ASSOCIATION_RAIL_HOVER_MAX_BLEND = 1.0
+MODE_CONTROL_GAP = SECONDARY_CONTROL_GAP
+MODE_CHOICE_COLUMNS = 3
+MANA_CHOICE_GAP = 8
+# Every numeric range uses the same fixed mini-grid so Min / to / Max fields
+# line up regardless of whether the widgets are spinboxes or year comboboxes.
+RANGE_FIELD_WIDTH_PX = 64
+RANGE_SEPARATOR_WIDTH_PX = 30
 FORMAT_STATUS_CHOICES = (
     ("Playable", "playable"), ("Banned", "banned"),
     ("Restricted", "restricted"),
@@ -58,7 +94,7 @@ TRAIT_CHOICES = (
     ("universes_beyond", "Universes Beyond"),
     ("reserved", "Reserved List"),
     ("game_changer", "Commander game changer"),
-    ("multi_faced", "Multi-faced card"),
+    ("multi_faced", "Has multiple faces"),
     ("single_faced", "Single-faced card"),
     ("hybrid_mana", "Hybrid mana in cost"),
     ("phyrexian_mana", "Phyrexian mana in cost"),
@@ -68,33 +104,279 @@ TRAIT_CHOICES = (
     ("variable_stats", "Variable power or toughness (*)"),
 )
 TRAIT_LABELS = dict(TRAIT_CHOICES)
-MANA_COST_TRAIT_KEYS = ("hybrid_mana", "phyrexian_mana", "has_x_cost")
-FACE_TRAIT_KEYS = ("single_faced", "multi_faced")
-PT_TRAIT_KEYS = ("top_heavy", "variable_stats")
-STATUS_TRAIT_KEYS = (
+MANA_COST_FEATURE_KEYS = ("hybrid_mana", "phyrexian_mana", "has_x_cost")
+SPECIAL_PROPERTY_KEYS = (
+    "top_heavy", "variable_stats", "color_indicator", "multi_faced",
+)
+STATUS_PROPERTY_KEYS = (
     "not_universes_beyond", "universes_beyond", "reserved", "game_changer",
 )
-COLOR_INDICATOR_TRAIT_KEYS = ("color_indicator",)
-PROPERTY_TRAIT_KEYS = frozenset(
-    MANA_COST_TRAIT_KEYS + FACE_TRAIT_KEYS + PT_TRAIT_KEYS
-    + STATUS_TRAIT_KEYS + COLOR_INDICATOR_TRAIT_KEYS)
+SPECIAL_PROPERTY_PICKER_LABELS = {
+    "top_heavy": "Power / Toughness · Power greater than toughness",
+    "variable_stats": "Power / Toughness · Variable power or toughness (*)",
+    "color_indicator": "Card Characteristics · Has a color indicator",
+    "multi_faced": "Card Characteristics · Has multiple faces",
+}
 PICKER_SUMMARY_PER_LINE = 5
 
 
-def _row_major_grid_required_width(widgets, columns):
-    """Return the natural width needed by a row-major grid of chip widgets."""
+def _chip_grid_padx(column, columns):
+    """Keep one exact gap between equal-width chips and no outer gutter."""
     if columns <= 0:
         raise ValueError("columns must be positive")
-    column_widths = [0] * columns
-    for index, widget in enumerate(widgets):
-        column = index % columns
-        column_widths[column] = max(
-            column_widths[column], int(widget.winfo_reqwidth()) + CHIP_GRID_X_GAP)
-    return sum(column_widths)
+    half = CHIP_GRID_X_GAP // 2
+    remainder = CHIP_GRID_X_GAP - half
+    return (0 if column == 0 else half,
+            0 if column == columns - 1 else remainder)
+
+
+def _chip_grid_pady(row, rows):
+    """Keep one exact vertical gap between chip rows and no outside padding."""
+    if rows <= 0:
+        raise ValueError("rows must be positive")
+    half = CHIP_GRID_Y_GAP // 2
+    remainder = CHIP_GRID_Y_GAP - half
+    return (0 if row == 0 else half,
+            0 if row == rows - 1 else remainder)
+
+
+def _blend_hex(start, end, amount):
+    """Blend two palette hex colors without introducing a local color literal."""
+    amount = max(0.0, min(1.0, float(amount)))
+    left = tuple(int(start[index:index + 2], 16) for index in (1, 3, 5))
+    right = tuple(int(end[index:index + 2], 16) for index in (1, 3, 5))
+    mixed = tuple(
+        round(a + ((b - a) * amount)) for a, b in zip(left, right))
+    return "#{:02X}{:02X}{:02X}".format(*mixed)
+
+
+def _association_rail_color(position, active=False):
+    """Palette-derived Style B fade with a bright champagne-gold hover center."""
+    position = max(0.0, min(1.0, float(position)))
+    curve = math.sin(math.pi * position) ** ASSOCIATION_RAIL_FADE_POWER
+    if active:
+        return _blend_hex(
+            SEARCH_ROW_HOVER_COLOR, PALETTE["search_hover_glow"],
+            curve * ASSOCIATION_RAIL_HOVER_MAX_BLEND)
+    return _blend_hex(
+        PALETTE["surface"], PALETTE["border"],
+        curve * ASSOCIATION_RAIL_MAX_BLEND)
+
+
+def _pack_mana_choice(widget):
+    """Keep W/U/B/R/G/C choices compact and aligned across Search mana rows."""
+    widget.pack(side="left", padx=(0, MANA_CHOICE_GAP))
+
+
+def _chip_layout_widget(widget):
+    """Return the geometry owner for a trusted Type Line chip."""
+    return getattr(widget, "_ui_chip_border_shell", None) or widget
+
+
+def _row_major_grid_required_width(widgets, columns):
+    """Return width needed when every chip column is intentionally equal."""
+    if columns <= 0:
+        raise ValueError("columns must be positive")
+    if not widgets:
+        return 0
+    widest = max(
+        int(_chip_layout_widget(widget).winfo_reqwidth()) for widget in widgets)
+    return (widest * columns) + (CHIP_GRID_X_GAP * (columns - 1))
 
 
 class SearchFeatureMixin:
     """Own the interactive Search feature while the root wires other features."""
+
+    @staticmethod
+    def _draw_association_rail(canvas, active=False):
+        """Paint the Style B fade without affecting layout geometry."""
+        try:
+            width = int(canvas.winfo_width())
+            canvas.delete("association_rail")
+        except tk.TclError:
+            return
+        if width < ASSOCIATION_RAIL_MIN_WIDTH:
+            return
+        segments = max(1, min(ASSOCIATION_RAIL_SEGMENTS, width))
+        y = ASSOCIATION_RAIL_CANVAS_HEIGHT / 2
+        for index in range(segments):
+            x0 = round(index * width / segments)
+            x1 = round((index + 1) * width / segments)
+            position = (index + 0.5) / segments
+            canvas.create_line(
+                x0, y, x1, y,
+                fill=_association_rail_color(position, active=active),
+                width=ASSOCIATION_RAIL_LINE_WIDTH,
+                tags=("association_rail",),
+            )
+
+    def _position_search_row_hover_region(self, region):
+        """Place one zero-geometry hover band behind an existing grid row."""
+        parent = region["parent"]
+        band = region["band"]
+        try:
+            if not parent.winfo_exists():
+                return
+            x, y, width, height = parent.grid_bbox(
+                0, region["row"], region["last_column"], region["row"])
+            if height <= 0 or width <= 0:
+                band.place_forget()
+                return
+            band.place(x=x, y=y, width=max(width, parent.winfo_width() - x), height=height)
+            band.lower()
+        except tk.TclError:
+            return
+
+    @staticmethod
+    def _search_hover_style_for(widget, active):
+        """Swap only surface-bearing Search widgets to hover-safe styles."""
+        try:
+            base = getattr(widget, "_mtg_search_hover_base_style", None)
+            if base is None:
+                base = str(widget.cget("style") or "")
+                widget._mtg_search_hover_base_style = base
+            if not active:
+                widget.configure(style=base)
+                return
+            mapping = {
+                "": {"TFrame": "SearchHover.TFrame", "TLabel": "SearchHover.TLabel"},
+                "TFrame": {"TFrame": "SearchHover.TFrame"},
+                "TLabel": {"TLabel": "SearchHover.TLabel"},
+                "Muted.TLabel": {"TLabel": "SearchHoverMuted.TLabel"},
+                "FormChoice.TRadiobutton": {
+                    "TRadiobutton": "SearchHover.FormChoice.TRadiobutton"},
+                "Color.TCheckbutton": {
+                    "TCheckbutton": "SearchHover.Color.TCheckbutton"},
+            }
+            replacement = mapping.get(base, {}).get(widget.winfo_class())
+            if replacement:
+                widget.configure(style=replacement)
+        except (tk.TclError, AttributeError):
+            return
+
+    def _set_search_row_hover_surface(self, widget, active):
+        """Tint neutral surfaces and brighten that row's association rail."""
+        self._search_hover_style_for(widget, active)
+        if (isinstance(widget, ClassicCheckbutton)
+                and getattr(widget, "_ui_check_role", None) == "chip"):
+            # The white cue belongs to the individual unselected chip, not to
+            # the logical row.  Store the owning-row hover state on the chip
+            # so selecting it can immediately restore its normal selected
+            # outline without waiting for the pointer to leave/re-enter.
+            widget._ui_search_row_hover_active = bool(active)
+            widget._ui_search_chip_hover_border = SEARCH_CHIP_HOVER_BORDER
+            widget._sync_chip_contrast()
+        rail = getattr(widget, "_mtg_search_association_rail", None)
+        if rail is not None:
+            try:
+                rail.configure(
+                    background=(SEARCH_ROW_HOVER_COLOR if active else PALETTE["surface"]))
+                self._draw_association_rail(rail, active=active)
+            except tk.TclError:
+                pass
+        try:
+            children = widget.winfo_children()
+        except tk.TclError:
+            return
+        for child in children:
+            self._set_search_row_hover_surface(child, active)
+
+    def _register_search_row_hover(self, parent, row, *, last_column):
+        """Register a non-layout hover band for one logical Search filter row."""
+        band = tk.Frame(
+            parent, bg=PALETTE["surface"], bd=0, highlightthickness=0,
+            takefocus=0)
+        region = {
+            "parent": parent, "row": int(row), "last_column": int(last_column),
+            "band": band, "active": False,
+        }
+        self._search_row_hover_regions.append(region)
+        parent.bind(
+            "<Configure>",
+            lambda _event, item=region: self._position_search_row_hover_region(item),
+            add="+")
+        self.after_idle(lambda item=region: self._position_search_row_hover_region(item))
+
+    def _sync_search_row_hover(self, _event=None):
+        """Highlight whichever Search row currently contains the pointer."""
+        try:
+            pointer_x, pointer_y = self.winfo_pointerxy()
+        except tk.TclError:
+            return
+        for region in getattr(self, "_search_row_hover_regions", ()):
+            parent = region["parent"]
+            band = region["band"]
+            active = False
+            try:
+                if parent.winfo_ismapped():
+                    self._position_search_row_hover_region(region)
+                    left = band.winfo_rootx()
+                    top = band.winfo_rooty()
+                    right = left + band.winfo_width()
+                    bottom = top + band.winfo_height()
+                    active = left <= pointer_x < right and top <= pointer_y < bottom
+            except tk.TclError:
+                active = False
+            if active == region["active"]:
+                continue
+            region["active"] = active
+            try:
+                band.configure(
+                    bg=(SEARCH_ROW_HOVER_COLOR if active else PALETTE["surface"]),
+                )
+                for widget in parent.grid_slaves(row=region["row"]):
+                    self._set_search_row_hover_surface(widget, active)
+                band.lower()
+            except tk.TclError:
+                continue
+
+    def _bind_search_row_hover_tracking(self):
+        """Track pointer movement through the toplevel bindtag, without row wrappers."""
+        if getattr(self, "_search_row_hover_tracking_bound", False):
+            return
+        self._search_row_hover_tracking_bound = True
+        self.bind("<Motion>", self._sync_search_row_hover, add="+")
+        self.bind(
+            "<Leave>",
+            lambda _event: self.after_idle(self._sync_search_row_hover),
+            add="+")
+
+    def _build_search_row_label(
+            self, parent, text, *, row, pady, tooltip_key=None, tooltip_text=None):
+        """Build a primary label and overlay a zero-geometry Style B fade rail.
+
+        The label is gridded exactly as it was before association rails existed.
+        The rail is placed relative to the label instead of packed or gridded, so
+        it cannot contribute a requested width or move the shared control column.
+        """
+        label = ttk.Label(parent, text=text)
+        label.grid(
+            row=row, column=0, sticky="nw",
+            padx=(0, FILTER_LABEL_GAP), pady=pady)
+
+        label.update_idletasks()
+        available = FILTER_LABEL_WIDTH - FILTER_LABEL_GAP
+        rail_width = (available - int(label.winfo_reqwidth())
+                      - ASSOCIATION_RAIL_TEXT_GAP)
+        if rail_width >= ASSOCIATION_RAIL_MIN_WIDTH:
+            rail = tk.Canvas(
+                parent, width=rail_width, height=ASSOCIATION_RAIL_CANVAS_HEIGHT,
+                background=PALETTE["surface"], highlightthickness=0,
+                borderwidth=0, relief="flat", takefocus=0)
+            rail.place(
+                in_=label, relx=1.0, rely=0.5,
+                x=ASSOCIATION_RAIL_TEXT_GAP, anchor="w")
+            label._mtg_search_association_rail = rail
+            rail.bind(
+                "<Configure>",
+                lambda _event, canvas=rail: self._draw_association_rail(canvas),
+                add="+")
+
+        if tooltip_key:
+            self._add_standard_filter_tooltip(label, tooltip_key)
+        elif tooltip_text:
+            self._add_tooltip(label, tooltip_text, wraplength=380)
+        return label
 
     def _initialize_search_filter_state(self):
         """Create every filter's state before any of its widgets exist.
@@ -106,13 +388,23 @@ class SearchFeatureMixin:
         they shadow their value through _capture_advanced_filter_values.
         """
         self.card_type_vars = {}
-        self._card_type_catalog = []
+        warm_catalogs = {"card_types": (), "supertypes": ()}
+        preferences = getattr(self, "_ui_preferences_repository", None)
+        if preferences is not None:
+            try:
+                warm_catalogs = preferences.load_search_type_line_catalogs()
+            except (OSError, ValueError, TypeError, AttributeError):
+                log.debug("Could not load Type Line warm-start catalogs", exc_info=True)
+        self._card_type_catalog = list(warm_catalogs.get("card_types") or ())
         self._card_type_chip_widgets = ()
         self._card_type_chip_columns = CARD_TYPE_MIN_COLUMNS
         self.q_card_type_mode = tk.StringVar(value="any")
 
         self.property_vars = {}
-        self._property_catalog = []
+        self._property_catalog = list(warm_catalogs.get("supertypes") or ())
+        self._search_type_line_cold_start = True
+        self._card_type_authority_available = False
+        self._supertype_authority_available = False
         # Any, like every other multi-select. Only 17 cards in the whole
         # paper pool carry two supertypes, so an "all" default silently
         # emptied any two-value selection.
@@ -121,7 +413,6 @@ class SearchFeatureMixin:
         self.color_vars = {}
         self.q_color_mode = tk.StringVar(value="within")
         self.q_color_scope = tk.StringVar(value="identity")
-        self._color_mode_label = None
         self._colorless_check = None
         self.produces_vars = {}
         self.q_produces_mode = tk.StringVar(value="includes")
@@ -141,12 +432,18 @@ class SearchFeatureMixin:
         # states a deck check asks about and nothing could previously reach.
         self.q_format_status = tk.StringVar(value="playable")
         self.q_rules_mode = tk.StringVar(value="all")
+        # Search Scope keeps its compact content-trait storage. Boolean card
+        # properties live in independent facets so each picker owns Match.
         self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
-        # Traits combine with Any by default, like Subtype and Mechanics.
-        # Requiring all of them made two selections return nothing.
-        self.q_trait_mode = tk.StringVar(value="any")
+        self._selected_mana_features = set()
+        self.q_mana_feature_mode = tk.StringVar(value="any")
+        self._selected_special_properties = set()
+        self.q_special_property_mode = tk.StringVar(value="any")
+        self._selected_status_properties = set()
+        self.q_status_property_mode = tk.StringVar(value="any")
         self._selected_layouts = set()
         self.q_layout_mode = tk.StringVar(value="any")
+        self.q_pip_mode = tk.StringVar(value="all")
         self._layout_catalog = []
         self._card_form_btn = None
         self._layout_duplicates = set()
@@ -174,13 +471,11 @@ class SearchFeatureMixin:
         self._keyword_btn = None
         self._search_scope_btn = None
         self._mana_cost_features_btn = None
-        self._faces_btn = None
-        self._pt_properties_btn = None
+        self._special_properties_btn = None
         self._status_properties_btn = None
         self._color_indicator_var = None
         self._color_indicator_check = None
         self._property_chip_frame = None
-        self._supertype_empty_text = ""
         for name in (
                 "q_cmc_min", "q_cmc_max", "q_power_min", "q_power_max",
                 "q_toughness_min", "q_toughness_max",
@@ -190,9 +485,10 @@ class SearchFeatureMixin:
             setattr(self, name, None)
 
     def _build_search_pane(self, parent):
+        self._search_row_hover_regions = []
         form = ttk.Frame(parent)
         form.pack(fill="x")
-        form.columnconfigure(0, minsize=76)
+        form.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)
         form.columnconfigure(1, weight=1, uniform="search_control")
         form.columnconfigure(2, minsize=76)
         form.columnconfigure(3, weight=1, uniform="search_control")
@@ -203,8 +499,10 @@ class SearchFeatureMixin:
         self._build_standard_type_line_filters(form)
         self._build_color_filters(form, row=5)
         self._build_standard_stats_filter(form, row=6)
-        self._build_printing_filter(form, row=7)
+        for row in (0, 2, 3, 4, 5, 6, 7):
+            self._register_search_row_hover(form, row, last_column=3)
         self._build_advanced_filter_zone(parent)
+        self._bind_search_row_hover_tracking()
         self._bind_search_outside_click_selection_cleanup()
         self._build_search_actions(parent)
         self._build_results_table(parent)
@@ -221,10 +519,8 @@ class SearchFeatureMixin:
     def _build_name_filter(self, form):
         # Primary card identity starts with a full-width name field. Language is
         # still one Search criterion but its control lives with Printings.
-        name_label = ttk.Label(form, text="Card Name")
-        name_label.grid(row=0, column=0, sticky="w",
-                        padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(name_label, "name")
+        self._build_search_row_label(
+            form, "Card Name", row=0, pady=SEARCH_ROW_PADY, tooltip_key="name")
         self._search_name_batch = ()
         self._search_name_batch_display = ""
         self.q_name = AutocompleteEntry(form)
@@ -305,12 +601,11 @@ class SearchFeatureMixin:
 
     def _build_standard_type_line_filters(self, form):
         heading = ttk.Label(form, text="TYPE LINE", style="Section.TLabel")
-        heading.grid(row=1, column=0, columnspan=4, sticky="w", pady=(7, 1))
+        heading.grid(row=1, column=0, columnspan=4, sticky="w", pady=TYPE_LINE_HEADING_PADY)
 
-        super_label = ttk.Label(form, text="Supertype")
-        super_label.grid(
-            row=2, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(super_label, "supertypes")
+        self._build_search_row_label(
+            form, "Supertype", row=2, pady=SEARCH_ROW_PADY,
+            tooltip_key="supertypes")
         super_box = ttk.Frame(form)
         super_box.grid(
             row=2, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
@@ -318,50 +613,52 @@ class SearchFeatureMixin:
         self._property_chip_frame.pack(fill="x")
         self._render_supertype_chips()
         self._build_mode_row(
-            super_box, "Selected supertypes:", self.q_supertype_mode, "supertypes")
+            super_box, self.q_supertype_mode, "supertypes")
 
         self._build_card_type_filters(form, row=3)
 
-        subtype_label = ttk.Label(form, text="Subtype")
-        subtype_label.grid(
-            row=4, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(subtype_label, "subtype")
+        self._build_search_row_label(
+            form, "Subtype", row=4, pady=SEARCH_ROW_PADY,
+            tooltip_key="subtype")
         self._subtype_btn = AppButton(
             form, text=self._picker_button_text(
                 self._selected_subtypes, "Any", "subtypes",
                 max_visible=10, single_line=True),
-            role="picker", command=self._choose_subtypes)
+            role="search_picker", command=self._choose_subtypes)
         self._subtype_btn.grid(
             row=4, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._add_standard_filter_tooltip(self._subtype_btn, "subtype")
 
     def _build_card_type_filters(self, form, *, row=1):
-        type_label = ttk.Label(form, text="Card Type")
-        type_label.grid(
-            row=row, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(type_label, "card_type")
+        self._build_search_row_label(
+            form, "Card Type", row=row, pady=SEARCH_ROW_PADY,
+            tooltip_key="card_type")
         typebox = ttk.Frame(form)
         typebox.grid(row=row, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._card_type_chip_frame = ttk.Frame(typebox)
         self._card_type_chip_frame.pack(fill="x")
         self._card_type_chip_frame.bind(
             "<Configure>", self._layout_card_type_chips, add="+")
+        self._card_type_chip_widgets = self._render_trusted_chips(
+            self._card_type_chip_frame, self._card_type_catalog, self.card_type_vars,
+            columns=CARD_TYPE_MIN_COLUMNS, tooltip_key="card_type",
+            loading_placeholders=CARD_TYPE_LOADING_SLOTS)
+        self._layout_card_type_chips()
         self._build_mode_row(
-            typebox, "Selected types:", self.q_card_type_mode, "card types",
+            typebox, self.q_card_type_mode, "card types",
             meanings={
-                "any": "Any: the card must have at least one selected Card Type.",
-                "all": ("All: the card must have every selected Card Type across "
-                        "its full type line, including multiple faces."),
-                "none": ("None: exclude every card having any selected Card Type, "
-                         "which is how to ask for a green non-creature."),
+                "any": ("Any: a card needs at least one selected Card Type. Selecting "
+                        "additional types can broaden this filter."),
+                "all": ("All: a card must have every selected Card Type across its "
+                        "type line, including its faces. Additional types narrow the filter."),
+                "none": "None: exclude cards that have any selected Card Type.",
             })
 
 
     def _build_color_filters(self, form, *, row=3):
-        color_label = ttk.Label(form, text="Colors")
-        color_label.grid(
-            row=row, column=0, sticky="nw", padx=(0, 8), pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(color_label, "colors")
+        self._build_search_row_label(
+            form, "Mana Color", row=row, pady=SEARCH_ROW_PADY,
+            tooltip_key="colors")
         colorwrap = ttk.Frame(form)
         colorwrap.grid(row=row, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         colorbox = ttk.Frame(colorwrap)
@@ -377,77 +674,92 @@ class SearchFeatureMixin:
                 # colour releases it. Silently dropping it from the query made
                 # White plus Colorless return exactly the mono-white result.
                 kw["command"] = self._sync_colorless_availability
-            if self.pips.get(c):
-                kw["image"] = self.pips[c]
+            pip_image = self._filter_pip_image(c)
+            if pip_image:
+                kw["image"] = pip_image
                 kw["compound"] = "left"
             check = ttk.Checkbutton(colorbox, **kw)
             self._color_checks[c] = check
-            check.pack(side="left", padx=(0, 8))
+            _pack_mana_choice(check)
             if c != "C":
                 self._add_standard_filter_tooltip(check, "colors")
             if c == "C":
                 self._colorless_check = check
                 self._add_tooltip(
                     check,
-                    "Colorless: cards with no colors at all. A card cannot be "
-                    "colorless and also a color, so this clears itself when "
-                    "you pick one. To find what makes colorless mana, use the "
-                    "Produces filter instead.",
-                    wraplength=380)
+                    "Colorless means the card has no colors in the selected Use field. "
+                    "With Color Identity, it means no color identity; with Card Colors, "
+                    "it means the card itself is colorless. Colorless cannot be combined "
+                    "with White, Blue, Black, Red, or Green in this filter. This is not "
+                    "the same as producing colorless mana; use Mana Produced for that.",
+                    wraplength=410)
         scope = ttk.Frame(colorwrap)
-        scope.pack(fill="x", pady=(2, 0))
-        ttk.Label(scope, text="Look at:", style="Muted.TLabel").pack(side="left")
+        scope.pack(fill="x", pady=MODE_ROW_PADY)
+        scope.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        ttk.Label(scope, text=COLOR_SCOPE_LABEL, style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w")
         scope_help = {
             "identity": (
-                "Color identity: every color the card brings to a deck, from "
-                "its cost, its rules text and both faces. This is the one "
-                "Commander uses."),
+                "Color Identity uses the color set that matters for Commander deck "
+                "construction. It includes colors from colored mana symbols in the mana "
+                "cost or rules text, color indicators, and color-defining abilities, including "
+                "information on both faces of a double-faced card. Reminder text does not add "
+                "colors. A card can be colorless itself but still have a colored identity."),
             "colors": (
-                "Card colors: the colors the card itself is, from its cost "
-                "and any color indicator. Devoid cards and lands are "
-                "colorless here even when their identity is not."),
+                "Card Colors uses only the colors the card actually is. A colored mana "
+                "symbol appearing only in rules text does not by itself make the card that "
+                "color. Lands and cards with Devoid can be colorless here even when their "
+                "Color Identity contains one or more colors."),
         }
-        for label, value in (("Color identity", "identity"),
-                             ("Card colors", "colors")):
+        for column, (label, value) in enumerate(
+                (("Color Identity", "identity"), ("Card Colors", "colors")),
+                start=1):
             radio = ttk.Radiobutton(
                 scope, text=label, variable=self.q_color_scope, value=value,
                 style="FormChoice.TRadiobutton",
                 command=self._on_color_scope_changed)
-            radio.pack(side="left", padx=(3, 0))
+            radio.grid(
+                row=0, column=column, sticky="w",
+                padx=(MODE_CONTROL_GAP if column == 1 else MATCH_MODE_CHOICE_GAP, 0))
             self._add_tooltip(radio, scope_help[value], wraplength=390)
         colormode = ttk.Frame(colorwrap)
-        colormode.pack(fill="x", pady=(2, 0))
-        self._color_mode_label = ttk.Label(
-            colormode, text="Color identity:", style="Muted.TLabel")
-        self._color_mode_label.pack(side="left")
+        colormode.pack(fill="x", pady=MODE_ROW_PADY)
+        colormode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        ttk.Label(
+            colormode, text=MATCH_MODE_LABEL, style="Muted.TLabel").grid(
+                row=0, column=0, sticky="w")
         color_mode_help = {
-            "within": "Within: the card's entire color identity must fit inside the selected colors.",
-            "includes": "Contains: the card must contain every selected color but may contain others.",
-            "exact": "Exactly: the card's color identity must exactly equal the selected colors.",
+            "within": (
+                "Within: a card may use any subset of the selected colors, but no "
+                "colors outside them. Selecting White + Blue allows colorless, white, "
+                "blue, and white-blue cards, but excludes cards containing another color."),
+            "includes": (
+                "Contains: a card must include every selected color, but it may include "
+                "additional colors. Selecting White + Blue includes white-blue and "
+                "three-, four-, or five-color cards containing both colors."),
+            "exact": (
+                "Exactly: a card must have exactly the selected colors and no others. "
+                "Selecting White + Blue excludes mono-colored cards and cards containing "
+                "a third color."),
         }
-        for label, value in (("Within", "within"), ("Contains", "includes"),
-                             ("Exactly", "exact")):
+        for column, (label, value) in enumerate(
+                (("Within", "within"), ("Contains", "includes"),
+                 ("Exactly", "exact")), start=1):
             radio = ttk.Radiobutton(
                 colormode, text=label, variable=self.q_color_mode, value=value,
                 style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
-            radio.pack(side="left", padx=(3, 0))
+            radio.grid(
+                row=0, column=column, sticky="w",
+                padx=(MODE_CONTROL_GAP if column == 1 else MATCH_MODE_CHOICE_GAP, 0))
             self._add_tooltip(radio, color_mode_help[value], wraplength=390)
         self._sync_colorless_availability()
 
-
-    COLOR_SCOPE_LABELS = {
-        "identity": "Color identity:", "colors": "Card colors:"}
-
     def _on_color_scope_changed(self):
-        """Keep the mode row naming whichever column is being compared."""
-        label = getattr(self, "_color_mode_label", None)
-        if label is not None:
-            label.configure(text=self.COLOR_SCOPE_LABELS.get(
-                self.q_color_scope.get(), "Color identity:"))
+        """Refresh Search state when the selected color field changes."""
         self._update_search_filter_summary()
 
-    def _sync_colorless_availability(self):
+    def _sync_colorless_availability(self, *, update_summary=True):
         """Release the Colorless pip while any colour is selected.
 
         Colorless is the absence of colour in both columns this filter can
@@ -464,21 +776,26 @@ class SearchFeatureMixin:
         check = getattr(self, "_colorless_check", None)
         if check is not None:
             try:
-                check.state(["disabled"] if colored else ["!disabled"])
+                context_available = bool(
+                    getattr(check, "_mtg_context_available", True))
+                selected = bool(colorless is not None and colorless.get())
+                enabled = (not colored) and (context_available or selected)
+                check.state(["!disabled"] if enabled else ["disabled"])
             except tk.TclError:
                 pass
-        self._update_search_filter_summary()
+        if update_summary:
+            self._update_search_filter_summary()
 
     def _build_produces_filter(self, parent, row):
         """Mana a card can actually produce, distinct from its colour identity.
 
-        Deliberately a twin of the Colors control: the same pip checkboxes and
+        Deliberately a twin of the Mana Color control: the same pip checkboxes and
         the same within/contains/exactly modes, because the two filters read
         the same comma-joined WUBRG(+C) encoding. Only the default mode differs
         -- "contains" answers the mana-base question people actually ask.
         """
         wrap = ttk.Frame(parent)
-        wrap.grid(row=row, column=1, sticky="ew", pady=2)
+        wrap.grid(row=row, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         box = ttk.Frame(wrap)
         box.pack(fill="x")
         for color in (*COLORS, "C"):
@@ -487,29 +804,54 @@ class SearchFeatureMixin:
             kw = {"text": " " + MANA_NAMES[color], "variable": variable,
                   "style": "Color.TCheckbutton",
                   "command": self._update_search_filter_summary}
-            if self.pips.get(color):
-                kw["image"] = self.pips[color]
+            pip_image = self._filter_pip_image(color)
+            if pip_image:
+                kw["image"] = pip_image
                 kw["compound"] = "left"
             produced = ttk.Checkbutton(box, **kw)
             self._produces_checks[color] = produced
-            produced.pack(side="left", padx=(0, 8))
-            self._add_tooltip(
-                produced, filter_tooltip("produces"), wraplength=380)
+            _pack_mana_choice(produced)
+            produced_help = (
+                f"{MANA_NAMES[color]}: filter for cards that can produce "
+                f"{MANA_NAMES[color].lower()} mana. "
+                + (
+                    "Here Colorless means actual colorless mana (C), not a card that "
+                    "happens to be colorless. "
+                    if color == "C" else ""
+                )
+                + "Mana Produced is independent of the card's own colors and Color Identity. "
+                  "The current Match rule determines how this choice combines with other "
+                  "selected mana colors."
+            )
+            self._add_tooltip(produced, produced_help, wraplength=410)
         mode = ttk.Frame(wrap)
-        mode.pack(fill="x", pady=(2, 0))
-        ttk.Label(mode, text="Produces mana:", style="Muted.TLabel").pack(side="left")
+        mode.pack(fill="x", pady=MODE_ROW_PADY)
+        mode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        ttk.Label(mode, text=MATCH_MODE_LABEL, style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w")
         help_text = {
-            "within": "Within: everything the card produces must fit inside the selected colors.",
-            "includes": "Contains: the card must produce every selected color and may produce others.",
-            "exact": "Exactly: the card must produce exactly the selected colors.",
+            "within": (
+                "Within: a card must produce at least one selected mana color and cannot "
+                "produce mana colors outside the selected set. White + Blue allows "
+                "white-only, blue-only, and white-blue producers, but not a white-blue-black producer."),
+            "includes": (
+                "Contains: a card must be able to produce every selected mana color, but "
+                "it may also produce additional colors. This is useful for finding mana "
+                "sources that cover all colors you need."),
+            "exact": (
+                "Exactly: a card must produce exactly the selected mana colors and no "
+                "others. A source that can produce an additional color is excluded."),
         }
-        for label, value in (("Within", "within"), ("Contains", "includes"),
-                             ("Exactly", "exact")):
+        for column, (label, value) in enumerate(
+                (("Within", "within"), ("Contains", "includes"),
+                 ("Exactly", "exact")), start=1):
             radio = ttk.Radiobutton(
                 mode, text=label, variable=self.q_produces_mode, value=value,
                 style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
-            radio.pack(side="left", padx=(3, 0))
+            radio.grid(
+                row=0, column=column, sticky="w",
+                padx=(MODE_CONTROL_GAP if column == 1 else MATCH_MODE_CHOICE_GAP, 0))
             self._add_tooltip(radio, help_text[value], wraplength=390)
 
     def _configure_zero_start_spinbox(self, spin):
@@ -539,7 +881,7 @@ class SearchFeatureMixin:
         rules_box = ttk.Frame(form)
         rules_box.grid(
             row=row, column=1, sticky="ew",
-            pady=(2 if advanced else SEARCH_ROW_PADY))
+            pady=(ADVANCED_ROW_PADY if advanced else SEARCH_ROW_PADY))
         rules_box.columnconfigure(0, weight=1)
         self.q_rules = TokenBubbleEntry(
             rules_box, search_command=self._do_search,
@@ -548,14 +890,14 @@ class SearchFeatureMixin:
         self._bind_editable_focus_behavior(self.q_rules.entry)
         self._add_tooltip(
             self.q_rules.entry,
-            ("Unquoted words may appear anywhere in the card's complete Oracle "
-             "text; use double quotes for an exact phrase. Press Enter to add "
-             "another Rules Text chip."),
+            ("Unquoted words may appear anywhere in the card's rules text across its "
+             "faces; use double quotes for an exact phrase. Press Enter to add another "
+             "Rules Text entry."),
             wraplength=420)
         mode_box = ttk.Frame(rules_box)
-        mode_box.grid(row=1, column=0, sticky="w", pady=(1, 0))
+        mode_box.grid(row=1, column=0, sticky="ew", pady=(0, 0))
         self._build_mode_row(
-            mode_box, "Rules text:", self.q_rules_mode, "chips",
+            mode_box, self.q_rules_mode, "chips",
             meanings={
                 "any": "Any: at least one Rules Text chip must match the card.",
                 "all": "All: every Rules Text chip must match the card.",
@@ -569,26 +911,38 @@ class SearchFeatureMixin:
     # ------------------------------------------------------------------
 
     RANGE_BOUNDS_HELP = (
-        "Both numbers are included, so 2 to 4 finds 2, 3 and 4. Leave a box "
-        "empty for no limit on that side, and fill only one to search from or "
-        "up to a single value.")
+        "Min and Max are inclusive. Leave Min blank for no lower limit or Max blank "
+        "for no upper limit. Enter the same number in both fields to require one exact value.")
 
-    def _numeric_pair(self, parent, attribute_prefix, width=5):
-        """Two spinboxes as one unplaced frame; the caller positions it.
+    @staticmethod
+    def _layout_numeric_range(box, low, high):
+        """Place one Min / to / Max control on the shared range geometry.
 
-        Returned rather than placed so the same helper serves grid rows and
-        packed sub-frames without fighting the geometry manager.
+        Pixel minimums, rather than each widget's requested character width,
+        keep spinbox ranges and release-year combobox ranges on the same rails.
         """
+        box.columnconfigure(0, minsize=RANGE_FIELD_WIDTH_PX)
+        box.columnconfigure(1, minsize=RANGE_SEPARATOR_WIDTH_PX)
+        box.columnconfigure(2, minsize=RANGE_FIELD_WIDTH_PX)
+        low.grid(row=0, column=0, sticky="ew")
+        ttk.Label(box, text="to", style="Muted.TLabel", anchor="center").grid(
+            row=0, column=1, sticky="ew")
+        high.grid(row=0, column=2, sticky="ew")
+
+    def _numeric_pair(self, parent, attribute_prefix, tooltip_key):
+        """Two spinboxes using the shared fixed Min / to / Max mini-grid."""
         box = ttk.Frame(parent)
-        low = AppSpinbox(box, from_=0, to=999, width=width)
-        low.pack(side="left")
-        ttk.Label(box, text="to", style="Muted.TLabel").pack(side="left", padx=5)
-        high = AppSpinbox(box, from_=0, to=999, width=width)
-        high.pack(side="left")
+        # A tiny character width prevents the widget's requested size from
+        # overriding the pixel rails; sticky=ew expands it to the shared field.
+        low = AppSpinbox(box, from_=0, to=999, width=1)
+        high = AppSpinbox(box, from_=0, to=999, width=1)
+        self._layout_numeric_range(box, low, high)
         for widget in (low, high):
             widget.delete(0, "end")
             self._configure_zero_start_spinbox(widget)
-            self._add_tooltip(widget, self.RANGE_BOUNDS_HELP, wraplength=340)
+            filter_help = filter_tooltip(tooltip_key)
+            self._add_tooltip(
+                widget, f"{filter_help}\n\n{self.RANGE_BOUNDS_HELP}", wraplength=410)
             widget.bind(
                 "<KeyRelease>",
                 lambda _event: self._update_search_filter_summary(), add="+")
@@ -602,27 +956,28 @@ class SearchFeatureMixin:
         setattr(self, f"{attribute_prefix}_max", high)
         return box
 
-    def _trait_subset_selected(self, keys):
-        selected = set(getattr(self, "_selected_traits", set()) or ())
+    def _trait_subset_selected(self, keys, selected_attr):
+        selected = set(getattr(self, selected_attr, set()) or ())
         return {key for key in keys if key in selected}
 
-    def _context_trait_label(self, key):
-        label = TRAIT_LABELS[key]
+    def _context_trait_label(self, key, count_attr, picker_labels=None):
+        label = (picker_labels or TRAIT_LABELS).get(key, TRAIT_LABELS.get(key, key))
         snapshot = getattr(self, "_context_snapshot", None)
         if snapshot is None:
             return label
-        count = int((snapshot.trait_counts or {}).get(key, 0))
+        counts = getattr(snapshot, count_attr, None) or {}
+        count = int(counts.get(key, 0))
         return f"{label} · {count:,}"
 
-    def _choose_trait_subset(self, title, keys, button_attr, noun):
+    def _choose_trait_subset(self, title, keys, button_attr, noun, *,
+                             selected_attr, mode_var, count_attr,
+                             picker_labels=None, help_text=None):
         keys = tuple(keys)
-        selected = self._trait_subset_selected(keys)
+        selected = self._trait_subset_selected(keys, selected_attr)
 
         def apply(chosen):
-            current = set(getattr(self, "_selected_traits", set()) or ())
-            current.difference_update(keys)
-            current.update(str(value) for value in chosen if str(value) in keys)
-            self._selected_traits = current
+            chosen = {str(value) for value in chosen if str(value) in keys}
+            setattr(self, selected_attr, chosen)
             button = getattr(self, button_attr, None)
             self._set_picker_text(button, self._picker_button_text(
                 {TRAIT_LABELS[key] for key in chosen if key in TRAIT_LABELS},
@@ -630,50 +985,53 @@ class SearchFeatureMixin:
             self._update_search_filter_summary()
 
         snapshot = getattr(self, "_context_snapshot", None)
+        counts = getattr(snapshot, count_attr, None) if snapshot is not None else None
         self._open_search_multi_picker(
             title,
             [
-                (key, self._context_trait_label(key),
-                 {"zero_count": (snapshot is not None and
-                                  int((snapshot.trait_counts or {}).get(key, 0)) <= 0)})
+                (key, self._context_trait_label(key, count_attr, picker_labels),
+                 {"zero_count": (counts is not None and int(counts.get(key, 0)) <= 0)})
                 for key in keys
             ],
-            selected, apply,
-            mode_var=self.q_trait_mode,
-            mode_label="Property matching:",
-            help_text=(
-                "These are existing yes/no Search properties. Current-result counts "
-                "are informational; selecting a value keeps the existing Any/All/None "
-                "query semantics."))
+            selected, apply, mode_var=mode_var, mode_label=MATCH_MODE_LABEL,
+            help_text=(help_text or
+                       "Choose one or more properties. Each count shows how many cards match "
+                       "that choice with the other current filters."))
 
-    def _build_trait_subset_button(self, parent, keys, button_attr, title, noun):
-        selected = self._trait_subset_selected(keys)
+    def _build_trait_subset_button(self, parent, keys, button_attr, title, noun, *,
+                                   selected_attr, mode_var, count_attr,
+                                   picker_labels=None, help_text=None):
+        selected = self._trait_subset_selected(keys, selected_attr)
         button = AppButton(
             parent,
             text=self._picker_button_text(
                 {TRAIT_LABELS[key] for key in selected}, "Any", noun,
                 max_visible=8, single_line=True),
-            role="picker",
-            command=lambda: self._choose_trait_subset(title, keys, button_attr, noun))
-        button.grid(row=0, column=1, sticky="ew", pady=2)
+            role="search_picker",
+            command=lambda: self._choose_trait_subset(
+                title, keys, button_attr, noun, selected_attr=selected_attr,
+                mode_var=mode_var, count_attr=count_attr,
+                picker_labels=picker_labels, help_text=help_text))
+        button.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         setattr(self, button_attr, button)
 
-    def _reset_trait_subset(self, keys, button_attr):
-        current = set(getattr(self, "_selected_traits", set()) or ())
-        current.difference_update(keys)
-        self._selected_traits = current
+    def _reset_trait_subset(self, keys, button_attr, selected_attr, mode_var):
+        setattr(self, selected_attr, set())
+        mode_var.set("any")
         setattr(self, button_attr, None)
 
     def _refresh_split_trait_button_texts(self):
         groups = (
-            (MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn", "features"),
-            (FACE_TRAIT_KEYS, "_faces_btn", "face properties"),
-            (PT_TRAIT_KEYS, "_pt_properties_btn", "properties"),
-            (STATUS_TRAIT_KEYS, "_status_properties_btn", "status properties"),
+            (MANA_COST_FEATURE_KEYS, "_selected_mana_features",
+             "_mana_cost_features_btn", "features"),
+            (SPECIAL_PROPERTY_KEYS, "_selected_special_properties",
+             "_special_properties_btn", "properties"),
+            (STATUS_PROPERTY_KEYS, "_selected_status_properties",
+             "_status_properties_btn", "status properties"),
         )
-        for keys, attribute, noun in groups:
-            button = getattr(self, attribute, None)
-            selected = self._trait_subset_selected(keys)
+        for keys, selected_attr, button_attr, noun in groups:
+            button = getattr(self, button_attr, None)
+            selected = self._trait_subset_selected(keys, selected_attr)
             self._set_picker_text(button, self._picker_button_text(
                 {TRAIT_LABELS[key] for key in selected}, "Any", noun,
                 max_visible=8, single_line=True))
@@ -681,9 +1039,6 @@ class SearchFeatureMixin:
         self._set_picker_text(self._search_scope_btn, self._picker_button_text(
             {TRAIT_LABELS[key] for key in scope}, "Cards", "objects",
             max_visible=4, single_line=True))
-        variable = getattr(self, "_color_indicator_var", None)
-        if variable is not None:
-            variable.set("color_indicator" in self._selected_traits)
 
     def _build_filter_search_scope(self, parent):
         self._search_scope_btn = AppButton(
@@ -691,132 +1046,97 @@ class SearchFeatureMixin:
                 {TRAIT_LABELS[key] for key in self._selected_traits
                  if key in CONTENT_TRAIT_KEYS},
                 "Cards", "objects", max_visible=4, single_line=True),
-            role="picker", command=self._choose_search_scope)
-        self._search_scope_btn.grid(row=0, column=1, sticky="ew", pady=2)
+            role="search_picker", command=self._choose_search_scope)
+        self._search_scope_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_search_scope(self):
-        self._selected_traits = (
-            set(self._selected_traits) - set(CONTENT_TRAIT_KEYS)
-        ) | set(DEFAULT_CONTENT_TRAITS)
+        self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
         self._search_scope_btn = None
 
     def _choose_search_scope(self):
-        previous = self._content_types_from_traits()
         selected = {key for key in self._selected_traits if key in CONTENT_TRAIT_KEYS}
 
         def apply(chosen):
-            current = set(self._selected_traits) - set(CONTENT_TRAIT_KEYS)
             chosen = {str(value) for value in chosen if str(value) in CONTENT_TRAIT_KEYS}
-            if not chosen:
-                chosen = set(DEFAULT_CONTENT_TRAITS)
-            self._selected_traits = current | chosen
+            self._selected_traits = chosen or set(DEFAULT_CONTENT_TRAITS)
             self._set_picker_text(self._search_scope_btn, self._picker_button_text(
-                {TRAIT_LABELS[key] for key in chosen}, "Cards", "objects",
-                max_visible=4, single_line=True))
-            if self._content_types_from_traits() != previous:
-                self._on_content_filter_change()
-            else:
-                self._update_search_filter_summary()
+                {TRAIT_LABELS[key] for key in self._selected_traits},
+                "Cards", "objects", max_visible=4, single_line=True))
+            self._content_types_from_traits()
+            self._on_content_filter_change()
+            self._update_search_filter_summary()
 
         snapshot = getattr(self, "_context_snapshot", None)
-        content_counts = (snapshot.content_counts if snapshot is not None else {}) or {}
+        content_counts = getattr(snapshot, "content_counts", None) or {}
         values = []
         for key, kind in CONTENT_TRAIT_KEYS.items():
             label = TRAIT_LABELS[key]
-            if snapshot is not None:
-                label = f"{label} · {int(content_counts.get(kind, 0)):,}"
+            count = int(content_counts.get(kind, 0))
+            shown = f"{label} · {count:,}" if snapshot is not None else label
             values.append((
-                key, label,
-                {"zero_count": (snapshot is not None and
-                                 int(content_counts.get(kind, 0)) <= 0)},
+                key, shown,
+                {"zero_count": (snapshot is not None and count <= 0)},
             ))
         self._open_search_multi_picker(
-            "Search Scope", values,
-            selected, apply,
+            "Search Scope", values, selected, apply,
             help_text=(
-                "Choose which existing Scryfall object classes Search covers. "
-                "This scopes the search; it does not participate in Property matching."))
+                "Choose which object types Search includes. Each count shows how many objects "
+                "of that type match the other current filters."))
 
     def _build_filter_mana_cost_features(self, parent):
         self._build_trait_subset_button(
-            parent, MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn",
-            "Mana Cost Features", "features")
+            parent, MANA_COST_FEATURE_KEYS, "_mana_cost_features_btn",
+            "Mana Cost Features", "features",
+            selected_attr="_selected_mana_features",
+            mode_var=self.q_mana_feature_mode, count_attr="mana_feature_counts")
 
     def _reset_filter_mana_cost_features(self):
-        self._reset_trait_subset(MANA_COST_TRAIT_KEYS, "_mana_cost_features_btn")
+        self._reset_trait_subset(
+            MANA_COST_FEATURE_KEYS, "_mana_cost_features_btn",
+            "_selected_mana_features", self.q_mana_feature_mode)
 
-    def _build_filter_faces(self, parent):
+    def _build_filter_special_properties(self, parent):
         self._build_trait_subset_button(
-            parent, FACE_TRAIT_KEYS, "_faces_btn", "Faces", "face properties")
+            parent, SPECIAL_PROPERTY_KEYS, "_special_properties_btn",
+            "Special Properties", "properties",
+            selected_attr="_selected_special_properties",
+            mode_var=self.q_special_property_mode, count_attr="special_property_counts",
+            picker_labels=SPECIAL_PROPERTY_PICKER_LABELS,
+            help_text=(
+                "Choose rare or unusual card characteristics. Counts show how many cards "
+                "match each property with the other current filters."))
 
-    def _reset_filter_faces(self):
-        self._reset_trait_subset(FACE_TRAIT_KEYS, "_faces_btn")
-
-    def _build_filter_pt_properties(self, parent):
-        self._build_trait_subset_button(
-            parent, PT_TRAIT_KEYS, "_pt_properties_btn", "P/T Properties", "properties")
-
-    def _reset_filter_pt_properties(self):
-        self._reset_trait_subset(PT_TRAIT_KEYS, "_pt_properties_btn")
+    def _reset_filter_special_properties(self):
+        self._reset_trait_subset(
+            SPECIAL_PROPERTY_KEYS, "_special_properties_btn",
+            "_selected_special_properties", self.q_special_property_mode)
 
     def _build_filter_status_properties(self, parent):
         self._build_trait_subset_button(
-            parent, STATUS_TRAIT_KEYS, "_status_properties_btn",
-            "Product / Status", "status properties")
+            parent, STATUS_PROPERTY_KEYS, "_status_properties_btn",
+            "Product / Status", "status properties",
+            selected_attr="_selected_status_properties",
+            mode_var=self.q_status_property_mode, count_attr="status_property_counts")
 
     def _reset_filter_status_properties(self):
-        self._reset_trait_subset(STATUS_TRAIT_KEYS, "_status_properties_btn")
-
-    def _build_filter_color_indicator(self, parent):
-        variable = tk.BooleanVar(
-            master=self, value="color_indicator" in self._selected_traits)
-        self._color_indicator_var = variable
-
-        def changed():
-            if variable.get():
-                self._selected_traits.add("color_indicator")
-            else:
-                self._selected_traits.discard("color_indicator")
-            self._update_search_filter_summary()
-
-        check = ClassicCheckbutton(
-            parent, text="Has a color indicator", variable=variable,
-            command=changed, role="chip")
-        self._color_indicator_check = check
-        check.grid(row=0, column=1, sticky="w", pady=2)
-
-    def _reset_filter_color_indicator(self):
-        self._selected_traits.discard("color_indicator")
-        self._color_indicator_var = None
-        self._color_indicator_check = None
-
-    def _build_filter_property_match(self, parent):
-        box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="w", pady=2)
-        for text, value in self.MODE_ROW_CHOICES:
-            radio = ttk.Radiobutton(
-                box, text=text, variable=self.q_trait_mode, value=value,
-                style="FormChoice.TRadiobutton",
-                command=self._update_search_filter_summary)
-            radio.pack(side="left", padx=(0 if value == "any" else 5, 0))
-
-    def _reset_filter_property_match(self):
-        self.q_trait_mode.set("any")
+        self._reset_trait_subset(
+            STATUS_PROPERTY_KEYS, "_status_properties_btn",
+            "_selected_status_properties", self.q_status_property_mode)
 
     def _build_filter_card_form(self, parent):
         box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="ew", pady=2)
+        box.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         self._card_form_btn = AppButton(
             box, text=self._picker_button_text(
                 {self._layout_display_name(value) for value in self._selected_layouts},
                 "Any", "forms", max_visible=10, single_line=True),
-            role="picker", command=self._choose_card_forms)
+            role="search_picker", command=self._choose_card_forms)
         self._card_form_btn.pack(fill="x")
         self._build_mode_row(
-            box, "Selected forms:", self.q_layout_mode, "forms",
+            box, self.q_layout_mode, "forms",
             meanings={
-                "any": "Any: the card uses one of the selected Scryfall layouts.",
-                "none": "None: exclude every card using a selected Scryfall layout.",
+                "any": "Any: the card uses one of the selected card forms.",
+                "none": "None: exclude every card using any selected card form.",
             }, choices=self.ANY_NONE_CHOICES)
 
     def _reset_filter_card_form(self):
@@ -866,11 +1186,10 @@ class SearchFeatureMixin:
             ],
             set(self._selected_layouts), apply,
             mode_var=self.q_layout_mode,
-            mode_label="Selected forms:",
+            mode_label=MATCH_MODE_LABEL,
             help_text=(
-                "Card Form uses the existing observed Scryfall layout field. Values "
-                "matching the current Search are listed first; zero-count values stay selectable "
-                "but are shown in muted text."),
+                "Choose one or more card forms. Current matches appear first; "
+                "zero-count values remain visible but unavailable."),
             mode_choices=self.ANY_NONE_CHOICES)
 
     LAYOUT_LABELS = {
@@ -892,15 +1211,19 @@ class SearchFeatureMixin:
             key.casefold(), key.replace("_", " ").capitalize())
 
     PIP_SELECTION_HELP = (
-        "Every color you tick must appear at least this many times in the "
-        "same cost, so green and white at two finds {G}{G}{W}{W} and not a "
-        "card that is only heavily green. This is the one color control that "
-        "combines with and rather than or."
+        "Mana Symbols in Cost filters the actual mana symbols printed in a card's cost. "
+        "Match: All requires every selected color to be represented, Any requires at "
+        "least one, and None excludes all selected colors. Minimum is the total number "
+        "of qualifying physical mana symbols, not a separate minimum for each color. "
+        "A hybrid symbol such as {W/B} represents both White and Black for matching but "
+        "counts as one symbol toward Minimum. Colorless means the literal {C} symbol; "
+        "generic symbols such as {1}, {2}, or {X} do not count. This is separate from "
+        "Mana Color and Mana Produced."
     )
 
     def _build_filter_mana_pips(self, parent):
         box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="ew", pady=2)
+        box.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         pips = ttk.Frame(box)
         pips.pack(fill="x")
         for color in (*COLORS, "C"):
@@ -909,18 +1232,32 @@ class SearchFeatureMixin:
             kw = {"text": " " + MANA_NAMES[color], "variable": variable,
                   "style": "Color.TCheckbutton",
                   "command": self._update_search_filter_summary}
-            if self.pips.get(color):
-                kw["image"] = self.pips[color]
+            pip_image = self._filter_pip_image(color)
+            if pip_image:
+                kw["image"] = pip_image
                 kw["compound"] = "left"
             check = ttk.Checkbutton(pips, **kw)
             self._pip_checks[color] = check
-            check.pack(side="left", padx=(0, 8))
+            _pack_mana_choice(check)
             self._add_tooltip(check, self.PIP_SELECTION_HELP, wraplength=380)
+        self._build_mode_row(
+            box, self.q_pip_mode, "mana-symbol colors",
+            meanings={
+                "any": ("Any: at least one selected color must be represented. "
+                        "Minimum still counts all qualifying selected-color symbols."),
+                "all": ("All: every selected color must be represented. A hybrid can "
+                        "represent more than one selected color."),
+                "none": ("None: exclude costs containing any selected color. Minimum "
+                         "does not affect None."),
+            })
         row = ttk.Frame(box)
-        row.pack(fill="x", pady=(2, 0))
-        ttk.Label(row, text="At least:", style="Muted.TLabel").pack(side="left")
+        row.pack(fill="x", pady=MODE_ROW_PADY)
+        row.columnconfigure(0, minsize=SECONDARY_LABEL_WIDTH)
+        ttk.Label(row, text="Minimum", style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w")
         self.q_pip_min = AppSpinbox(row, from_=1, to=9, width=3)
-        self.q_pip_min.pack(side="left", padx=(5, 0))
+        self.q_pip_min.grid(
+            row=0, column=1, sticky="w", padx=(SECONDARY_CONTROL_GAP, 0))
         self._add_tooltip(self.q_pip_min, self.PIP_SELECTION_HELP, wraplength=380)
         self.q_pip_min.delete(0, "end")
         self.q_pip_min.insert(0, "1")
@@ -934,26 +1271,27 @@ class SearchFeatureMixin:
             "<FocusOut>",
             lambda _event: self._update_search_filter_summary(), add="+")
         ttk.Label(
-            row, text="of each selected color", style="Muted.TLabel").pack(
-                side="left", padx=(5, 0))
+            row, text="total selected symbols", style="Muted.TLabel").grid(
+                row=0, column=2, sticky="w", padx=(SECONDARY_HELPER_GAP, 0))
 
     def _reset_filter_mana_pips(self):
         for variable in self.pip_vars.values():
             variable.set(False)
         self.pip_vars = {}
+        self.q_pip_mode.set("all")
         self.q_pip_min = None
 
     def _build_filter_loyalty(self, parent):
-        self._numeric_pair(parent, "q_loyalty").grid(
-            row=0, column=1, sticky="w", pady=2)
+        self._numeric_pair(parent, "q_loyalty", "loyalty").grid(
+            row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_loyalty(self):
         self.q_loyalty_min = None
         self.q_loyalty_max = None
 
     def _build_filter_defense(self, parent):
-        self._numeric_pair(parent, "q_defense").grid(
-            row=0, column=1, sticky="w", pady=2)
+        self._numeric_pair(parent, "q_defense", "defense").grid(
+            row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_defense(self):
         self.q_defense_min = None
@@ -966,18 +1304,16 @@ class SearchFeatureMixin:
         invites holding an arrow through thirty years of Magic.
         """
         box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="w", pady=2)
+        box.grid(row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
         years = [""] + list(getattr(self, "_release_year_catalog", ()) or ())
         self.q_released_min = AppCombobox(
-            box, values=years, width=7, state="readonly")
+            box, values=years, width=1, state="readonly")
         self.q_released_min.set("")
-        self.q_released_min.pack(side="left")
-        ttk.Label(box, text="to", style="Muted.TLabel").pack(
-            side="left", padx=5)
         self.q_released_max = AppCombobox(
-            box, values=years, width=7, state="readonly")
+            box, values=years, width=1, state="readonly")
         self.q_released_max.set("")
-        self.q_released_max.pack(side="left")
+        self._layout_numeric_range(
+            box, self.q_released_min, self.q_released_max)
         for widget in (self.q_released_min, self.q_released_max):
             widget.bind(
                 "<<ComboboxSelected>>",
@@ -1066,16 +1402,6 @@ class SearchFeatureMixin:
             except tk.TclError:
                 continue
 
-    def _selected_trait_keys(self):
-        """Existing property predicates that contribute a clause, excluding scope kinds.
-
-        Tokens, Emblems and Art Series choose which objects the search covers
-        through content_types; treating them as clauses as well would filter
-        the very rows they just admitted.
-        """
-        keys = set(getattr(self, "_selected_traits", set()) or ())
-        return tuple(sorted(keys - set(CONTENT_TRAIT_KEYS)))
-
     # ------------------------------------------------------------------
     # advanced filters, built once and revealed together
     # ------------------------------------------------------------------
@@ -1122,17 +1448,11 @@ class SearchFeatureMixin:
         self._advanced_expanded = False
 
         header = ttk.Frame(parent)
-        header.pack(fill="x", pady=(6, 0))
+        header.pack(fill="x", pady=ADVANCED_HEADER_PADY)
         self._advanced_btn = AppButton(
-            header, text=self.ADVANCED_COLLAPSED_TEXT, role="dense",
+            header, text=self.ADVANCED_COLLAPSED_TEXT, role="search_section",
             command=self._toggle_advanced_filters)
-        self._advanced_btn.pack(side="left")
-        self._add_tooltip(
-            self._advanced_btn,
-            "Every filter beyond the standard set, grouped by what it asks "
-            "about. They stay where you leave them, so a filter you use often "
-            "is one click away rather than one search away.",
-            wraplength=360)
+        self._advanced_btn.pack(fill="x")
 
         self._advanced_host = ttk.Frame(parent)
         self._build_advanced_filter_rows()
@@ -1149,7 +1469,7 @@ class SearchFeatureMixin:
             heading = ttk.Label(
                 self._advanced_host, text=category.upper(),
                 style="Section.TLabel")
-            heading.pack(fill="x", anchor="w", pady=(8, 2))
+            heading.pack(fill="x", anchor="w", pady=ADVANCED_SECTION_HEADING_PADY)
             for entry in entries:
                 key = entry["key"]
                 builder = getattr(self, f"_build_filter_{key}", None)
@@ -1159,11 +1479,12 @@ class SearchFeatureMixin:
                 frame.pack(fill="x")
                 frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)
                 frame.columnconfigure(1, weight=1)
-                label = ttk.Label(frame, text=entry["label"])
-                label.grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=2)
-                self._add_tooltip(label, entry["tooltip"], wraplength=380)
+                self._build_search_row_label(
+                    frame, entry["label"], row=0, pady=ADVANCED_ROW_PADY,
+                    tooltip_text=entry["tooltip"])
                 builder(frame)
                 self._tooltip_row_controls(frame, entry["tooltip"])
+                self._register_search_row_hover(frame, 0, last_column=1)
                 self._advanced_filter_rows[key] = frame
         self._refresh_search_blur_widgets()
 
@@ -1177,7 +1498,9 @@ class SearchFeatureMixin:
             # Advanced is built before the actions row, so the anchor it packs
             # above may not exist yet. A missing anchor must not be the kind of
             # AttributeError that only a real window reveals.
-            anchor = getattr(self, "_search_actions_frame", None)
+            anchor = getattr(self, "_search_results_boundary", None)
+            if anchor is None or not anchor.winfo_exists():
+                anchor = getattr(self, "_search_actions_frame", None)
             if anchor is not None and anchor.winfo_exists():
                 self._advanced_host.pack(fill="x", before=anchor)
             else:
@@ -1200,6 +1523,11 @@ class SearchFeatureMixin:
             if reset is None or frame is None:
                 continue
             reset()
+            # Printings owns a persistent shared controller/popup adapter.
+            # Clearing its state must not destroy/rebuild that controller merely
+            # because the row now lives inside Advanced.
+            if key == "printings":
+                continue
             for child in frame.winfo_children():
                 if child.winfo_manager() != "grid":
                     continue
@@ -1246,9 +1574,9 @@ class SearchFeatureMixin:
 
     def _build_filter_format(self, parent):
         self._format_btn = AppButton(
-            parent, text=self.q_format.get() or "Any", role="picker",
+            parent, text=self.q_format.get() or "Any", role="search_picker",
             command=self._choose_format)
-        self._format_btn.grid(row=0, column=1, sticky="ew", pady=2)
+        self._format_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_format(self):
         self.q_format.set("")
@@ -1259,8 +1587,8 @@ class SearchFeatureMixin:
         self._rarity_btn = AppButton(
             parent, text=self._picker_button_text(
                 self._selected_rarities, "Any", "rarities"),
-            role="picker", command=self._choose_rarities)
-        self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=2)
+            role="search_picker", command=self._choose_rarities)
+        self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_rarity(self):
         self._selected_rarities = set()
@@ -1271,34 +1599,40 @@ class SearchFeatureMixin:
     # Offering a mode its values cannot satisfy is worse than offering fewer.
     ANY_NONE_CHOICES = (("Any", "any"), ("None", "none"))
 
-    def _build_mode_row(self, parent, label, variable, noun, meanings=None,
+    def _build_mode_row(self, parent, variable, noun, meanings=None,
                         choices=None):
-        """One Any/All/None row, worded for the values it governs.
+        """Build one compact, consistently titled matching-mode row.
 
-        The single construction point for these rows. Card Type built its own
-        for a while and silently kept only Any and All when None was added
-        everywhere else, which is the failure this helper exists to prevent.
-        Callers may override the wording where they can say something more
-        precise than the generic phrasing.
+        The primary filter row already establishes what is being matched.
+        Keeping a single muted ``Match`` title and clustering Any / All / None
+        prevents the secondary control from reading like three unrelated
+        options spread across the full Search pane.
         """
         mode = ttk.Frame(parent)
-        mode.pack(fill="x", pady=(2, 0))
-        ttk.Label(mode, text=label, style="Muted.TLabel").pack(side="left")
+        mode.pack(fill="x", pady=MODE_ROW_PADY)
+        resolved_choices = tuple(choices or self.MODE_ROW_CHOICES)
+        mode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        title = ttk.Label(mode, text=MATCH_MODE_LABEL, style="Muted.TLabel")
+        title.grid(row=0, column=0, sticky="w")
         meanings = dict(meanings or {}) or {
-            "any": f"Any: the card only needs one of the selected {noun}.",
-            "all": f"All: the card must have every selected {noun}.",
-            "none": f"None: exclude every card having any selected {noun}.",
+            "any": (f"Any: a card only needs to match one selected {noun}. "
+                    "Selecting additional choices can broaden this filter."),
+            "all": (f"All: a card must match every selected {noun}. "
+                    "Selecting additional choices narrows this filter."),
+            "none": f"None: exclude cards that match any selected {noun}.",
         }
-        for text, value in (choices or self.MODE_ROW_CHOICES):
+        for offset, (text, value) in enumerate(resolved_choices, start=1):
             radio = ttk.Radiobutton(
                 mode, text=text, variable=variable, value=value,
                 style="FormChoice.TRadiobutton",
                 command=self._update_search_filter_summary)
-            radio.pack(side="left", padx=(3, 0))
+            radio.grid(
+                row=0, column=offset, sticky="w",
+                padx=(MODE_CONTROL_GAP if offset == 1 else MATCH_MODE_CHOICE_GAP, 0))
             self._add_tooltip(radio, meanings[value], wraplength=390)
         return mode
 
-    def _render_supertype_chips(self):
+    def _render_supertype_chips(self, *, force_placeholders=False):
         """Draw supertype chips when the filter is present.
 
         The trusted-catalog refresh runs whether or not the Supertypes filter
@@ -1311,16 +1645,18 @@ class SearchFeatureMixin:
         self._property_chip_widgets = self._render_trusted_chips(
             frame, self._property_catalog, self.property_vars,
             columns=SUPERTYPE_COLUMNS,
-            empty_text=getattr(self, "_supertype_empty_text", ""))
+            tooltip_key="supertypes",
+            loading_placeholders=SUPERTYPE_LOADING_SLOTS,
+            force_placeholders=force_placeholders)
 
     def _build_filter_supertypes(self, parent):
         box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="ew", pady=2)
+        box.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         self._property_chip_frame = ttk.Frame(box)
         self._property_chip_frame.pack(fill="x")
         self._render_supertype_chips()
         self._build_mode_row(
-            box, "Selected supertypes:", self.q_supertype_mode, "supertypes")
+            box, self.q_supertype_mode, "supertypes")
 
     def _reset_filter_supertypes(self):
         for variable in self.property_vars.values():
@@ -1333,8 +1669,8 @@ class SearchFeatureMixin:
             parent, text=self._picker_button_text(
                 self._selected_keywords, "Any", "mechanics",
                 max_visible=10, single_line=True),
-            role="picker", command=self._choose_keywords)
-        self._keyword_btn.grid(row=0, column=1, sticky="ew", pady=2)
+            role="search_picker", command=self._choose_keywords)
+        self._keyword_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_mechanics(self):
         self._selected_keywords = set()
@@ -1346,8 +1682,8 @@ class SearchFeatureMixin:
             parent, text=self._picker_button_text(
                 self._selected_subtypes, "Any", "subtypes",
                 max_visible=10, single_line=True),
-            role="picker", command=self._choose_subtypes)
-        self._subtype_btn.grid(row=0, column=1, sticky="ew", pady=2)
+            role="search_picker", command=self._choose_subtypes)
+        self._subtype_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_subtype(self):
         self._selected_subtypes = set()
@@ -1355,22 +1691,25 @@ class SearchFeatureMixin:
         self._subtype_btn = None
 
     def _build_filter_mana_value(self, parent):
-        pair = self._numeric_pair(parent, "q_cmc", width=5)
-        pair.grid(row=0, column=1, sticky="w", pady=2)
+        pair = self._numeric_pair(parent, "q_cmc", "mana_value")
+        pair.grid(row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_mana_value(self):
         self.q_cmc_min = None
         self.q_cmc_max = None
 
-    def _build_filter_stats(self, parent):
-        box = ttk.Frame(parent)
-        box.grid(row=0, column=1, sticky="w", pady=2)
-        ttk.Label(box, text="Power", style="Muted.TLabel").pack(
-            side="left", padx=(0, 5))
-        self._numeric_pair(box, "q_power").pack(side="left")
-        ttk.Label(box, text="Toughness", style="Muted.TLabel").pack(
-            side="left", padx=(14, 5))
-        self._numeric_pair(box, "q_toughness").pack(side="left")
+    def _build_filter_stats(self, parent, *, row=0):
+        """Build Power and Toughness as two aligned primary-range rows."""
+        for offset, (label_text, prefix) in enumerate((
+                ("Power", "q_power"), ("Toughness", "q_toughness"))):
+            self._build_search_row_label(
+                parent, label_text, row=row + offset, pady=SEARCH_ROW_PADY,
+                tooltip_key="stats")
+            pair = self._numeric_pair(parent, prefix, "stats")
+            pair.grid(
+                row=row + offset, column=1, columnspan=3, sticky="w",
+                pady=SEARCH_ROW_PADY)
+            self._add_standard_filter_tooltip(pair, "stats")
 
     def _reset_filter_stats(self):
         # Power/Toughness is a standard row, so its widgets outlive a Clear:
@@ -1381,20 +1720,18 @@ class SearchFeatureMixin:
 
 
     def _build_standard_stats_filter(self, form, *, row):
-        """Power / Toughness on the main form, styled like its neighbours."""
-        label = ttk.Label(form, text="Power / Toughness")
-        label.grid(row=row, column=0, sticky="w", padx=(0, 8),
-                   pady=SEARCH_ROW_PADY)
-        self._add_standard_filter_tooltip(label, "stats")
-        holder = ttk.Frame(form)
-        holder.grid(row=row, column=1, columnspan=3, sticky="ew",
-                    pady=SEARCH_ROW_PADY)
-        holder.columnconfigure(1, weight=1)
-        self._build_filter_stats(holder)
-        self._tooltip_row_controls(holder, filter_tooltip("stats"))
+        """Power and Toughness share the same global numeric range rails."""
+        self._build_filter_stats(form, row=row)
 
-    def _build_printing_filter(self, parent, *, row=0):
-        self._search_printings = SearchPrintingFilter(self, parent, row=row)
+    def _build_printing_filter(self, parent, *, row=0, show_label=True):
+        self._search_printings = SearchPrintingFilter(
+            self, parent, row=row, show_label=show_label)
+
+    def _build_filter_printings(self, parent):
+        self._build_printing_filter(parent, row=0, show_label=False)
+
+    def _reset_filter_printings(self):
+        self._search_printings.clear()
 
 
     def _content_types_from_traits(self):
@@ -1416,7 +1753,8 @@ class SearchFeatureMixin:
         return self._content_types_from_traits()
 
     def _render_trusted_chips(
-            self, frame, values, variables, *, columns=3, empty_text=None):
+            self, frame, values, variables, *, columns=3,
+            tooltip_key=None, loading_placeholders=0, force_placeholders=False):
         selected = {key for key, variable in variables.items() if bool(variable.get())}
         for child in frame.winfo_children():
             child.destroy()
@@ -1425,19 +1763,52 @@ class SearchFeatureMixin:
         for index, value in enumerate(values):
             variable = tk.BooleanVar(master=self, value=value in selected)
             variables[value] = variable
-            chip = self._filter_chip(frame, value, variable)
+            # A real one-pixel shell is used as the visible chip border.  Tk's
+            # Checkbutton highlight ring is not reliably painted on Windows.
+            shell = tk.Frame(
+                frame, bg=PALETTE["border"], bd=0, highlightthickness=0,
+                takefocus=0)
+            chip = self._filter_chip(shell, value, variable, anchor="center")
+            chip._ui_chip_border_shell = shell
+            chip.pack(fill="both", expand=True, padx=1, pady=1)
+            chip._sync_chip_contrast()
+            if tooltip_key:
+                self._add_standard_filter_tooltip(chip, tooltip_key)
+            if getattr(self, "_search_type_line_cold_start", False):
+                chip.configure(state="disabled")
             widgets.append(chip)
-            chip.grid(
-                row=index // columns, column=index % columns, sticky="ew",
-                padx=(0, CHIP_GRID_X_GAP), pady=2)
-            frame.columnconfigure(index % columns, weight=1)
-        if not values:
-            ttk.Label(
-                frame,
-                text=(empty_text or
-                      "No authoritative values available for this content."),
-                style="Muted.TLabel", justify="left", wraplength=500
-            ).grid(row=0, column=0, sticky="w", columnspan=max(1, columns))
+            chip_row = index // columns
+            chip_column = index % columns
+            chip_rows = max(1, math.ceil(len(values) / columns))
+            shell.grid(
+                row=chip_row, column=chip_column, sticky="ew",
+                padx=_chip_grid_padx(chip_column, columns),
+                pady=_chip_grid_pady(chip_row, chip_rows))
+            frame.columnconfigure(
+                chip_column, weight=1, uniform="search-trusted-chip")
+        if (not values and loading_placeholders and
+                (getattr(self, "_search_type_line_cold_start", False) or
+                 force_placeholders)):
+            placeholder_rows = max(1, math.ceil(loading_placeholders / columns))
+            for index in range(loading_placeholders):
+                shell = tk.Frame(
+                    frame, bg=PALETTE["border"], bd=0, highlightthickness=0,
+                    takefocus=0)
+                variable = tk.BooleanVar(master=self, value=False)
+                chip = self._filter_chip(shell, " ", variable, anchor="center")
+                chip._ui_chip_border_shell = shell
+                chip._mtg_loading_placeholder = True
+                chip.configure(state="disabled")
+                chip.pack(fill="both", expand=True, padx=1, pady=1)
+                chip_row = index // columns
+                chip_column = index % columns
+                shell.grid(
+                    row=chip_row, column=chip_column, sticky="ew",
+                    padx=_chip_grid_padx(chip_column, columns),
+                    pady=_chip_grid_pady(chip_row, placeholder_rows))
+                frame.columnconfigure(
+                    chip_column, weight=1, uniform="search-trusted-chip")
+                widgets.append(chip)
         return tuple(widgets)
 
     def _layout_card_type_chips(self, _event=None):
@@ -1466,17 +1837,33 @@ class SearchFeatureMixin:
             for index, widget in enumerate(widgets):
                 if not widget.winfo_exists():
                     return
-                widget.grid_configure(
-                    row=index // desired, column=index % desired, sticky="ew",
-                    padx=(0, CHIP_GRID_X_GAP), pady=2)
+                layout_widget = _chip_layout_widget(widget)
+                if not layout_widget.winfo_exists():
+                    return
+                chip_row = index // desired
+                chip_column = index % desired
+                chip_rows = max(1, math.ceil(len(widgets) / desired))
+                layout_widget.grid_configure(
+                    row=chip_row, column=chip_column, sticky="ew",
+                    padx=_chip_grid_padx(chip_column, desired),
+                    pady=_chip_grid_pady(chip_row, chip_rows))
             for column in range(CARD_TYPE_MAX_COLUMNS):
                 frame.columnconfigure(
-                    column, weight=(1 if column < desired else 0))
+                    column, weight=(1 if column < desired else 0),
+                    uniform=("search-card-type-chip" if column < desired else ""))
             self._card_type_chip_columns = desired
         except tk.TclError:
             return
 
     def _build_search_actions(self, parent):
+        # A visual-only boundary separates filter construction above from the
+        # result/action area below. It is deliberately just a separator in the
+        # same pane: no new container, sash, or geometry lock is introduced.
+        self._search_results_boundary = tk.Frame(
+            parent, bg=PALETTE["accent2"], height=SEARCH_RESULTS_BOUNDARY_HEIGHT,
+            bd=0, highlightthickness=0, takefocus=0)
+        self._search_results_boundary.pack(fill="x", pady=(8, 6))
+
         # Search controls stay on the left; deck actions sit as a visually separate
         # group on the right so adding a selected result is always close at hand.
         btns = ttk.Frame(parent)
@@ -1509,18 +1896,6 @@ class SearchFeatureMixin:
             search_actions, text="Clear", role="standard", width=5,
             command=self._clear_search)
         clear_btn.pack(side="left", padx=(4, 0))
-        self._add_tooltip(
-            clear_btn,
-            "Empties every filter, standard and advanced, and returns the "
-            "results to the top. The filters themselves stay where they are, "
-            "and the deck you are building is untouched.",
-            wraplength=340)
-        self._add_tooltip(
-            self._search_btn,
-            "Runs the search with every filter currently set. The active ones "
-            "are summarized on their own controls, so a filter you forgot is "
-            "the one whose button does not read Any.",
-            wraplength=340)
 
 
     def _build_results_table(self, parent):
@@ -1529,7 +1904,7 @@ class SearchFeatureMixin:
         result_head = ttk.Frame(parent)
         result_head.pack(fill="x", pady=(0, 3))
         self.results_count_lbl = ttk.Label(
-            result_head, text="RESULTS | 0 Cards", style="Section.TLabel")
+            result_head, text="RESULTS | 0 CARDS", style="Section.TLabel")
         self.results_count_lbl.pack(side="left")
         results_columns_btn = AppButton(
             result_head, text="Edit Columns", role="compact",
@@ -1643,7 +2018,9 @@ class SearchFeatureMixin:
         self.q_color_mode.set("within")
         self.q_color_scope.set("identity")
         self.q_produces_mode.set("includes")
-        self.q_trait_mode.set("any")
+        self.q_mana_feature_mode.set("any")
+        self.q_special_property_mode.set("any")
+        self.q_status_property_mode.set("any")
         self.q_layout_mode.set("any")
         for variable in self.card_type_vars.values():
             variable.set(False)
@@ -1656,7 +2033,8 @@ class SearchFeatureMixin:
             "card_types": set(), "supertypes": set(), "format": "",
             "rarities": set(), "keywords": set(), "subtypes": set(),
         }
-        self._search_printings.clear()
+        # Printings is now an Advanced row and was already cleared by its
+        # owning reset above.
         # Clearing can shorten what the rows display, so the Results viewport
         # would otherwise stay scrolled to wherever the taller panel had left
         # it. Return it to the first row along with the criteria.
@@ -1705,7 +2083,7 @@ class SearchFeatureMixin:
 
     def _open_search_multi_picker(self, title, values, selected, apply_callback,
                                   mode_var=None, mode_default="any",
-                                  mode_label="Selected values:",
+                                  mode_label=MATCH_MODE_LABEL,
                                   help_text="Type to narrow the list.",
                                   single_select=False, mode_choices=None,
                                   mode_command=None):
@@ -1731,8 +2109,9 @@ class SearchFeatureMixin:
             self._contextual_subtype_values(),
             self._selected_subtypes, apply,
             mode_var=self.q_subtype_mode,
-            mode_label="Selected subtypes:",
-            help_text="Choose one or several card subtypes.")
+            mode_label=MATCH_MODE_LABEL,
+            help_text=("Choose one or more subtypes. Counts show matches under the other "
+                       "current filters; available matches appear first."))
 
 
     def _choose_keywords(self):
@@ -1749,8 +2128,9 @@ class SearchFeatureMixin:
                 self._keyword_catalog, "keyword_counts", self._selected_keywords),
             self._selected_keywords, apply,
             mode_var=self.q_keyword_mode,
-            mode_label="Selected mechanics:",
-            help_text="Choose one or several card mechanics.")
+            mode_label=MATCH_MODE_LABEL,
+            help_text=("Choose one or more mechanics. Counts show matches under the other "
+                       "current filters; available matches appear first."))
 
 
     def _contextual_picker_values(self, catalog, count_attribute, selected=()):
@@ -1832,17 +2212,31 @@ class SearchFeatureMixin:
                 pass
         tip.text = base if not suffix else f"{base}\n\n{suffix}"
 
-    def _apply_context_chip_state(self, widgets, catalog, counts, variables):
+    @staticmethod
+    def _context_choice_text(count, selected, noun="choice"):
+        """Describe one predictive choice without overstating union-mode totals."""
+        count = max(0, int(count or 0))
+        if count > 0:
+            card_word = "card" if count == 1 else "cards"
+            return f"{count:,} {card_word} match this {noun} with the other current filters."
+        if selected:
+            return (
+                f"No cards matching the other current filters also match this selected {noun}. "
+                "It stays available so you can deselect it.")
+        return (
+            f"Not available with the current filters. No cards match this {noun}.")
+
+    def _apply_context_chip_state(self, widgets, catalog, counts, variables, *, noun="choice"):
         """Mark zero-result trusted chips unavailable without trapping selection."""
         for value, widget in zip(catalog or (), widgets or ()):
             try:
                 count = int((counts or {}).get(value, 0))
                 available = count > 0
+                selected = bool(variables.get(value) and variables[value].get())
                 availability = getattr(widget, "set_context_availability", None)
                 if callable(availability):
                     availability(available, allow_selected_clear=True)
                 else:
-                    selected = bool(variables.get(value) and variables[value].get())
                     widget.configure(
                         state=("normal" if available or selected else "disabled"),
                         fg=(PALETTE["text"] if available else PALETTE["bad"]),
@@ -1851,8 +2245,7 @@ class SearchFeatureMixin:
                 if getattr(widget, "_mtg_tooltip", None) is None:
                     self._add_tooltip(
                         widget,
-                        (f"{count:,} cards match this option under the other "
-                         "current filters."),
+                        self._context_choice_text(count, selected, noun),
                         wraplength=320)
                     try:
                         widget._context_tooltip_base = ""
@@ -1861,20 +2254,58 @@ class SearchFeatureMixin:
                 else:
                     self._context_set_tooltip(
                         widget,
-                        (f"{count:,} cards match this option under the other "
-                         "current filters."))
+                        self._context_choice_text(count, selected, noun))
             except (tk.TclError, AttributeError):
                 pass
 
     @staticmethod
     def _context_range_text(bounds, applicable, noun):
         if not applicable or not bounds:
-            return f"No cards under the other current filters have numeric {noun}."
+            return (
+                f"Not available with the current filters. No matching cards have numeric {noun}.")
         low, high = bounds
         def shown(value):
             number = float(value)
             return str(int(number)) if number.is_integer() else f"{number:g}"
-        return f"Available under the other current filters: {shown(low)} to {shown(high)}."
+        card_word = "card" if int(applicable) == 1 else "cards"
+        return (
+            f"With the other current filters, {int(applicable):,} {card_word} have numeric {noun}, "
+            f"ranging from {shown(low)} to {shown(high)}.")
+
+    @staticmethod
+    def _context_widget_has_value(widget):
+        if widget is None:
+            return False
+        try:
+            return bool(str(widget.get()).strip())
+        except (tk.TclError, AttributeError):
+            return False
+
+    def _set_context_field_pair_availability(self, widgets, available):
+        """Disable an empty inapplicable range while keeping conflicts clearable."""
+        widgets = tuple(widget for widget in widgets if widget is not None)
+        selected = any(self._context_widget_has_value(widget) for widget in widgets)
+        enabled = bool(available or selected)
+        for widget in widgets:
+            try:
+                widget.state(["!disabled"] if enabled else ["disabled"])
+            except (tk.TclError, AttributeError):
+                pass
+        return enabled
+
+    @staticmethod
+    def _set_context_check_availability(widget, variable, available):
+        """Disable one zero-result choice unless it is selected and must be clearable."""
+        if widget is None:
+            return False
+        selected = bool(variable is not None and variable.get())
+        enabled = bool(available or selected)
+        try:
+            widget._mtg_context_available = bool(available)
+            widget.state(["!disabled"] if enabled else ["disabled"])
+        except (tk.TclError, AttributeError):
+            pass
+        return enabled
 
     def _apply_live_context_presentation(self):
         snapshot = getattr(self, "_context_snapshot", None)
@@ -1883,28 +2314,40 @@ class SearchFeatureMixin:
             return
 
         self._refresh_split_trait_button_texts()
-        indicator_count = int((snapshot.trait_counts or {}).get("color_indicator", 0))
-        self._context_set_tooltip(
-            getattr(self, "_color_indicator_check", None),
-            f"With this property: {indicator_count:,} cards.")
         self._apply_context_chip_state(
             getattr(self, "_card_type_chip_widgets", ()),
             getattr(self, "_card_type_catalog", ()), snapshot.card_type_counts,
-            self.card_type_vars)
+            self.card_type_vars, noun="card type")
         self._apply_context_chip_state(
             getattr(self, "_property_chip_widgets", ()),
             getattr(self, "_property_catalog", ()), snapshot.supertype_counts,
-            self.property_vars)
+            self.property_vars, noun="supertype")
 
         for key, widget in getattr(self, "_color_checks", {}).items():
             count = int((snapshot.color_counts or {}).get(key, 0))
-            self._context_set_tooltip(widget, f"With this color choice: {count:,} cards.")
+            self._set_context_check_availability(
+                widget, self.color_vars.get(key), count > 0)
+            selected = bool(self.color_vars.get(key) and self.color_vars[key].get())
+            self._context_set_tooltip(
+                widget, self._context_choice_text(count, selected, "Mana Color choice"))
         for key, widget in getattr(self, "_produces_checks", {}).items():
             count = int((snapshot.produces_counts or {}).get(key, 0))
-            self._context_set_tooltip(widget, f"With this mana-production choice: {count:,} cards.")
+            self._set_context_check_availability(
+                widget, self.produces_vars.get(key), count > 0)
+            selected = bool(self.produces_vars.get(key) and self.produces_vars[key].get())
+            self._context_set_tooltip(
+                widget, self._context_choice_text(count, selected, "Mana Produced choice"))
         for key, widget in getattr(self, "_pip_checks", {}).items():
             count = int((snapshot.pip_counts or {}).get(key, 0))
-            self._context_set_tooltip(widget, f"With this mana-symbol requirement: {count:,} cards.")
+            self._set_context_check_availability(
+                widget, self.pip_vars.get(key), count > 0)
+            selected = bool(self.pip_vars.get(key) and self.pip_vars[key].get())
+            self._context_set_tooltip(
+                widget, self._context_choice_text(count, selected, "mana-symbol requirement"))
+        # Colorless has an additional semantic exclusion: it cannot coexist
+        # with an actual card color. Reapply that rule after contextual state
+        # so a positive predictive count cannot re-enable an impossible choice.
+        self._sync_colorless_availability(update_summary=False)
 
         numeric_widgets = {
             "cmc": (getattr(self, "q_cmc_min", None), getattr(self, "q_cmc_max", None), "mana value"),
@@ -1914,19 +2357,27 @@ class SearchFeatureMixin:
             "defense": (getattr(self, "q_defense_min", None), getattr(self, "q_defense_max", None), "defense"),
         }
         for key, (low_widget, high_widget, noun) in numeric_widgets.items():
+            applicable = int((snapshot.numeric_applicability or {}).get(key, 0))
             suffix = self._context_range_text(
                 (snapshot.numeric_ranges or {}).get(key),
-                int((snapshot.numeric_applicability or {}).get(key, 0)), noun)
+                applicable, noun)
             self._context_set_tooltip(low_widget, suffix)
             self._context_set_tooltip(high_widget, suffix)
+            if key in {"cmc", "power", "toughness", "loyalty", "defense"}:
+                self._set_context_field_pair_availability(
+                    (low_widget, high_widget), applicable > 0)
 
         release_suffix = (
-            f"Available under the other current filters: {snapshot.release_years[0]} to "
-            f"{snapshot.release_years[-1]}."
+            f"With the other current filters, qualifying release years range from "
+            f"{snapshot.release_years[0]} to {snapshot.release_years[-1]}."
             if snapshot.release_years else
-            "No release years occur under the other current filters.")
+            "Not available with the current filters. No matching printings have a release year.")
         self._context_set_tooltip(getattr(self, "q_released_min", None), release_suffix)
         self._context_set_tooltip(getattr(self, "q_released_max", None), release_suffix)
+        self._set_context_field_pair_availability(
+            (getattr(self, "q_released_min", None),
+             getattr(self, "q_released_max", None)),
+            bool(snapshot.release_years))
 
         printings = getattr(self, "_search_printings", None)
         if printings is not None and hasattr(printings, "apply_context_snapshot"):
@@ -2085,11 +2536,11 @@ class SearchFeatureMixin:
             selected,
             apply,
             help_text=(
-                "Choose a format, then the legality it must have in it. "
-                "Only formats that have cards in the chosen state are listed."),
+                "Choose a format and the legality it must have. "
+                "Only formats available for that legality are shown."),
             single_select=True,
             mode_var=self.q_format_status,
-            mode_label="Legality:",
+            mode_label="Legality",
             mode_choices=FORMAT_STATUS_CHOICES,
             mode_command=self._rescope_format_choices)
 
@@ -2107,7 +2558,8 @@ class SearchFeatureMixin:
                 [(r, r.replace("_", " ").capitalize()) for r in self._rarity_catalog],
                 "rarity_counts", self._selected_rarities),
             self._selected_rarities, apply,
-            help_text="Choose one or several rarities.")
+            help_text=("Choose one or more rarities. Counts show qualifying matches under the "
+                       "other current filters; available matches appear first."))
 
     def _capture_catalog_filter_state(self):
         return {
@@ -2123,11 +2575,24 @@ class SearchFeatureMixin:
 
     def _set_search_catalog_controls_enabled(self, enabled):
         """Keep trusted-filter geometry stable while a cold scope loads."""
-        state = "normal" if enabled else "disabled"
-        for widget in tuple(getattr(self, "_card_type_chip_widgets", ())) + tuple(
-                getattr(self, "_property_chip_widgets", ())):
+        card_type_state = (
+            "normal" if enabled and getattr(
+                self, "_card_type_authority_available", False) else "disabled")
+        supertype_state = (
+            "normal" if enabled and getattr(
+                self, "_supertype_authority_available", False) else "disabled")
+        for widget in tuple(getattr(self, "_card_type_chip_widgets", ())):
             try:
-                widget.configure(state=state)
+                if enabled and getattr(widget, "_mtg_loading_placeholder", False):
+                    continue
+                widget.configure(state=card_type_state)
+            except (tk.TclError, AttributeError):
+                pass
+        for widget in tuple(getattr(self, "_property_chip_widgets", ())):
+            try:
+                if enabled and getattr(widget, "_mtg_loading_placeholder", False):
+                    continue
+                widget.configure(state=supertype_state)
             except (tk.TclError, AttributeError):
                 pass
         for name in ("_format_btn", "_rarity_btn", "_keyword_btn", "_subtype_btn"):
@@ -2224,37 +2689,40 @@ class SearchFeatureMixin:
             isinstance(supertype_status, (tuple, list))
             and supertype_status and supertype_status[0])
 
-        self._card_type_catalog = list(snapshot.card_types)
-        self._property_catalog = list(snapshot.supertypes)
-        card_type_empty_text = None
-        if not card_type_authority_available:
-            card_type_empty_text = (
-                "Scryfall Card Type taxonomy is unavailable. "
-                "Use Database > Update Database to retry.")
-            if len(card_type_status) > 1 and card_type_status[1]:
-                card_type_empty_text += (
-                    "\nLast error: "
-                    + " ".join(str(card_type_status[1]).split())[:220])
+        # Inline Type Line prose is intentionally forbidden. During database
+        # startup an accepted snapshot can temporarily report a taxonomy as
+        # unavailable; preserve the last trusted labels and keep them disabled
+        # instead of replacing the chip row with a status sentence. A true
+        # cold start uses disabled blank chip shells until authority arrives.
+        if card_type_authority_available:
+            self._card_type_catalog = list(snapshot.card_types)
+        if supertype_authority_available:
+            self._property_catalog = list(snapshot.supertypes)
+        self._card_type_authority_available = card_type_authority_available
+        self._supertype_authority_available = supertype_authority_available
+        self._search_type_line_cold_start = False
+        preferences = getattr(self, "_ui_preferences_repository", None)
+        if preferences is not None and (
+                card_type_authority_available or supertype_authority_available):
+            try:
+                preferences.save_search_type_line_catalogs(
+                    self._card_type_catalog, self._property_catalog)
+            except OSError:
+                log.debug("Could not save Type Line warm-start catalogs", exc_info=True)
+
         self._card_type_chip_widgets = ()
         self._card_type_chip_columns = CARD_TYPE_MIN_COLUMNS
         self._card_type_chip_widgets = self._render_trusted_chips(
             self._card_type_chip_frame, self._card_type_catalog, self.card_type_vars,
-            columns=CARD_TYPE_MIN_COLUMNS, empty_text=card_type_empty_text)
+            columns=CARD_TYPE_MIN_COLUMNS, tooltip_key="card_type",
+            loading_placeholders=CARD_TYPE_LOADING_SLOTS,
+            force_placeholders=not card_type_authority_available)
         for value, variable in self.card_type_vars.items():
             variable.set(value in pending["card_types"])
         self._layout_card_type_chips()
 
-        supertype_empty_text = None
-        if not supertype_authority_available:
-            supertype_empty_text = (
-                "Official Wizards Supertype taxonomy is unavailable. "
-                "Use Database > Update Database to retry.")
-            if len(supertype_status) > 1 and supertype_status[1]:
-                supertype_empty_text += (
-                    "\nLast error: "
-                    + " ".join(str(supertype_status[1]).split())[:220])
-        self._supertype_empty_text = supertype_empty_text
-        self._render_supertype_chips()
+        self._render_supertype_chips(
+            force_placeholders=not supertype_authority_available)
         for value, variable in self.property_vars.items():
             variable.set(value in pending["supertypes"])
 
@@ -2327,6 +2795,15 @@ class SearchFeatureMixin:
         self._search_catalog_loading = False
         self._set_search_catalog_controls_enabled(True)
         self._update_search_filter_summary()
+        unavailable = []
+        if not card_type_authority_available:
+            unavailable.append(
+                "Scryfall Card Type taxonomy is unavailable; use Database > Update Database to retry.")
+        if not supertype_authority_available:
+            unavailable.append(
+                "Official Wizards Supertype taxonomy is unavailable; use Database > Update Database to retry.")
+        if unavailable:
+            self._status(" ".join(unavailable))
         self._resume_pending_search_request()
 
     def _resume_pending_search_request(self):
@@ -2435,12 +2912,20 @@ class SearchFeatureMixin:
             "color_mode": self.q_color_mode.get(),
             "color_scope": self.q_color_scope.get(),
             "produces_mode": self.q_produces_mode.get(),
-            "trait_mode": self.q_trait_mode.get(),
+            "pip_mode": self.q_pip_mode.get(),
+            "mana_feature_mode": self.q_mana_feature_mode.get(),
+            "special_property_mode": self.q_special_property_mode.get(),
+            "status_property_mode": self.q_status_property_mode.get(),
             "format_status": self.q_format_status.get(),
             "advanced_expanded": bool(getattr(self, "_advanced_expanded", False)),
             "advanced_values": self._capture_advanced_filter_values(),
+            # Keep the legacy key content-only so older builds do not mistake
+            # new independent property groups for one global OR/AND bucket.
             "traits": sorted(
                 getattr(self, "_selected_traits", set()) or ()),
+            "mana_features": sorted(self._selected_mana_features),
+            "special_properties": sorted(self._selected_special_properties),
+            "status_properties": sorted(self._selected_status_properties),
             "layouts": sorted(getattr(self, "_selected_layouts", set()) or ()),
             "layout_mode": self.q_layout_mode.get(),
             "pips": sorted(
@@ -2566,7 +3051,16 @@ class SearchFeatureMixin:
              {"identity", "colors"}, "identity"),
             (self.q_produces_mode, state.get("produces_mode"),
              {"within", "includes", "exact"}, "includes"),
-            (self.q_trait_mode, state.get("trait_mode"),
+            (self.q_pip_mode, state.get("pip_mode"),
+             {"any", "all", "none"}, "all"),
+            (self.q_mana_feature_mode,
+             state.get("mana_feature_mode", state.get("trait_mode")),
+             {"any", "all", "none"}, "any"),
+            (self.q_special_property_mode,
+             state.get("special_property_mode", state.get("trait_mode")),
+             {"any", "all", "none"}, "any"),
+            (self.q_status_property_mode,
+             state.get("status_property_mode", state.get("trait_mode")),
              {"any", "all", "none"}, "any"),
             (self.q_layout_mode, state.get("layout_mode"),
              {"any", "none"}, "any"),
@@ -2583,16 +3077,37 @@ class SearchFeatureMixin:
         # Advanced rows always exist, so only its open/closed state is
         # restored; a session that was working in Advanced reopens there.
         self._toggle_advanced_filters(bool(state.get("advanced_expanded", False)))
-        self._selected_traits = {
+        legacy_properties = {
             str(value) for value in state.get("traits", []) or ()
             if str(value) in TRAIT_LABELS and str(value) not in CONTENT_TRAIT_KEYS
-        } | restored_content_traits
+        }
+        self._selected_traits = set(restored_content_traits)
+        self._selected_mana_features = {
+            str(value) for value in state.get(
+                "mana_features", legacy_properties & set(MANA_COST_FEATURE_KEYS)) or ()
+            if str(value) in MANA_COST_FEATURE_KEYS}
+        self._selected_special_properties = {
+            str(value) for value in state.get(
+                "special_properties", legacy_properties & set(SPECIAL_PROPERTY_KEYS)) or ()
+            if str(value) in SPECIAL_PROPERTY_KEYS}
+        self._selected_status_properties = {
+            str(value) for value in state.get(
+                "status_properties", legacy_properties & set(STATUS_PROPERTY_KEYS)) or ()
+            if str(value) in STATUS_PROPERTY_KEYS}
+        # Legacy Single-faced is the complement of the new Has multiple faces
+        # property.  Preserve the common one-property workspace case by
+        # translating it to Match None rather than re-exposing Single-faced.
+        if ("special_properties" not in state and
+                legacy_properties == {"single_faced"}):
+            self._selected_special_properties = {"multi_faced"}
+            self.q_special_property_mode.set(
+                "any" if state.get("trait_mode") == "none" else "none")
         self._refresh_split_trait_button_texts()
         # Workspaces written before the standard/advanced split named this
         # key "optional_values"; the values inside it never changed.
         self._restore_advanced_filter_values(
             state.get("advanced_values", state.get("optional_values", {})))
-        # Produces is restored here rather than with Colors: its checkboxes
+        # Produces is restored here rather than with Mana Color: its checkboxes
         # belong to an advanced row, so anything set before the rows are
         # rebuilt is discarded along with the widgets that held it.
         wanted_produces = {str(value) for value in state.get("produces", [])}
@@ -2729,10 +3244,18 @@ class SearchFeatureMixin:
             color_mode=self.q_color_mode.get(), color_scope=self.q_color_scope.get(),
             produces=[value for value, variable in self.produces_vars.items() if variable.get()],
             produces_mode=self.q_produces_mode.get(),
-            traits=self._selected_trait_keys(), trait_mode=self.q_trait_mode.get(),
+            # Legacy global traits stay empty in the interactive UI. Each
+            # property family owns its own Match mode.
+            traits=(), trait_mode="any",
+            mana_features=sorted(self._selected_mana_features),
+            mana_feature_mode=self.q_mana_feature_mode.get(),
+            special_properties=sorted(self._selected_special_properties),
+            special_property_mode=self.q_special_property_mode.get(),
+            status_properties=sorted(self._selected_status_properties),
+            status_property_mode=self.q_status_property_mode.get(),
             layouts=sorted(self._selected_layouts), layout_mode=self.q_layout_mode.get(),
             pips=[value for value, variable in self.pip_vars.items() if variable.get()],
-            pip_min=numeric["q_pip_min"],
+            pip_mode=self.q_pip_mode.get(), pip_min=numeric["q_pip_min"],
             loyalty_min=numeric["q_loyalty_min"], loyalty_max=numeric["q_loyalty_max"],
             defense_min=numeric["q_defense_min"], defense_max=numeric["q_defense_max"],
             released_from=numeric["q_released_min"], released_to=numeric["q_released_max"],

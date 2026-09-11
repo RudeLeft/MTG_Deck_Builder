@@ -276,7 +276,7 @@ class TableFilterMixin:
         picks = tk.Frame(editor, bg=PALETTE["surface2"])
         picks.pack(fill="x", pady=(5, 0))
         ClassicButton(
-            picks, text="Select all", role="compact",
+            picks, text="Select All", role="compact",
             command=lambda: checklist.select_all(True)).pack(side="left")
         ClassicButton(
             picks, text="Clear", role="compact",
@@ -319,7 +319,7 @@ class TableFilterMixin:
         action = tk.Frame(outer, bg=PALETTE["surface2"])
         action.pack(fill="x", pady=(8, 0))
         ClassicButton(
-            action, text="Clear this", role="compact",
+            action, text="Clear This", role="compact",
             command=lambda: self._clear_table_filter(view, key)).pack(side="left")
         ClassicButton(
             action, text="Apply", role="compact_primary",

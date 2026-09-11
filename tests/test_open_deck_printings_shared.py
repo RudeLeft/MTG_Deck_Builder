@@ -1,4 +1,4 @@
-"""Open Deck must compose the same authoritative Printings component as Search."""
+"""Open Deck TXT resolution must be independent of interactive filters."""
 
 from pathlib import Path
 import sys
@@ -9,46 +9,30 @@ sys.path.insert(0, str(ROOT))
 import mtgdb.ui.deck_files as deck_files
 from mtgdb.deck.io import deck_from_text
 from mtgdb.ui.deck_files import DeckFileWorkflowMixin
-from mtgdb.ui.set_filters import PrintingFilter
-from mtgdb.ui.search_printings import SearchPrintingFilter
 
 
-class _Var:
-    def __init__(self, value=False):
-        self.value = bool(value)
+class _ImmediateFuture:
+    def __init__(self, value):
+        self._value = value
 
-    def get(self):
-        return self.value
-
-
-class _FakePicker:
-    last = None
-
-    def __init__(self, owner, **kwargs):
-        self.owner = owner
-        self.kwargs = kwargs
-        self.paper_only = _Var(False)
-        self.refreshed = 0
-        self.done_text = None
-        _FakePicker.last = self
-
-    def refresh_catalog(self):
-        self.refreshed += 1
-
-    def run_modal(self, *, done_text="Done"):
-        self.done_text = done_text
-        return True
-
-    def selected_set_types(self):
-        return {"commander"}
-
-    def selected_set_codes(self):
-        return {"cmd"}
+    def result(self):
+        return self._value
 
 
 class _Owner(DeckFileWorkflowMixin):
     def __init__(self):
-        self.search_repository = object()
+        self.db = object()
+        self.statuses = []
+        self.opened = []
+
+    def _status(self, text):
+        self.statuses.append(text)
+
+    def _append_deck_session(self, deck, *, path=None, dirty=False):
+        self.opened.append((deck, path, dirty))
+
+    def _poll_deck_file_job(self, future, on_success, *, error_title):
+        on_success(future.result())
 
 
 class _Resolver:
@@ -59,69 +43,85 @@ class _Resolver:
     def get_by_name(self, name, **options):
         self.calls.append((name, options))
         self.counter += 1
+        allowed = options.get("allowed_set_codes")
         return {
-            "id": f"card-{self.counter}", "name": name,
-            "set_code": next(iter(options.get("allowed_set_codes") or {"cmd"})),
+            "id": f"card-{self.counter}",
+            "name": name,
+            "set_code": next(iter(allowed)) if allowed else "any",
         }
 
 
 def main():
     source = (ROOT / "mtgdb/ui/deck_files.py").read_text(encoding="utf-8")
-    set_source = (ROOT / "mtgdb/ui/set_filters.py").read_text(encoding="utf-8")
+    app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
+    deck_source = (ROOT / "mtgdb/ui/deck.py").read_text(encoding="utf-8")
 
-    original_picker = deck_files._DeckImportPrintingFilter
-    original_boolean_var = deck_files.tk.BooleanVar
-    deck_files._DeckImportPrintingFilter = _FakePicker
-    deck_files.tk.BooleanVar = lambda master=None, value=False: _Var(value)
+    captured = {}
+    original_dialog = deck_files.filedialog.askopenfilename
+    original_read = deck_files.read_deck_text
+    original_parse = deck_files.deck_from_text
+    original_submit = deck_files.submit_deck_file_job
     try:
+        deck_files.filedialog.askopenfilename = lambda **_kwargs: "/tmp/example.txt"
+        deck_files.read_deck_text = lambda _path: "1 Any Card\n"
+
+        def fake_parse(raw, resolver, **kwargs):
+            captured["raw"] = raw
+            captured["resolver"] = resolver
+            captured["kwargs"] = kwargs
+            return object(), []
+
+        deck_files.deck_from_text = fake_parse
+        deck_files.submit_deck_file_job = (
+            lambda fn, *args, **_kwargs: _ImmediateFuture(fn(*args)))
+
         owner = _Owner()
-        result = owner._choose_import_sets()
-        picker = _FakePicker.last
+        owner._open_deck()
     finally:
-        deck_files._DeckImportPrintingFilter = original_picker
-        deck_files.tk.BooleanVar = original_boolean_var
+        deck_files.filedialog.askopenfilename = original_dialog
+        deck_files.read_deck_text = original_read
+        deck_files.deck_from_text = original_parse
+        deck_files.submit_deck_file_job = original_submit
 
     resolver = _Resolver()
     imported, missing = deck_from_text(
         "1 Untagged Card\n1 Tagged Card [TST:7]\n",
         resolver,
-        allowed_set_types={"commander"},
-        allowed_set_codes={"cmd"},
-        paper_only=True,
-        lang="en",
+        allowed_set_types=None,
+        allowed_set_codes=None,
+        paper_only=False,
+        lang=None,
     )
     untagged_options = resolver.calls[0][1]
     tagged_options = resolver.calls[1][1]
 
     checks = {
-        "Search adapter subclasses the shared PrintingFilter": (
-            issubclass(SearchPrintingFilter, PrintingFilter)),
-        "Open Deck has no second bespoke Printings dialog": (
-            "class _DeckImportSetsDialog" not in source
-            and "PrintingFilter(" in source
-            and "class PrintingFilter" in set_source),
-        "Open Deck remains Cards-only while Search may expose Art Series": (
-            result == ({"commander"}, {"cmd"}, False, "en")
-            and picker.refreshed == 1
-            and picker.done_text == "Open Deck"
-            and picker.kwargs["content_types_getter"]() == ("card",)
-            and picker.kwargs["english_variable"].get() is True),
-        "Open Deck Printings keeps only the requested resolver guidance": (
-            picker.kwargs["intro_text"]
-            == "Choose which printings may resolve untagged cards."
-            and "Explicit [SET]" not in source),
-        "untagged TXT cards honor the shared Printings scope": (
-            untagged_options.get("allowed_set_types") == {"commander"}
-            and untagged_options.get("allowed_set_codes") == {"cmd"}
-            and untagged_options.get("paper_only") is True
-            and untagged_options.get("lang") == "en"),
-        "explicit printing tags remain authoritative over picker scope": (
+        "File menu and deck + menu share the same Open Deck command": (
+            'label="Open Deck...", command=self._open_deck' in app_source
+            and 'label="Open Deck TXT...", command=self._open_deck' in deck_source),
+        "Open Deck no longer opens or depends on a Printings scope picker": (
+            "_choose_import_sets" not in source
+            and "_DeckImportPrintingFilter" not in source
+            and "PrintingFilter" not in source),
+        "Open Deck passes an unrestricted resolver scope": (
+            captured.get("raw") == "1 Any Card\n"
+            and captured.get("resolver") is owner.db
+            and captured.get("kwargs", {}).get("allowed_set_types") is None
+            and captured.get("kwargs", {}).get("allowed_set_codes") is None
+            and captured.get("kwargs", {}).get("paper_only") is False
+            and captured.get("kwargs", {}).get("lang") is None),
+        "untagged TXT names resolve against the complete local card database": (
+            untagged_options.get("allowed_set_types") is None
+            and untagged_options.get("allowed_set_codes") is None
+            and untagged_options.get("paper_only") is False
+            and untagged_options.get("lang") is None),
+        "explicit printing tags remain authoritative during unrestricted import": (
             tagged_options.get("allowed_set_types") is None
             and tagged_options.get("allowed_set_codes") == {"tst"}
             and tagged_options.get("allowed_collector_numbers") == {"7"}
             and tagged_options.get("paper_only") is False
             and tagged_options.get("lang") is None),
-        "shared-scope import still resolves both rows": (
+        "unrestricted import still resolves both rows": (
             not missing and imported.total("main") == 2),
     }
 
@@ -129,7 +129,7 @@ def main():
     for label, passed in checks.items():
         print(f"  [{'PASS' if passed else 'FAIL'}] {label}")
         ok &= bool(passed)
-    print("\nOPEN DECK SHARED PRINTINGS:", "ALL PASS" if ok else "FAILURES")
+    print("\nOPEN DECK FULL DATABASE:", "ALL PASS" if ok else "FAILURES")
     return 0 if ok else 1
 
 

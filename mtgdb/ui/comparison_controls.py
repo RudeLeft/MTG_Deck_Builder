@@ -12,12 +12,11 @@ from mtgdb.ui.comparison import CardComparisonWindow
 from mtgdb.ui.components import AppButton, AppMenubutton, deck_board_label
 from mtgdb.ui.tokens import (
     FONT_BODY,
-    FONT_DIALOG_TITLE,
     PALETTE,
 )
 
 
-COMPARISON_OVER_LIMIT_NOTE = " (Too Many Cards Selected)"
+COMPARISON_OVER_LIMIT_NOTE = " (TOO MANY CARDS SELECTED)"
 
 
 def comparison_selection_overflows(compared_count, pending_count,
@@ -82,12 +81,12 @@ class ComparisonFeatureMixin:
         title_row = ttk.Frame(bar)
         title_row.pack(fill="x", pady=(0, 5))
         self._comparison_selection_lbl = ttk.Label(
-            title_row, text="COMPARE | Cards Selected: 0",
+            title_row, text="COMPARE | 0 CARDS SELECTED",
             style="Section.TLabel", anchor="w")
         # Fill the row so the heading measures the available pane width: the
         # over-limit wording is far wider than the plain count and MUST wrap
         # instead of clipping at elevated Tk scaling (LAY-004).  anchor="w"
-        # keeps the text on the same left edge as MAINBOARD | Cards: N.
+        # keeps the text on the same left edge as MAINBOARD | N CARDS.
         self._comparison_selection_lbl.pack(
             side="left", anchor="w", fill="x", expand=True)
         self._bind_debounced_wrap(self._comparison_selection_lbl)
@@ -608,7 +607,7 @@ class ComparisonFeatureMixin:
         over_limit_note = COMPARISON_OVER_LIMIT_NOTE if over_limit else ""
         if self._comparison_selection_lbl is not None:
             self._comparison_selection_lbl.configure(
-                text=f"COMPARE | Cards Selected: {selected_count}{over_limit_note}")
+                text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}")
         self._set_comparison_over_limit(over_limit)
         if self._comparison_add_selected_btn is not None:
             self._comparison_add_selected_btn.state(
@@ -703,9 +702,8 @@ class ComparisonFeatureMixin:
             popup, bg=PALETTE["surface"], padx=18, pady=16,
             highlightthickness=1, highlightbackground=PALETTE["border"])
         shell.pack(fill="both", expand=True, padx=10, pady=10)
-        tk.Label(
-            shell, text=str(title), bg=PALETTE["surface"], fg=PALETTE["text"],
-            font=FONT_DIALOG_TITLE, anchor="w",
+        ttk.Label(
+            shell, text=str(title), style="DialogTitle.TLabel", anchor="w",
         ).pack(fill="x", pady=(0, 10))
         tk.Label(
             shell, text=str(message), bg=PALETTE["surface"], fg=PALETTE["text"],
@@ -772,6 +770,22 @@ class ComparisonFeatureMixin:
             except tk.TclError:
                 pass
         self._show_card(card)
+        self._popup_result_add_menu(event.x_root, event.y_root)
+
+    def _show_gallery_card_context_menu(self, card, x_root, y_root):
+        """Apply the Results context actions to one Gallery card."""
+        card = dict(card or {})
+        card_id = str(card.get("id") or "")
+        if not card_id:
+            return
+        if not self._result_select_card_id(
+                card_id, additive=False, ensure_visible=False):
+            return
+        self._show_card(card)
+        self._popup_result_add_menu(x_root, y_root)
+
+    def _popup_result_add_menu(self, x_root, y_root):
+        """Show the shared Results/Gallery deck-add context menu."""
         menu = self._dark_menu()
         menu.add_command(
             label="Add to Mainboard",
@@ -780,7 +794,7 @@ class ComparisonFeatureMixin:
             label="Add to Sideboard",
             command=lambda: self._add_to_deck("side"))
         try:
-            menu.tk_popup(event.x_root, event.y_root)
+            menu.tk_popup(x_root, y_root)
         finally:
             try:
                 menu.grab_release()

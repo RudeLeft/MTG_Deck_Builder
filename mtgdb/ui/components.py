@@ -52,6 +52,8 @@ _BUTTON_STYLES = {
     "compact_primary": "CompactPrimary.TButton",
     "deck": "DeckControl.TButton",
     "picker": "Picker.TButton",
+    "search_picker": "SearchPicker.TButton",
+    "search_section": "SearchSection.TButton",
     "dense": "SearchRow.TButton",
     "dense_primary": "SearchRowAccent.TButton",
 }
@@ -208,9 +210,9 @@ class AppSpinbox(ttk.Spinbox):
 
 _CLASSIC_BUTTON_ROLES = {
     "secondary": {
-        "bg": PALETTE["surface3"], "fg": PALETTE["text"],
-        "activebackground": PALETTE["surface"],
-        "activeforeground": PALETTE["accent"],
+        "bg": PALETTE["surface2"], "fg": PALETTE["text"],
+        "activebackground": PALETTE["surface3"],
+        "activeforeground": PALETTE["text"],
         "font": FONT_BODY, "padx": 10, "pady": 4,
     },
     "primary": {
@@ -220,9 +222,9 @@ _CLASSIC_BUTTON_ROLES = {
         "font": FONT_BODY_BOLD, "padx": 12, "pady": 4,
     },
     "compact": {
-        "bg": PALETTE["surface3"], "fg": PALETTE["text"],
-        "activebackground": PALETTE["surface"],
-        "activeforeground": PALETTE["accent"],
+        "bg": PALETTE["surface2"], "fg": PALETTE["text"],
+        "activebackground": PALETTE["surface3"],
+        "activeforeground": PALETTE["text"],
         "font": FONT_HELPER, "padx": 8, "pady": 4,
     },
     "compact_primary": {
@@ -405,6 +407,12 @@ _CHECK_ROLES = {
         "activebackground": PALETTE["accent2"],
         "activeforeground": PALETTE["on_accent"],
         "selectcolor": PALETTE["accent"],
+        # Supertype/Card Type chips get their visible border from a dedicated
+        # one-pixel shell.  Tk's highlight ring is not consistently visible on
+        # Windows for indicator-less Checkbuttons, so do not use it as the
+        # user-facing border.
+        "highlightthickness": 0, "highlightbackground": PALETTE["border"],
+        "highlightcolor": PALETTE["text"],
         "font": FONT_HELPER, "padx": 7, "pady": 3, "cursor": "hand2",
     },
 }
@@ -427,6 +435,7 @@ class ClassicCheckbutton(tk.Checkbutton):
             variable if hasattr(variable, "get") else None)
         self._ui_chip_variable = None
         self._ui_chip_trace = None
+        self._ui_chip_border_shell = None
         if role == "chip":
             variable = options.get("variable")
             if hasattr(variable, "trace_add") and hasattr(variable, "get"):
@@ -439,6 +448,19 @@ class ClassicCheckbutton(tk.Checkbutton):
     def _schedule_chip_contrast_sync(self, *_args):
         try:
             self.after_idle(self._sync_chip_contrast)
+        except tk.TclError:
+            pass
+
+    def _set_chip_border(self, color):
+        """Paint the real chip border shell, with a highlight fallback."""
+        shell = getattr(self, "_ui_chip_border_shell", None)
+        if shell is not None:
+            try:
+                shell.configure(bg=color)
+            except tk.TclError:
+                pass
+        try:
+            self.configure(highlightbackground=color, highlightcolor=color)
         except tk.TclError:
             pass
 
@@ -455,19 +477,36 @@ class ClassicCheckbutton(tk.Checkbutton):
                 # cleared.  As soon as that variable turns false, disable it
                 # immediately rather than waiting for the next facet snapshot.
                 if getattr(self, "_ui_check_role", None) == "chip":
+                    # Unavailable chips retain the neutral border even while
+                    # their row is hovered.  White is reserved for selectable,
+                    # unselected choices; selected conflicts must still read
+                    # as selected and remain clearable.
                     self.configure(
                         state="normal" if selected else "disabled",
                         cursor="hand2" if selected else "arrow",
                     )
+                    self._set_chip_border(PALETTE["border"])
                 self.configure(
                     fg=PALETTE["bad"], activeforeground=PALETTE["bad"],
                     disabledforeground=PALETTE["bad"],
                 )
                 return
-            self.configure(
-                fg=(PALETTE["on_accent"] if selected else PALETTE["text"]),
-                disabledforeground=PALETTE["muted"],
-            )
+            options = {
+                "fg": (PALETTE["on_accent"] if selected else PALETTE["text"]),
+                "disabledforeground": PALETTE["muted"],
+            }
+            if getattr(self, "_ui_check_role", None) == "chip":
+                hover_active = bool(
+                    getattr(self, "_ui_search_row_hover_active", False))
+                hover_border = getattr(
+                    self, "_ui_search_chip_hover_border", PALETTE["text"])
+                chip_border = (
+                    hover_border if hover_active and not selected
+                    else PALETTE["border"]
+                )
+            self.configure(**options)
+            if getattr(self, "_ui_check_role", None) == "chip":
+                self._set_chip_border(chip_border)
         except tk.TclError:
             pass
 

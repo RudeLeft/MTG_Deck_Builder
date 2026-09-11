@@ -9,6 +9,7 @@ from tkinter import ttk
 from mtgdb.search.results import (
     CompactResultSelection, ResultPreparationWorker, SearchResultStore,
 )
+from mtgdb.ui.card_detail import _ResultsGalleryWindow
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 
 
@@ -52,6 +53,7 @@ class SearchResultsMixin:
         self._result_selection_sync_after = None
         self._result_tree_configure_after = None
         self._last_result_preview_selection = None
+        self._results_gallery_window = None
         self._result_diagnostics = {
             "view_preparations": 0,
             "view_prepare_seconds": 0.0,
@@ -65,6 +67,9 @@ class SearchResultsMixin:
         }
 
     def _shutdown_search_results(self):
+        gallery = getattr(self, "_results_gallery_window", None)
+        if gallery is not None:
+            gallery.close()
         for attr in (
                 "_result_prepare_after", "_result_vocab_after",
                 "_result_selection_sync_after", "_result_tree_configure_after"):
@@ -135,6 +140,7 @@ class SearchResultsMixin:
         self._result_selection_anchor_id = None
         self._last_result_preview_selection = None
         self._result_diagnostics["logical_rows"] = store.logical_count
+        self._sync_results_gallery()
 
     def _render_results(self):
         """Prepare the complete Results view off Tk, keeping the old index usable."""
@@ -199,19 +205,64 @@ class SearchResultsMixin:
         # every accepted logical-view swap so Cards Selected matches the current
         # visible Results selection plus deck-board highlights.
         self._update_comparison_bar()
+        self._sync_results_gallery()
 
     def _set_result_count(self, updating=False):
         total = self._result_store.logical_count
         visible = self._result_store.visible_count
         filtered = bool(self._table_filters.get("results"))
         count = visible if filtered else total
-        text = f"RESULTS | {count:,} Cards"
+        text = f"RESULTS | {count:,} CARDS"
         if updating:
             text += " · Updating…"
         try:
             self.results_count_lbl.configure(text=text)
         except (tk.TclError, AttributeError):
             pass
+        self._sync_results_gallery_button()
+
+    def _result_gallery_count(self):
+        return self._result_store.visible_count
+
+    def _result_gallery_card_at(self, position):
+        try:
+            source = self._result_store.source_index_at_view(position)
+        except (IndexError, TypeError, ValueError):
+            return None
+        return self._full_result_at(source)
+
+    def _sync_results_gallery_button(self):
+        button = getattr(self, "card_gallery_btn", None)
+        if button is None:
+            return
+        try:
+            button.state(
+                ["!disabled"] if self._result_store.visible_count else ["disabled"])
+        except tk.TclError:
+            pass
+
+    def _sync_results_gallery(self):
+        self._sync_results_gallery_button()
+        gallery = getattr(self, "_results_gallery_window", None)
+        if gallery is not None:
+            gallery.refresh_results()
+
+    def _open_results_gallery(self):
+        if not self._result_store.visible_count:
+            return
+        gallery = getattr(self, "_results_gallery_window", None)
+        if gallery is not None:
+            try:
+                if gallery.top.winfo_exists():
+                    gallery.refresh_results()
+                    gallery.lift()
+                    return
+            except tk.TclError:
+                pass
+        self._results_gallery_window = _ResultsGalleryWindow(
+            self, count_fn=self._result_gallery_count,
+            card_at_fn=self._result_gallery_card_at,
+            context_menu_fn=self._show_gallery_card_context_menu)
 
     def _result_visible_capacity(self):
         tv = self.results_tv

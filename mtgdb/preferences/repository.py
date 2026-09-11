@@ -13,6 +13,8 @@ from mtgdb.core.atomic_files import (
 
 
 TABLE_COLUMNS_VERSION = 3
+SEARCH_TYPE_LINE_CACHE_VERSION = 1
+
 
 
 class UIPreferencesRepository:
@@ -33,21 +35,13 @@ class UIPreferencesRepository:
             return {}
         return value if isinstance(value, dict) else {}
 
-    def save_table_columns(self, visible_columns):
-        """Preserve unrelated preferences and atomically save table layouts."""
-        data = self.load()
-        data["table_columns"] = {
-            view: list(columns) for view, columns in visible_columns.items()
-        }
-        data["table_columns_version"] = TABLE_COLUMNS_VERSION
-
+    def _save(self, data):
+        """Atomically replace the complete preference mapping."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Same durability contract as the workspace and deck-TXT writers: a
         # unique temp name so two writers can never interleave into one path,
         # and fsync before replace so the rename cannot become visible ahead of
-        # the bytes it points at. Without the fsync a power loss can publish an
-        # empty preferences file, which load() silently reads back as {} --
-        # resetting every saved table layout.
+        # the bytes it points at.
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=temp_prefix(self.path.name), suffix=TEMP_SUFFIX,
             dir=self.path.parent)
@@ -63,3 +57,47 @@ class UIPreferencesRepository:
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
+
+    def save_table_columns(self, visible_columns):
+        """Preserve unrelated preferences and atomically save table layouts."""
+        data = self.load()
+        data["table_columns"] = {
+            view: list(columns) for view, columns in visible_columns.items()
+        }
+        data["table_columns_version"] = TABLE_COLUMNS_VERSION
+        self._save(data)
+
+    def load_search_type_line_catalogs(self):
+        """Return last successful Type Line chip labels for disabled warm-start UI."""
+        data = self.load().get("search_type_line_catalogs", {})
+        if not isinstance(data, dict):
+            return {"card_types": (), "supertypes": ()}
+
+        def clean(values):
+            if not isinstance(values, list):
+                return ()
+            seen, result = set(), []
+            for value in values:
+                label = " ".join(str(value or "").split())
+                key = label.casefold()
+                if label and key not in seen:
+                    seen.add(key)
+                    result.append(label)
+            return tuple(result)
+
+        if data.get("version") != SEARCH_TYPE_LINE_CACHE_VERSION:
+            return {"card_types": (), "supertypes": ()}
+        return {
+            "card_types": clean(data.get("card_types")),
+            "supertypes": clean(data.get("supertypes")),
+        }
+
+    def save_search_type_line_catalogs(self, card_types, supertypes):
+        """Persist trusted labels for presentation-only disabled startup chips."""
+        data = self.load()
+        data["search_type_line_catalogs"] = {
+            "version": SEARCH_TYPE_LINE_CACHE_VERSION,
+            "card_types": [str(value) for value in card_types or ()],
+            "supertypes": [str(value) for value in supertypes or ()],
+        }
+        self._save(data)

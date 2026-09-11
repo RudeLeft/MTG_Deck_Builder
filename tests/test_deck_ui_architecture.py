@@ -547,8 +547,8 @@ def main():
         "deck layout retains tabs and split boards with counts in section headings": (
             'text="Current Deck"' not in editor_source
             and 'deck_count_lbl' not in editor_source
-            and 'MAINBOARD | Cards:' in editor_source
-            and 'SIDEBOARD | Cards:' in editor_source
+            and 'MAINBOARD | ' in editor_source
+            and 'SIDEBOARD | ' in editor_source
             and all(marker in editor_source for marker in (
                 'orient="vertical"', 'role="tab_add"', 'role="tab_overflow"'))),
         "deck actions use DPI-safe requested widths without clipping": (
@@ -609,10 +609,12 @@ def main():
                 in stats_source
             and '"name", width=315, minwidth=140, stretch=False' in stats_source
             and 'text="BASIC FORMAT CHECK"' in stats_source
-            and 'font=FONT_DIALOG_TITLE' in stats_source
+            and 'style="DialogTitle.TLabel"' in stats_source
             and 'see Details' not in stats_source
             and "No problems found by basic checks" not in stats_source
             and "No issues were found by the app's available basic checks" not in stats_source),
+        "Mana Curve mode radios blend into their header surface": (
+            'style="DialogChoice.TRadiobutton"' in stats_source),
         "Mana Curve By type and By color legends include numeric totals": (
             'total = sum(bucket.get(lab, 0) for bucket in buckets)' in stats_source
             and 'text=f" {lab}: {total}"' in stats_source),
@@ -621,7 +623,7 @@ def main():
             and 'values=(card.get("name") or "",)' in stats_source),
         "sample hand reuses the shared large-card comparison grid": all(
             marker in stats_source for marker in (
-                'text="View hand"',
+                'text="View Hand"',
                 '_open_card_grid_window(',
                 '_update_card_grid_window("sample_hand", self._hand)',
                 '_close_card_grid_window("sample_hand")',
@@ -658,10 +660,10 @@ def main():
             and 'foreground=PALETTE["deck_good"]' in stats_source
             and 'foreground=PALETTE["deck_bad"]' in stats_source),
         "deck-file workflow owns open save import and JSON export": (
-            {"_choose_import_sets", "_open_deck", "_save_session_as",
+            {"_open_deck", "_save_session_as",
              "_save_deck", "_deck_json_payload", "_export_all_decks_json"}
             <= deck_file_methods
-            and not ({"_choose_import_sets", "_open_deck", "_save_session_as",
+            and not ({"_open_deck", "_save_session_as",
                       "_save_deck", "_deck_json_payload",
                       "_export_all_decks_json"} & gui_methods)
             and "def _on_app_close(" in gui_source),

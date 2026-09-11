@@ -212,6 +212,70 @@ def _card_content_kind(layout, type_line):
     return "card" if classification == "unknown" else classification
 
 
+
+_MANA_COST_SYMBOL = re.compile(r"\{([^}]+)\}")
+_MANA_FILTER_COLORS = frozenset(("W", "U", "B", "R", "G", "C"))
+
+
+@lru_cache(maxsize=65536)
+def _mana_cost_symbol_colors(mana_cost):
+    """Return represented filter colors for each physical mana symbol.
+
+    Each tuple entry is one brace-delimited mana symbol. A hybrid such as
+    ``{W/B}`` therefore yields one entry representing both W and B rather than
+    two pips. Generic, variable, snow, and other non-WUBRGC symbols yield an
+    empty set and do not count toward Mana Symbols in Cost Minimum.
+    """
+    output = []
+    for raw_symbol in _MANA_COST_SYMBOL.findall(str(mana_cost or "")):
+        represented = frozenset(
+            part for part in str(raw_symbol).upper().split("/")
+            if part in _MANA_FILTER_COLORS
+        )
+        output.append(represented)
+    return tuple(output)
+
+
+def _mana_cost_symbol_match(mana_cost, selected, mode="all", minimum=1):
+    """Match the interactive Mana Symbols in Cost semantics.
+
+    ``All`` requires every selected color to be represented; ``Any`` requires
+    at least one; ``None`` excludes every selected color. For All/Any, Minimum
+    is the total number of *physical* symbols that represent at least one
+    selected color. One hybrid symbol can satisfy multiple color-presence
+    requirements, but it contributes only one to that total.
+    """
+    if isinstance(selected, str):
+        raw_values = selected.split(",")
+    else:
+        raw_values = selected or ()
+    wanted = {
+        str(value).strip().upper() for value in raw_values
+        if str(value).strip().upper() in _MANA_FILTER_COLORS
+    }
+    if not wanted:
+        return 1
+
+    symbols = _mana_cost_symbol_colors(str(mana_cost or ""))
+    represented = set().union(*symbols) if symbols else set()
+    normalized = str(mode or "all").casefold()
+
+    if normalized == "none":
+        return int(not bool(wanted & represented))
+
+    try:
+        threshold = max(1, int(float(minimum if minimum is not None else 1)))
+    except (TypeError, ValueError):
+        threshold = 1
+
+    qualifying_symbols = sum(1 for colors in symbols if colors & wanted)
+    if normalized == "any":
+        presence_matches = bool(wanted & represented)
+    else:
+        presence_matches = wanted.issubset(represented)
+    return int(presence_matches and qualifying_symbols >= threshold)
+
+
 def _escape_like(value):
     """Escape SQLite LIKE wildcards so user text is treated literally."""
     return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

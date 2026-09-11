@@ -12,7 +12,7 @@ from mtgdb.ui.tokens import PALETTE
 class SearchPrintingFilter(PrintingFilter):
     """Bind shared printing controls to the asynchronous Search taxonomy path."""
 
-    def __init__(self, owner, parent, *, row=0):
+    def __init__(self, owner, parent, *, row=0, show_label=True):
         super().__init__(
             owner,
             repository=owner.search_repository,
@@ -24,17 +24,18 @@ class SearchPrintingFilter(PrintingFilter):
             popup_title="Search Printings",
             header_text="PRINTINGS",
             intro_text="",
+            tooltips_enabled=True,
         )
         self._pending_restore_types = None
         self._pending_restore_codes = None
         self._context_snapshot = None
-        printings_label = ttk.Label(parent, text="Printings")
-        printings_label.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
-        owner._add_standard_filter_tooltip(printings_label, "printings")
+        if show_label:
+            owner._build_search_row_label(
+                parent, "Printings", row=row, pady=2, tooltip_key="printings")
         self.button = AppButton(
-            parent, text="Paper only · Any set type · Any set", role="picker",
+            parent, text="Paper Only · Any set type · Any set", role="search_picker",
             command=self.toggle_popup)
-        self.button.grid(row=row, column=1, sticky="ew", pady=2)
+        self.button.grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)
         # The button is what a user clicks; the label beside it is not.
         owner._add_standard_filter_tooltip(self.button, "printings")
 

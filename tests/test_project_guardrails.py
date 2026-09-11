@@ -386,6 +386,16 @@ def main():
         name: _import_paths(source) for name, source in production_sources.items()
     }
     production_files = set(production_sources)
+    tooltip_owner_modules = {
+        "mtgdb/ui/app.py", "mtgdb/ui/components.py", "mtgdb/ui/search.py",
+        "mtgdb/ui/search_checklist.py", "mtgdb/ui/search_printings.py",
+        "mtgdb/ui/set_filters.py",
+    }
+    tooltip_call_offenders = sorted(
+        name for name, source in production_sources.items()
+        if name not in tooltip_owner_modules
+        and ("_add_tooltip(" in source or "ToolTip(" in source)
+    )
 
     repository_match = re.search(
         r"## Repository map\n(.*?)(?=\n## Feature map)",
@@ -563,6 +573,14 @@ def main():
             is not None),
         "changelog use is explicitly prohibited": (
             "MUST NOT:** Turn this file into a changelog" in agent_text),
+        "live Search applicability rules cover every dynamic range and mana distinction": (
+            "Empty Mana Value, Power, Toughness, Loyalty, Defense, and Released range controls MUST gray/disable" in agent_text
+            and "MUST NOT infer applicability from Card Type, layout, or a maintained incompatibility table" in agent_text
+            and "numeric zero alone MUST NOT establish applicability" in agent_text
+            and "a literal `{0}` cost is meaningful" in agent_text
+            and "a no-cost object whose rules-derived mana value defaults to 0 MUST NOT by itself keep Mana Value enabled" in agent_text
+            and "Mana Color Colorless means the selected card-color/identity set is empty" in agent_text
+            and "Mana Produced `C` means explicit colorless mana production" in agent_text),
         "requirements.txt is absent": not (ROOT / "requirements.txt").exists(),
         "search core is Tk-free": all(
             "tkinter" not in architecture_imports[name]
@@ -592,7 +610,7 @@ def main():
         "search printing component exclusively owns printing selector state": (
             "class SearchPrintingFilter"
             in architecture_sources["mtgdb/ui/search_printings.py"]
-            and "self._search_printings = SearchPrintingFilter(self, parent, row=row)"
+            and "self._search_printings = SearchPrintingFilter(\n            self, parent, row=row, show_label=show_label)"
             in architecture_sources["mtgdb/ui/search.py"]
             and all(
                 marker not in architecture_sources["mtgdb/ui/search.py"]
@@ -865,7 +883,7 @@ def main():
                 "_draw_hand", "_view_hand", "_render_legality",
             } & gui_methods),
         "sample hand uses shared read-only card grid": (
-            'text="View hand"' in architecture_sources["mtgdb/ui/deck_stats.py"]
+            'text="View Hand"' in architecture_sources["mtgdb/ui/deck_stats.py"]
             and "self._open_card_grid_window("
             in architecture_sources["mtgdb/ui/deck_stats.py"]
             and 'self._close_card_grid_window("sample_hand")'
@@ -1119,6 +1137,17 @@ def main():
             and "Data-shape routing:" in agent_text
             and "`mtgdb/database/schema.py`" in agent_text
             and "`mtgdb/database/bulk_import.py`" in agent_text),
+        "Search-only tooltip policy is documented as an enforceable contract": (
+            "SRCH-035" in agent_text
+            and "Tooltips are a Search-filter teaching aid" in agent_text
+            and "outside Search MUST NOT introduce application-owned tooltips"
+            in agent_text
+            and "Scryfall, a database, snapshots, APIs" in agent_text
+            and "Mana Color, Mana Produced, and Mana Symbols in Cost" in agent_text
+            and "Predictive wording MUST NOT claim an exact post-selection total"
+            in agent_text),
+        "non-Search feature modules cannot attach application tooltips": (
+            not tooltip_call_offenders),
         "configurable Results fields exist in the narrow Search projection": (
             configured_result_fields <= search_result_columns
             and "TBL-009" in agent_text),

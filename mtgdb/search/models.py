@@ -38,11 +38,22 @@ class SearchCriteria:
     color_scope: str = "identity"
     produces: tuple[str, ...] = ()
     produces_mode: str = "includes"
+    # ``traits`` is retained as a legacy compatibility bucket for external
+    # CardDB.search callers and older saved criteria.  The interactive Search
+    # UI uses the three independent property facets below so each picker owns
+    # its own Any/All/None semantics.
     traits: tuple[str, ...] = ()
     trait_mode: str = "any"
+    mana_features: tuple[str, ...] = ()
+    mana_feature_mode: str = "any"
+    special_properties: tuple[str, ...] = ()
+    special_property_mode: str = "any"
+    status_properties: tuple[str, ...] = ()
+    status_property_mode: str = "any"
     layouts: tuple[str, ...] = ()
     layout_mode: str = "any"
     pips: tuple[str, ...] = ()
+    pip_mode: str = "all"
     pip_min: float | None = None
     cmc_min: float | None = None
     cmc_max: float | None = None
@@ -72,7 +83,8 @@ class SearchCriteria:
         data = dict(values)
         tuple_fields = {
             "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-            "colors", "produces", "traits", "rarities", "games",
+            "colors", "produces", "traits", "mana_features",
+            "special_properties", "status_properties", "rarities", "games",
             "layouts", "pips", "content_types",
         }
         optional_tuple_fields = {"set_codes", "set_types"}
@@ -93,7 +105,8 @@ class SearchCriteria:
         values = {field.name: getattr(self, field.name) for field in fields(self)}
         for name in (
                 "names", "text", "card_types", "supertypes", "subtypes", "keywords",
-                "colors", "produces", "traits", "rarities", "games",
+                "colors", "produces", "traits", "mana_features",
+                "special_properties", "status_properties", "rarities", "games",
                 "layouts", "pips", "content_types"):
             values[name] = list(values[name])
         for name in ("set_codes", "set_types"):

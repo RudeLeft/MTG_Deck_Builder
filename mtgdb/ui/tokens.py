@@ -22,6 +22,12 @@ PALETTE = {
     "border": "#343840",
     "stripe": "#1B1E23",
     "select": "#5B4723",
+    # Search-row hover uses a lighter warm charcoal so the row reads as a
+    # grouped relationship without borrowing the app's selected/action gold.
+    "search_hover": "#292A2C",
+    # Hover-only association-rail glow. This is intentionally brighter than
+    # the normal accent, while remaining in the established warm-gold family.
+    "search_hover_glow": "#D9B967",
     "input": "#111317",
     "bar": "#C39A4A",
     "bar_land": "#777C86",
@@ -70,6 +76,9 @@ PAD_PRIMARY = (12, 5)
 # Picker buttons represent field values, so their vertical padding matches the
 # shared Entry/Combobox/Spinbox field padding below.
 PAD_PICKER = (8, 3)
+# Search filter pickers share the form-field height so button-backed and
+# native dropdown controls align on one horizontal rail.
+PAD_SEARCH_PICKER = (8, 2)
 PAD_COMPACT = (7, 4)
 PAD_DECK = (10, 6)
 PAD_DENSE = (3, 2)
@@ -104,6 +113,23 @@ CARD_ZOOM_WINDOW_SIZE = (900, 900)
 CARD_ZOOM_WINDOW_MIN_SIZE = (720, 520)
 CARD_ZOOM_BASE_PORTRAIT_SIZE = (560, 784)
 CARD_ZOOM_LEVELS = (50, 75, 100, 125, 150, 175, 200, 225)
+
+# Search Results gallery. The window is resizable and virtualized; these values
+# define its preferred/minimum shell and the largest card-art cell it may ask
+# the shared image service to prepare.
+RESULT_GALLERY_WINDOW_SIZE = (1240, 860)
+RESULT_GALLERY_WINDOW_MIN_SIZE = (760, 520)
+RESULT_GALLERY_MAX_COLUMNS = 32
+RESULT_GALLERY_MAX_VISIBLE_ROWS = 16
+# The Results Gallery owns a live card-size slider.  The target is the initial
+# card-art width; the user can trade density for readability without changing
+# the logical result set or abandoning the bounded virtualized grid.
+RESULT_GALLERY_CARD_TARGET_WIDTH = 280
+RESULT_GALLERY_CARD_MIN_WIDTH = 120
+RESULT_GALLERY_CARD_MAX_WIDTH = 360
+RESULT_GALLERY_CARD_SLIDER_STEP = 10
+RESULT_GALLERY_GAP = 2
+RESULT_GALLERY_CARD_ASPECT = CARD_PREVIEW_PORTRAIT_SIZE[1] / CARD_PREVIEW_PORTRAIT_SIZE[0]
 
 COMPARISON_WINDOW_SIZE = (1840, 1120)
 COMPARISON_WINDOW_MIN_SIZE = (960, 640)

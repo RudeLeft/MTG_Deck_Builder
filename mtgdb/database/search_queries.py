@@ -299,27 +299,28 @@ class SearchQueryBuilder:
             "AND CAST(power AS REAL) > CAST(toughness AS REAL)"),
     }
 
-    def add_trait_filters(self, traits, trait_mode="any"):
-        """Filter by stable boolean card properties.
-
-        These are application semantics rather than upstream vocabulary
-        (DATA-011), so the keys are fixed here rather than discovered. Each
-        selected property narrows the search; an unknown key is ignored so a
-        restored workspace from a newer build cannot widen a query.
-        """
+    def add_property_filters(self, properties, mode="any"):
+        """Filter one independent group of stable boolean card properties."""
         fragments = []
-        values = []
-        for key in sorted({str(value) for value in (traits or [])}):
+        for key in sorted({str(value) for value in (properties or [])}):
             clause = self.TRAIT_CLAUSES.get(key)
             if clause:
                 fragments.append(f"({clause})")
         if not fragments:
             return
-        normalized = str(trait_mode).casefold()
+        normalized = str(mode).casefold()
         joiner = " OR " if normalized in ("any", "none") else " AND "
         group = "(" + joiner.join(fragments) + ")"
         self.clauses.append(f"NOT {group}" if normalized == "none" else group)
-        self.params.extend(values)
+
+    def add_trait_filters(self, traits, trait_mode="any"):
+        """Legacy compatibility wrapper for the former global property facet.
+
+        Existing external ``CardDB.search(traits=..., trait_mode=...)`` calls
+        retain their exact semantics. Interactive Search uses independent
+        property groups so one picker's Match mode cannot affect another.
+        """
+        self.add_property_filters(traits, trait_mode)
 
     def add_layout_filter(self, layouts, layout_mode="any"):
         """Filter by the printed shape of the card.
@@ -337,25 +338,40 @@ class SearchQueryBuilder:
             f"NOT {group}" if str(layout_mode).casefold() == "none" else group)
         self.params.extend(clean)
 
-    def add_pip_filters(self, pips, pip_min):
-        """Require at least N symbols of each selected colour in the cost.
+    def add_pip_filters(self, pips, pip_min, pip_mode="all"):
+        """Filter physical mana symbols by selected-color presence and total.
 
-        Counted at import, once per colour, with hybrid halves counting for
-        both -- so {G/W}{G/W} satisfies two green and two white.
+        Import-time per-color pip columns remain a cheap presence prefilter.
+        The deterministic SQL helper parses the stored mana-cost string for the
+        total so one hybrid symbol may represent both colors without counting
+        twice toward Minimum.
         """
-        selected = [
+        selected = sorted({
             str(value).strip().upper() for value in (pips or [])
-            if str(value).strip().upper() in (*COLORS, "C")]
+            if str(value).strip().upper() in (*COLORS, "C")
+        })
         if not selected:
             return
+        normalized = str(pip_mode or "all").casefold()
+        if normalized not in {"any", "all", "none"}:
+            normalized = "all"
         try:
             minimum = int(pip_min) if pip_min is not None else 1
         except (TypeError, ValueError):
             minimum = 1
         minimum = max(1, minimum)
-        for color in sorted(set(selected)):
-            self.clauses.append(f"pips_{color.casefold()} >= ?")
-            self.params.append(minimum)
+
+        presence = [f"pips_{color.casefold()} > 0" for color in selected]
+        if normalized == "all":
+            self.clauses.extend(presence)
+        elif normalized == "any":
+            self.clauses.append("(" + " OR ".join(presence) + ")")
+        else:
+            self.clauses.extend(
+                f"pips_{color.casefold()} = 0" for color in selected)
+
+        self.clauses.append("MANA_COST_SYMBOL_MATCH(mana_cost, ?, ?, ?) = 1")
+        self.params.extend((",".join(selected), normalized, minimum))
 
     GAME_PLATFORMS = ("paper", "mtgo", "arena")
 
@@ -463,35 +479,6 @@ class SearchQueryBuilder:
         where, params = self.where_sql()
         return f"SELECT COUNT(*) AS match_count FROM cards{where}", params
 
-    def build_group_count(self, column):
-        """Count matches per distinct value of one stored column.
-
-        The same WHERE clause as the result query, aggregated in the engine
-        with GROUP BY so a single-valued facet's contextual counts never
-        require materializing rows in Python. The column is validated
-        against the real schema to keep this injection-safe.
-        """
-        if column not in _CARD_COLUMN_NAMES:
-            raise ValueError(f"Invalid group-count column: {column!r}")
-        where, params = self.where_sql()
-        return (
-            f"SELECT {column} AS value, COUNT(*) AS n FROM cards{where} "
-            f"GROUP BY {column}", params)
-
-    def build_platform_counts(self):
-        """Count matches available on each Scryfall game platform.
-
-        ``games`` is a comma-joined member list, so per-platform counts use
-        exact bounded membership rather than GROUP BY on the whole string.
-        """
-        where, params = self.where_sql()
-        sums = ", ".join(
-            "SUM(CASE WHEN ',' || COALESCE(games, '') || ',' LIKE ? "
-            "THEN 1 ELSE 0 END) AS " + name
-            for name in ("paper", "arena", "mtgo"))
-        like_params = ["%," + name + ",%" for name in ("paper", "arena", "mtgo")]
-        return f"SELECT {sums} FROM cards{where}", [*like_params, *params]
-
     def build(self, *, set_codes, columns, ordered=True):
         where, params = self.where_sql()
         one_selected_set = (
@@ -519,8 +506,11 @@ def _configured_search_builder(*, name="", names=None, text="", text_mode="all",
                                subtype_mode="any", keywords=None, keyword_mode="any",
                                colors=None, color_mode="within", color_scope="identity",
                                produces=None, produces_mode="includes", traits=None,
-                               trait_mode="any", layouts=None, layout_mode="any",
-                               pips=None, pip_min=None, loyalty_min=None, loyalty_max=None,
+                               trait_mode="any", mana_features=None,
+                               mana_feature_mode="any", special_properties=None,
+                               special_property_mode="any", status_properties=None,
+                               status_property_mode="any", layouts=None, layout_mode="any",
+                               pips=None, pip_mode="all", pip_min=None, loyalty_min=None, loyalty_max=None,
                                defense_min=None, defense_max=None, released_from=None,
                                released_to=None, games=None, cmc_min=None, cmc_max=None,
                                power_min=None, power_max=None, toughness_min=None,
@@ -542,9 +532,14 @@ def _configured_search_builder(*, name="", names=None, text="", text_mode="all",
         subtypes, subtype_mode, keywords, keyword_mode, type_line)
     builder.add_color_filter(colors, color_mode, color_scope)
     builder.add_produces_filter(produces, produces_mode)
-    builder.add_trait_filters(traits, trait_mode)
+    # Property groups are independent facets.  Groups AND with each other;
+    # values inside each group use that group's own Any/All/None mode.
+    builder.add_trait_filters(traits, trait_mode)  # legacy external API only
+    builder.add_property_filters(mana_features, mana_feature_mode)
+    builder.add_property_filters(special_properties, special_property_mode)
+    builder.add_property_filters(status_properties, status_property_mode)
     builder.add_layout_filter(layouts, layout_mode)
-    builder.add_pip_filters(pips, pip_min)
+    builder.add_pip_filters(pips, pip_min, pip_mode)
     builder.add_stat_filters(
         loyalty_min, loyalty_max, defense_min, defense_max)
     builder.add_release_filters(released_from, released_to)
@@ -567,8 +562,11 @@ class CardSearchQueryMixin:
                subtype_mode="any", keywords=None, keyword_mode="any", colors=None,
                color_mode="within", color_scope="identity",
                produces=None, produces_mode="includes",
-               traits=None, trait_mode="any", layouts=None, layout_mode="any",
-               pips=None, pip_min=None, loyalty_min=None, loyalty_max=None,
+               traits=None, trait_mode="any", mana_features=None,
+               mana_feature_mode="any", special_properties=None,
+               special_property_mode="any", status_properties=None,
+               status_property_mode="any", layouts=None, layout_mode="any",
+               pips=None, pip_mode="all", pip_min=None, loyalty_min=None, loyalty_max=None,
                defense_min=None, defense_max=None, released_from=None,
                released_to=None, games=None,
                cmc_min=None, cmc_max=None, power_min=None,
@@ -614,39 +612,6 @@ class CardSearchQueryMixin:
         else:
             rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
-
-    def group_count_search(self, *, connection=None, column, **criteria):
-        """Return {value: count} for one column under canonical criteria."""
-        builder = _configured_search_builder(**criteria)
-        if builder is None:
-            return {}
-        sql, params = builder.build_group_count(column)
-        if connection is None:
-            with self._lock:
-                rows = self.conn.execute(sql, params).fetchall()
-        else:
-            rows = connection.execute(sql, params).fetchall()
-        counts = {}
-        for row in rows:
-            value = row[0]
-            if value is not None and str(value) != "":
-                counts[str(value)] = int(row[1])
-        return counts
-
-    def platform_count_search(self, *, connection=None, **criteria):
-        """Return {platform: count} for paper/arena/mtgo under criteria."""
-        builder = _configured_search_builder(**criteria)
-        if builder is None:
-            return {"paper": 0, "arena": 0, "mtgo": 0}
-        sql, params = builder.build_platform_counts()
-        if connection is None:
-            with self._lock:
-                row = self.conn.execute(sql, params).fetchone()
-        else:
-            row = connection.execute(sql, params).fetchone()
-        keys = ("paper", "arena", "mtgo")
-        return {key: int((row[index] if row is not None else 0) or 0)
-                for index, key in enumerate(keys)}
 
     def count_search(self, *, connection=None, **criteria):
         """Count Search matches using SQL COUNT(*) and canonical criteria clauses."""

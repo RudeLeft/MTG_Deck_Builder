@@ -180,9 +180,9 @@ class DeckEditorMixin:
         main = getattr(self, "mainboard_header_lbl", None)
         side = getattr(self, "sideboard_header_lbl", None)
         if main is not None:
-            main.configure(text=f"MAINBOARD | Cards: {self.deck.total('main')}")
+            main.configure(text=f"MAINBOARD | {self.deck.total('main')} CARDS")
         if side is not None:
-            side.configure(text=f"SIDEBOARD | Cards: {self.deck.total('side')}")
+            side.configure(text=f"SIDEBOARD | {self.deck.total('side')} CARDS")
 
     def _make_deck_tree(self, parent, view, height=8):
         ordinary = tuple(c for c in TABLE_COLUMN_ORDER

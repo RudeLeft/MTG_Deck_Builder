@@ -14,13 +14,13 @@ from mtgdb.ui.tokens import (
     FONT_HELPER_BOLD,
     FONT_MICRO,
     FONT_MICRO_BOLD,
-    FONT_PANE_TITLE,
     FORM_CONTROL_PADDING,
     PAD_COMPACT,
     PAD_DECK,
     PAD_DENSE,
     PAD_DENSE_PRIMARY,
     PAD_PICKER,
+    PAD_SEARCH_PICKER,
     PAD_PRIMARY,
     PAD_STANDARD,
     PALETTE,
@@ -134,23 +134,27 @@ def install_ui_styles(root):
                     font=FONT_BODY)
     style.configure("TFrame", background=p["surface"])
     style.configure("Bg.TFrame", background=p["bg"])
-    style.configure("Card.TFrame", background=p["surface"],
-                    bordercolor=p["border"], borderwidth=1, relief="solid")
     style.configure("Workspace.TFrame", background=p["surface"],
                     borderwidth=0, relief="flat")
-    style.configure("Raised.TFrame", background=p["surface2"])
     style.configure("Preview.TFrame", background=p["surface"],
                     borderwidth=0, relief="flat")
     style.configure("MenuBar.TFrame", background=p["surface2"])
+    # Search row hover is intentionally surface-only: metrics and control
+    # geometry stay unchanged while the logical label/control row reads as one.
+    style.configure("SearchHover.TFrame", background=p["search_hover"])
 
     style.configure("TLabel", background=p["surface"], foreground=p["text"],
                     font=FONT_BODY)
     style.configure("Muted.TLabel", background=p["surface"],
                     foreground=p["muted"], font=FONT_HELPER)
-    style.configure("Header.TLabel", background=p["surface"],
-                    foreground=p["text"], font=FONT_PANE_TITLE)
+    style.configure("SearchHover.TLabel", background=p["search_hover"],
+                    foreground=p["text"], font=FONT_BODY)
+    style.configure("SearchHoverMuted.TLabel", background=p["search_hover"],
+                    foreground=p["muted"], font=FONT_HELPER)
     style.configure("DialogTitle.TLabel", background=p["surface"],
-                    foreground=p["text"], font=FONT_DIALOG_TITLE)
+                    foreground=p["accent"], font=FONT_DIALOG_TITLE)
+    style.configure("RaisedDialogTitle.TLabel", background=p["surface2"],
+                    foreground=p["accent"], font=FONT_DIALOG_TITLE)
     style.configure("Section.TLabel", background=p["surface"],
                     foreground=p["accent"], font=FONT_HELPER_BOLD)
     # Alert variants of the section heading.  Same weight and metrics as
@@ -161,15 +165,8 @@ def install_ui_styles(root):
                     foreground=p["deck_bad"], font=FONT_HELPER_BOLD)
     style.configure("SectionAlertDim.TLabel", background=p["surface"],
                     foreground=p["deck_bad_dim"], font=FONT_HELPER_BOLD)
-    style.configure("Status.TLabel", background=p["bg"],
-                    foreground=p["muted"], font=FONT_HELPER)
-    style.configure("PreviewHeader.TLabel", background=p["surface"],
-                    foreground=p["text"], font=FONT_PANE_TITLE)
-    style.configure("PreviewMuted.TLabel", background=p["surface"],
-                    foreground=p["muted"], font=FONT_HELPER)
     style.configure("PreviewCard.TLabel", background=p["surface"],
                     foreground=p["muted"], font=FONT_BODY)
-    style.configure("Preview.TSeparator", background=p["border"])
     style.configure("PaneDivider.TSeparator", background=p["border"])
 
     style.configure("TCheckbutton", background=p["surface"], foreground=p["text"],
@@ -184,7 +181,17 @@ def install_ui_styles(root):
     )
     style.configure("Color.TCheckbutton", background=p["surface"],
                     foreground=p["text"], font=FONT_BODY)
-    style.map("Color.TCheckbutton", background=[("active", p["surface"])])
+    style.map(
+        "Color.TCheckbutton",
+        background=[("active", p["surface"])],
+        foreground=[("disabled", p["muted"])],
+    )
+    style.configure("SearchHover.Color.TCheckbutton", background=p["search_hover"],
+                    foreground=p["text"], font=FONT_BODY)
+    style.map(
+        "SearchHover.Color.TCheckbutton",
+        background=[("active", p["search_hover"])],
+        foreground=[("disabled", p["muted"])])
     style.configure("TRadiobutton", background=p["surface"],
                     foreground=p["text"], font=FONT_BODY,
                     indicatorbackground=p["input"])
@@ -227,6 +234,7 @@ def install_ui_styles(root):
     for name, ground in (
             ("FormChoice.TRadiobutton", p["surface"]),
             ("DialogChoice.TRadiobutton", p["surface2"]),
+            ("SearchHover.FormChoice.TRadiobutton", p["search_hover"]),
     ):
         style.configure(name, background=ground, foreground=p["text"],
                         font=FONT_HELPER, indicatorbackground=p["input"])
@@ -262,6 +270,29 @@ def install_ui_styles(root):
                       foreground=p["text"], font=FONT_BODY,
                       padding=PAD_PICKER, bordercolor=p["border"])
     _map_button(style, "Picker.TButton")
+    _configure_button(style, "SearchPicker.TButton", background=p["surface2"],
+                      foreground=p["text"], font=FONT_BODY,
+                      padding=PAD_SEARCH_PICKER, bordercolor=p["border"])
+    _map_button(style, "SearchPicker.TButton")
+    _configure_button(style, "SearchSection.TButton", background=p["surface3"],
+                      foreground=p["accent"], font=FONT_BODY_BOLD,
+                      padding=PAD_SEARCH_PICKER, bordercolor=p["accent2"])
+    style.map(
+        "SearchSection.TButton",
+        background=[("disabled", p["surface2"]),
+                    ("pressed", p["select"]),
+                    ("alternate", p["select"]),
+                    ("active", p["select"])],
+        foreground=[("disabled", p["muted"]),
+                    ("pressed", p["text"]),
+                    ("alternate", p["text"]),
+                    ("active", p["text"])],
+        bordercolor=[("disabled", p["border"]),
+                     ("pressed", p["accent"]),
+                     ("alternate", p["accent"]),
+                     ("active", p["accent"])],
+        relief=[("pressed", "sunken")],
+    )
     _configure_button(style, "SearchRow.TButton", background=p["surface2"],
                       foreground=p["text"], font=FONT_MICRO,
                       padding=PAD_DENSE, bordercolor=p["border"])
@@ -318,13 +349,20 @@ def install_ui_styles(root):
             )
             style.map(
                 name,
-                fieldbackground=[("readonly", p["input"]),
+                fieldbackground=[("disabled", p["surface3"]),
+                                 ("readonly", p["input"]),
                                  ("focus", p["input"])],
-                foreground=[("readonly", p["text"])],
-                bordercolor=[("focus", p["accent"])],
-                lightcolor=[("focus", p["accent"])],
-                darkcolor=[("focus", p["accent"])],
-                arrowcolor=[("active", p["accent"]),
+                background=[("disabled", p["surface3"])],
+                foreground=[("disabled", p["muted"]),
+                            ("readonly", p["text"])],
+                bordercolor=[("disabled", p["border"]),
+                             ("focus", p["accent"])],
+                lightcolor=[("disabled", p["border"]),
+                            ("focus", p["accent"])],
+                darkcolor=[("disabled", p["border"]),
+                           ("focus", p["accent"])],
+                arrowcolor=[("disabled", p["border"]),
+                            ("active", p["accent"]),
                             ("focus", p["accent"])],
             )
 
@@ -362,6 +400,21 @@ def install_ui_styles(root):
             arrowcolor=[("active", scrollbar_arrow),
                         ("pressed", scrollbar_arrow)],
         )
+    # Results Gallery size control.  Keep the slider in the shared component
+    # palette instead of allowing a raw classic-Tk scale to invent its own
+    # platform-dependent trough/thumb treatment.
+    style.configure(
+        "Gallery.Horizontal.TScale", background=p["accent"],
+        troughcolor=p["surface3"], bordercolor=p["border"],
+        lightcolor=p["accent"], darkcolor=p["accent2"],
+        sliderrelief="flat", troughrelief="flat",
+    )
+    style.map(
+        "Gallery.Horizontal.TScale",
+        background=[("active", p["accent2"])],
+        bordercolor=[("active", p["accent2"])],
+    )
+
     style.configure("Horizontal.TProgressbar", background=p["accent"],
                     troughcolor=p["surface2"], bordercolor=p["surface2"])
     style.configure("Gold.Horizontal.TProgressbar", background=p["accent"],

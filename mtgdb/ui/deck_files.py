@@ -10,121 +10,8 @@ from tkinter import filedialog, messagebox
 from mtgdb.deck.file_jobs import submit_deck_file_job
 from mtgdb.deck.io import deck_from_text, read_deck_text, save_deck_text
 from mtgdb.deck.model import Deck
-from mtgdb.ui.set_filters import PrintingFilter
 
 log = logging.getLogger("mtg")
-
-
-class _DeckImportPrintingFilter(PrintingFilter):
-    """Printing picker whose trusted catalogs are prepared off the Tk thread.
-
-    The first modal frame is not mapped until its initial catalog is complete.
-    Later Paper/Set-Type cascades keep the current fixed-row controls in place
-    while a generation-protected worker prepares the replacement vocabulary.
-    """
-
-    def __init__(self, owner, **kwargs):
-        super().__init__(owner, **kwargs)
-        self._catalog_generation = 0
-        self._catalog_future = None
-        self._catalog_waiter = None
-        self._catalog_pending_args = None
-
-    def _request_catalog(self, *, selected_codes=None):
-        self._catalog_generation += 1
-        generation = self._catalog_generation
-        content = tuple(self._content_types())
-        paper_only = bool(self.paper_only.get())
-        games = self.selected_games()
-        selected_types = set(self.selected_set_types())
-        if selected_codes is None:
-            selected_codes = set(self.selected_set_codes())
-        else:
-            selected_codes = {str(code) for code in selected_codes}
-        self._set_catalog_controls_enabled(False)
-
-        repository = self.repository
-
-        def prepare():
-            present = [
-                value for value, _count
-                in repository.set_types(content, paper_only, games=games)
-            ]
-            sets = repository.sets(
-                sorted(selected_types) or None,
-                content_types=content, paper_only=paper_only, games=games)
-            return present, sets
-
-        future = submit_deck_file_job(
-            prepare, name="mtg-deck-import-taxonomy")
-        self._catalog_future = future
-        self._catalog_pending_args = (
-            generation, future, selected_types, selected_codes)
-        try:
-            self.owner.after(0, lambda: self._poll_catalog(
-                generation, future, selected_types, selected_codes))
-        except tk.TclError:
-            pass
-
-    def _poll_catalog(
-            self, generation, future, selected_types, selected_codes):
-        if generation != self._catalog_generation:
-            return
-        if self._catalog_pending_args is None:
-            # This generation was already applied -- by run_modal draining a
-            # future that finished before the event loop ran. The queued
-            # after() callback must not re-apply the captured selection over
-            # whatever the user has since chosen in the open picker.
-            return
-        if not future.done():
-            try:
-                self.owner.after(15, lambda: self._poll_catalog(
-                    generation, future, selected_types, selected_codes))
-            except tk.TclError:
-                pass
-            return
-        try:
-            present, sets = future.result()
-        except Exception:
-            log.exception("Could not load Open Deck printing catalog")
-            present, sets = (), ()
-        if generation != self._catalog_generation:
-            return
-        self.apply_catalog_data(
-            present, sets, selected_types=selected_types,
-            selected_codes=selected_codes)
-        self._set_catalog_controls_enabled(True)
-        self._catalog_future = None
-        self._catalog_pending_args = None
-        waiter = self._catalog_waiter
-        self._catalog_waiter = None
-        if waiter is not None:
-            try:
-                waiter.set(True)
-            except tk.TclError:
-                pass
-
-    def refresh_catalog(self):
-        self._request_catalog()
-
-    def _refresh_exact_set_catalog(self, selected_codes=None):
-        self._request_catalog(selected_codes=selected_codes)
-
-    def run_modal(self, *, done_text="Done"):
-        # Keep the picker hidden until its first complete trusted snapshot exists.
-        future = self._catalog_future
-        if future is not None and not future.done():
-            waiter = tk.BooleanVar(master=self.owner, value=False)
-            self._catalog_waiter = waiter
-            try:
-                self.owner.wait_variable(waiter)
-            except tk.TclError:
-                return False
-        elif future is not None:
-            pending = self._catalog_pending_args
-            if pending is not None:
-                self._poll_catalog(*pending)
-        return super().run_modal(done_text=done_text)
 
 
 class DeckFileWorkflowMixin:
@@ -170,31 +57,6 @@ class DeckFileWorkflowMixin:
             return
         on_success(result)
 
-    def _choose_import_sets(self):
-        """Choose untagged-card printing scope using the shared Printings UI."""
-        english_only = tk.BooleanVar(master=self, value=True)
-        picker = _DeckImportPrintingFilter(
-            self,
-            repository=self.search_repository,
-            content_types_getter=lambda: ("card",),
-            english_variable=english_only,
-            popup_title="Open Deck Printings",
-            header_text="PRINTINGS",
-            intro_text="Choose which printings may resolve untagged cards.",
-        )
-        picker.refresh_catalog()
-        if not picker.run_modal(done_text="Open Deck"):
-            return None
-        selected_types = picker.selected_set_types()
-        selected_codes = picker.selected_set_codes()
-        return (
-            selected_types or None,
-            selected_codes or None,
-            bool(picker.paper_only.get()),
-            "en" if english_only.get() else None,
-        )
-
-
     def _open_deck(self):
         path = filedialog.askopenfilename(
             title="Open Deck",
@@ -202,21 +64,19 @@ class DeckFileWorkflowMixin:
         if not path:
             return
 
-        import_sets = self._choose_import_sets()
-        if import_sets is None:
-            return
-        (allowed_set_types, allowed_set_codes, paper_only, lang) = import_sets
-
         def load_and_resolve():
-            # Decoding belongs with the rest of the decklist file format, not
-            # here: decks arrive from other tools in several encodings.
+            # Deck TXT import is intentionally independent of every interactive
+            # Search/Printings filter. Resolve names against the complete local
+            # card database so an active filter can never hide a valid deck card.
+            # Explicit [SET] / [SET:COLLECTOR] tags remain authoritative inside
+            # deck_from_text; untagged names use the resolver's normal ranking
+            # across every stored platform, language, set type, and set.
             raw = read_deck_text(path)
             return deck_from_text(
                 raw, self.db,
                 name=os.path.splitext(os.path.basename(path))[0],
-                allowed_set_types=allowed_set_types,
-                allowed_set_codes=allowed_set_codes,
-                paper_only=paper_only, lang=lang)
+                allowed_set_types=None, allowed_set_codes=None,
+                paper_only=False, lang=None)
 
         def opened(result):
             deck, missing = result

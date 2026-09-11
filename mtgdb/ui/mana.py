@@ -8,7 +8,7 @@ from mtgdb.ui.assets import _asset_path
 from mtgdb.ui.tokens import FILTER_PIP_SIZE
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageTk
+    from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
     HAVE_PIL = True
 except Exception:
     HAVE_PIL = False
@@ -56,6 +56,7 @@ class ManaSymbolsMixin:
 
     def _make_pips(self):
         self.pips = {}
+        self.pips_disabled = {}
         if not HAVE_PIL:
             return
         for k, fname in COLOR_ICON_FILES.items():
@@ -65,7 +66,29 @@ class ManaSymbolsMixin:
                 self.pips[k] = ImageTk.PhotoImage(img)
             except Exception:
                 log.warning("Could not load mana icon %s; using drawn pip", fname)
+                # The drawn fallback is already a Tk image, so retain it as the
+                # normal state and leave disabled-state rendering to ttk.
                 self.pips[k] = self._make_pip(k, FILTER_PIP_SIZE)
+                continue
+
+            # Search facet availability is communicated by disabling individual
+            # mana choices.  A normal PhotoImage remains fully saturated under
+            # ttk's disabled state on Windows, so keep a deliberately muted
+            # grayscale partner for the state-specific image specification.
+            alpha = img.getchannel("A")
+            disabled = ImageOps.grayscale(img.convert("RGB")).convert("RGBA")
+            disabled.putalpha(alpha.point(lambda value: int(value * 0.52)))
+            self.pips_disabled[k] = ImageTk.PhotoImage(disabled)
+
+    def _filter_pip_image(self, key):
+        """Return the normal/disabled image specification for a filter pip."""
+        normal = self.pips.get(key)
+        if normal is None:
+            return None
+        disabled = getattr(self, "pips_disabled", {}).get(key)
+        if disabled is None:
+            return normal
+        return (normal, "disabled", disabled)
 
 
     def _load_symbol_keys(self):

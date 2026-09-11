@@ -23,7 +23,9 @@ from mtgdb.search.results import (
     prepare_vocabulary,
     table_value,
 )
+from mtgdb.ui.card_detail import results_gallery_layout_metrics
 from mtgdb.ui.results import RESULT_LIVE_ROW_LIMIT, SearchResultsMixin
+from mtgdb.ui.tokens import RESULT_GALLERY_MAX_COLUMNS, RESULT_GALLERY_MAX_VISIBLE_ROWS
 from mtgdb.workspace.repository import WorkspaceLoadWorker, WorkspaceSaveWorker
 
 
@@ -450,6 +452,14 @@ def main():
             store.logical_count == 100_000
             and not hasattr(compact_row, "__dict__")
             and isinstance(store.rows, tuple)),
+        "Results Gallery expands with viewport while live image slots stay bounded": (
+            results_gallery_layout_metrics(1920, 1000)["slot_count"]
+            > results_gallery_layout_metrics(1240, 860)["slot_count"]
+            > 12
+            and results_gallery_layout_metrics(1240, 860, 320)["slot_count"]
+                < results_gallery_layout_metrics(1240, 860, 140)["slot_count"]
+            and results_gallery_layout_metrics(10_000, 10_000)["slot_count"]
+            <= RESULT_GALLERY_MAX_COLUMNS * RESULT_GALLERY_MAX_VISIBLE_ROWS),
         "100k logical results keep a bounded reusable Tk viewport": (
             75 <= len(initial_slots) <= RESULT_LIVE_ROW_LIMIT == 128
             and initial_slots == deep_slots

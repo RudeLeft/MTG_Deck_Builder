@@ -1,9 +1,4 @@
-"""Presentation registry for the existing Search capabilities.
-
-The registry deliberately names UI groups, not a second Magic taxonomy. Values
-still come from Scryfall/observed database fields and the query model remains
-unchanged; this module only decides where an existing capability is presented.
-"""
+"""Presentation registry for Search filters and their user-facing help text."""
 
 from __future__ import annotations
 
@@ -11,168 +6,172 @@ from __future__ import annotations
 CATEGORY_ORDER = ("Search Scope", "Mana", "Card", "Printing & Status")
 
 # The common Search surface follows a printed Magic type line before moving on
-# to colour, stats, and printing scope.  No query field was added for this UI
-# change: Supertype/Card Type/Subtype are the existing criteria moved together.
+# to mana/color, stats, and the advanced groups.
 STANDARD_FILTERS = (
-    "name", "supertypes", "card_type", "subtype", "colors", "stats", "printings",
+    "name", "supertypes", "card_type", "subtype", "colors", "stats",
 )
 
 FILTER_DEFINITIONS = (
     {
         "key": "search_scope", "category": "Search Scope", "label": "Search scope",
         "tooltip": (
-            "Choose whether Search covers Cards, Tokens, Emblems, or Art Series. "
-            "These choices set the search universe and are not affected by the "
-            "Any, All, or None mode used for card properties."),
+            "Choose which kinds of objects can appear in Results: Cards, Tokens, "
+            "Emblems, or Art Series. Selecting several object types includes any of them. "
+            "Search Scope is independent of the Any, All, or None modes used by other filters."),
     },
     {
         "key": "mana_value", "category": "Mana", "label": "Mana value",
         "tooltip": (
-            "The total cost of a card, counting colored and generic mana together. "
-            "Leave either side empty for no limit."),
+            "Filter by a card's mana value. The Min and Max fields let you search one "
+            "exact value or a range. If every remaining result has no meaningful mana cost, "
+            "the control becomes unavailable even though rules may assign those objects mana value 0."),
     },
     {
         "key": "produces", "category": "Mana", "label": "Mana produced",
         "tooltip": (
-            "The mana a card can make, which is not the same as its color or color "
-            "identity. The existing Within, Contains and Exactly modes are preserved."),
+            "Filter by the colors of mana a card can produce. This is separate from "
+            "the card's own colors and Color Identity. Select one or more mana colors, "
+            "then use Match to choose Within, Contains, or Exactly."),
     },
     {
         "key": "mana_pips", "category": "Mana", "label": "Mana symbols in cost",
         "tooltip": (
-            "How many colored mana symbols the cost has, counted per selected color. "
-            "The threshold applies to every selected color exactly as before."),
+            "Filter by colored or colorless mana symbols that appear in a card's mana cost. "
+            "Match: All requires every selected color, Any requires at least one selected "
+            "color, and None excludes them. Minimum is the total number of qualifying physical "
+            "symbols. A hybrid symbol can represent each of its colors for Match but counts only "
+            "once toward Minimum. Colorless means literal {C}; generic costs such as {1} or {2} "
+            "do not count. This is separate from Mana Color and Mana Produced."),
     },
     {
         "key": "mana_cost_features", "category": "Mana", "label": "Mana cost features",
         "tooltip": (
-            "Find cards whose mana cost contains Hybrid mana, Phyrexian mana, or X. "
-            "These are the existing mana-cost properties, grouped here so cost-related "
-            "questions stay together."),
+            "Filter for Hybrid mana, Phyrexian mana, or X in the mana cost. Match: Any "
+            "accepts at least one selected feature, All requires every selected feature, "
+            "and None excludes cards with any selected feature."),
     },
     {
         "key": "stats", "category": "Card", "label": "Power / Toughness",
         "tooltip": (
-            "Printed numeric power and toughness. Variable values such as */* are not "
-            "numeric range matches; their existing property filter remains available."),
+            "Filter by numeric power and toughness. Nonnumeric values such as * do not "
+            "satisfy a numeric range; use Special Properties to find variable power or "
+            "toughness. Power and Toughness are filtered independently."),
     },
     {
         "key": "loyalty", "category": "Card", "label": "Loyalty",
         "tooltip": (
-            "The printed numeric loyalty value used by planeswalker cards. Leave either "
-            "side empty for no limit; cards without numeric loyalty do not satisfy a "
-            "loyalty range."),
+            "Filter by a card's printed numeric loyalty, used by planeswalkers. Cards "
+            "without a numeric loyalty value do not match a Loyalty range."),
     },
     {
         "key": "defense", "category": "Card", "label": "Defense",
         "tooltip": (
-            "The printed numeric defense value used by battle cards. Leave either side "
-            "empty for no limit; loyalty and defense are separate values and no card "
-            "has both as one shared statistic."),
+            "Filter by a card's printed numeric defense, used by battles. Cards without "
+            "numeric defense do not match a Defense range. Loyalty and Defense are separate "
+            "characteristics."),
     },
     {
         "key": "supertypes", "category": "Card", "label": "Supertype",
         "tooltip": (
-            "The words before Card Type on the type line, such as Legendary, Basic or "
-            "Snow. Matching checks the complete type line across either face while the "
-            "trusted Supertype vocabulary remains authoritative."),
+            "Filter by supertypes such as Legendary, Basic, Snow, or World. On a "
+            "multi-faced card, a matching supertype on either face qualifies. Match: "
+            "Any accepts at least one selected supertype, All requires every selected "
+            "supertype, and None excludes any selected supertype."),
     },
     {
         "key": "subtype", "category": "Card", "label": "Subtype",
         "tooltip": (
-            "The words after the dash on the type line, such as Angel, Equipment, or "
-            "Forest. Current results may change the ordering and counts, but they never "
-            "create subtype names that are not already trusted vocabulary."),
+            "Filter by subtypes such as Angel, Equipment, Forest, or Wizard. On a "
+            "multi-faced card, a matching subtype on either face qualifies. Match: Any "
+            "accepts at least one selected subtype, All requires every selected subtype, "
+            "and None excludes any selected subtype."),
     },
     {
         "key": "mechanics", "category": "Card", "label": "Mechanics",
         "tooltip": (
-            "Named Keyword Abilities, Keyword Actions, and Ability Words, separate from "
-            "free-form rules text. Current results prioritize relevant mechanics without "
-            "creating new mechanic names."),
+            "Filter by named Keyword Abilities, Keyword Actions, and Ability Words. "
+            "Unlike Rules Text, this searches named mechanics rather than arbitrary words "
+            "or phrases. Match: Any accepts at least one selected mechanic, All requires "
+            "every selected mechanic, and None excludes cards with any selected mechanic."),
     },
     {
         "key": "rules_text", "category": "Card", "label": "Rules text",
         "tooltip": (
-            "Words in a card's rules text across every face. Quotes still require an "
-            "exact phrase; Any can match one term, All requires every term, and None "
-            "requires none of them to match."),
+            "Filter by words or phrases in a card's rules text across every face. "
+            "Unquoted text can appear anywhere; text in double quotes must appear as an "
+            "exact phrase. Match: Any accepts at least one entry, All requires every "
+            "entry, and None excludes cards matching any entry."),
     },
     {
         "key": "card_form", "category": "Card", "label": "Card form",
         "tooltip": (
-            "The card's existing layout value, such as a split or double-faced form. "
-            "Current results prioritize forms that can match, while selected and other "
-            "observed forms remain available."),
+            "Filter by a card's structural form, such as split, transforming, modal "
+            "double-faced, adventure, or another available form. Match: Any includes "
+            "the selected forms; None excludes them."),
     },
     {
-        "key": "faces", "category": "Card", "label": "Faces",
+        "key": "special_properties", "category": "Card", "label": "Special properties",
         "tooltip": (
-            "Choose the existing Single-faced or Multi-faced card property. This uses the "
-            "card's actual face data and does not infer face count from a maintained list "
-            "of layouts."),
+            "Filter uncommon card characteristics. Power greater than toughness compares "
+            "numeric power and toughness; Variable power or toughness finds a * value; a "
+            "color indicator is the printed color marker that defines a card's color; and "
+            "Has multiple faces finds cards with more than one card face. Match: Any accepts "
+            "at least one selected property, All requires every selected property, and None "
+            "excludes cards with any selected property."),
     },
     {
-        "key": "color_indicator", "category": "Card", "label": "Color indicator",
+        "key": "printings", "category": "Printing & Status", "label": "Printings",
         "tooltip": (
-            "Require a card to have a printed color indicator. This is the existing "
-            "yes/no property only; it does not add a separate filter for the indicator's "
-            "color."),
-    },
-    {
-        "key": "pt_properties", "category": "Card", "label": "P/T properties",
-        "tooltip": (
-            "The existing Power greater than toughness and Variable power/toughness "
-            "predicates, grouped beside the card characteristics they describe."),
-    },
-    {
-        "key": "property_match", "category": "Card", "label": "Property matching",
-        "tooltip": (
-            "How the selected yes/no property filters above and below combine: Any, All "
-            "or None. This is the existing property matching mode, not a new filter."),
+            "Choose which printings can appear by Printing Type (Paper, Arena, or MTGO), "
+            "Set Type, Exact Set, and language. Selecting multiple printing types, set types, "
+            "or exact sets includes any selected choice. These settings also limit what can "
+            "match Rarity and Released."),
     },
     {
         "key": "format", "category": "Printing & Status", "label": "Format",
         "tooltip": (
-            "Cards with the selected legality in the selected format. Playable, Banned "
-            "and Restricted retain their existing search semantics."),
+            "Filter by a card's legality in one format. Playable includes cards that "
+            "are legal or restricted, Banned finds cards explicitly banned, and "
+            "Restricted finds cards limited to one copy in that format."),
     },
     {
         "key": "rarity", "category": "Printing & Status", "label": "Rarity",
         "tooltip": (
-            "The rarity of an individual printing rather than a card name in general. "
-            "Current matching printings determine which existing rarity values are most "
-            "relevant."),
+            "Filter by the rarity of a qualifying printing. Selecting several rarities "
+            "includes a printing with any selected rarity. Printings excluded by your other "
+            "Printing & Status filters do not qualify."),
     },
     {
         "key": "released", "category": "Printing & Status", "label": "Released",
         "tooltip": (
-            "The inclusive release-year range for an individual printing. Leave either "
-            "side empty for no limit; the available year range follows the current "
-            "printing scope."),
+            "Filter by the release year of a qualifying printing. Min and Max are "
+            "inclusive, and either side can be left blank for no limit."),
     },
     {
         "key": "status_properties", "category": "Printing & Status", "label": "Product / status",
         "tooltip": (
-            "The existing Universes Beyond, Reserved List, and Commander Game Changer "
-            "yes/no properties. They remain the same search predicates and are grouped "
-            "here only for presentation."),
+            "Filter by Universes Beyond, Reserved List, or Commander Game Changer "
+            "status. Match: Any accepts at least one selected status, All requires every "
+            "selected status, and None excludes cards with any selected status."),
     },
 )
 
 STANDARD_FILTER_TOOLTIPS = {
     "name": (
-        "Matches any card whose name contains what you type. Searching from a deck "
-        "selection continues to use the existing exact-name batch behavior."),
+        "Filter by card name. Typing part of a name matches names containing that text. "
+        "When Search is opened from selected deck cards, those selected card names are "
+        "matched exactly."),
     "colors": (
-        "Use Look at to search either color identity or the card's printed colors, "
-        "then apply the existing Within, Contains, or Exactly set comparison."),
+        "Filter by Mana Color using either Color Identity or Card Colors. Use chooses "
+        "which color definition is searched. Match controls the relationship to the "
+        "selected colors: Within allows only selected colors, Contains requires every "
+        "selected color and allows additional colors, and Exactly requires the selected "
+        "color set and no others."),
     "card_type": (
-        "The main Card Type on the type line, such as Creature, Instant or Land. "
-        "Multi-type cards continue to match according to Any/All/None."),
-    "printings": (
-        "Which existing printings may match: Printing Type, Set Type, Exact Set and "
-        "English-only scope. These choices also scope trusted filter vocabulary."),
+        "Filter by card types such as Creature, Instant, Land, or Dungeon. On a "
+        "multi-faced card, a matching type on either face qualifies. Match: Any accepts "
+        "at least one selected type, All requires every selected type, and None excludes "
+        "cards with any selected type."),
 }
 
 FILTER_BY_KEY = {entry["key"]: entry for entry in FILTER_DEFINITIONS}

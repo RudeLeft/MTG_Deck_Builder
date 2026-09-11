@@ -12,10 +12,11 @@ sys.path.insert(0, str(ROOT))
 from mtgdb.database.db import CardDB
 from mtgdb.database.semantics import _card_content_kind
 from mtgdb.database.schema import RULES_SUPERTYPES_META_KEY
-from mtgdb.ui.search_filters import FILTER_BY_KEY, FILTER_DEFINITIONS
+from mtgdb.ui.search_filters import FILTER_BY_KEY, FILTER_DEFINITIONS, STANDARD_FILTERS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.search.catalogs import SearchCatalogController
 from mtgdb.search.repository import SearchRepository
+from mtgdb.ui.set_filters import platform_selection_summary
 
 
 def card(card_id, name, type_line, set_code, set_type, *, games=("paper",),
@@ -223,25 +224,40 @@ def main():
     set_source = (ROOT / "mtgdb/ui/set_filters.py").read_text(encoding="utf-8")
     combined = search_source + printing_source + set_source
     checks.update({
-        "Search has no More Types or Characteristics UI": (
-            "More Types" not in search_source and "Characteristics" not in search_source),
+        "Search has no More Types or Characteristics filter": (
+            "More Types" not in search_source
+            and all(entry.get("label") != "Characteristics"
+                    for entry in FILTER_DEFINITIONS)),
         "Abilities are presented under the Mechanics umbrella": (
             FILTER_BY_KEY["mechanics"]["label"] == "Mechanics"
             and "Choose Abilities" not in search_source
             and all(term in FILTER_BY_KEY["mechanics"]["tooltip"] for term in (
                 "Keyword Abilities", "Keyword Actions", "Ability Words"))),
-        "trusted Type Line filters expose explicit authority failures": (
+        "trusted Type Line loading keeps disabled chips instead of prose": (
+            "No trusted values are available for the current search scope." not in search_source
+            and "CARD_TYPE_LOADING_SLOTS" in search_source
+            and "SUPERTYPE_LOADING_SLOTS" in search_source
+            and "loading_placeholders=CARD_TYPE_LOADING_SLOTS" in search_source
+            and "loading_placeholders=SUPERTYPE_LOADING_SLOTS" in search_source
+            and "_mtg_loading_placeholder" in search_source
+            and "load_search_type_line_catalogs" in search_source
+            and "save_search_type_line_catalogs" in search_source),
+        "trusted Type Line authority failures stay out of chip rows": (
             FILTER_BY_KEY["supertypes"]["label"] == "Supertype"
             and "def _build_standard_type_line_filters(" in search_source
-            and '"Selected supertypes:"' in search_source
+            and 'text=MATCH_MODE_LABEL' in search_source
             and 'text="TYPE LINE"' in search_source
             and not any(entry["label"] in {"Properties", "Card Shape", "Card Traits"}
                         for entry in FILTER_DEFINITIONS)
             and "Official Wizards Supertype taxonomy is unavailable" in search_source
             and "Scryfall Card Type taxonomy is unavailable" in search_source
+            and "force_placeholders=not card_type_authority_available" in search_source
+            and "force_placeholders=not supertype_authority_available" in search_source
+            and "empty_text=" not in search_source
+            and "_supertype_empty_text" not in search_source
+            and 'self._status(" ".join(unavailable))' in search_source
             and "supertype_taxonomy_status" in catalog_source
-            and "card_type_taxonomy_status" in catalog_source
-            and "Last error:" in search_source),
+            and "card_type_taxonomy_status" in catalog_source),
         "taxonomy code has no hardcoded Supertype picker vocabulary": (
             "SUPERTYPES =" not in (ROOT / "mtgdb/database/constants.py").read_text(
                 encoding="utf-8")
@@ -259,11 +275,11 @@ def main():
             # Type Line values are standard; Search Scope is the existing content
             # selector moved into Advanced rather than a new query dimension.
             and "content" not in FILTER_BY_KEY
-            and "printings" not in FILTER_BY_KEY),
+            and FILTER_BY_KEY["printings"]["category"] == "Printing & Status"
+            and "printings" not in STANDARD_FILTERS),
         "advanced filter labels match primary Search field typography": (
-            'label = ttk.Label(frame, text=entry["label"])' in search_source
-            and 'printings_label = ttk.Label(parent, text="Printings")'
-            in printing_source
+            'label = ttk.Label(parent, text=text)' in search_source
+            and 'owner._build_search_row_label(' in printing_source
             and 'text="Content", style="Section.TLabel"' not in search_source
             and 'text="Subtype", style="Section.TLabel"' not in search_source
             and 'text="Format", style="Section.TLabel"' not in search_source
@@ -286,11 +302,21 @@ def main():
             and "Supplemental" not in search_source
             and FILTER_BY_KEY["search_scope"]["category"] == "Search Scope"
             and "def _choose_search_scope(" in search_source),
-        "Printings default to Paper only and Any set": (
-            'text="Paper only · Any set type · Any set"' in printing_source
+        "Printings default to Paper Only and Any set": (
+            'text="Paper Only · Any set type · Any set"' in printing_source
             and "SET_TYPE_DEFAULT_ON" not in combined
             and "SET_TYPE_GROUPS" not in combined
             and "Recommended" not in combined),
+        "Printings summary mirrors the exact selected platforms": (
+            platform_selection_summary(()) == "Any Platform"
+            and platform_selection_summary(("paper",)) == "Paper Only"
+            and platform_selection_summary(("arena",)) == "Arena Only"
+            and platform_selection_summary(("mtgo",)) == "MTGO Only"
+            and platform_selection_summary(("paper", "arena")) == "Paper + Arena"
+            and platform_selection_summary(("paper", "mtgo")) == "Paper + MTGO"
+            and platform_selection_summary(("arena", "mtgo")) == "Arena + MTGO"
+            and platform_selection_summary(("paper", "arena", "mtgo"))
+                == "Paper + Arena + MTGO"),
         "Printings Exact Set picker cascades from selected Set Types in place": (
             "def _on_set_type_change(" in set_source
             and "allowed_types = sorted(self.selected_set_types()) or None" in set_source
@@ -308,9 +334,10 @@ def main():
             and 'value = "" if "" in normalized else next(iter(normalized), "")'
                 in search_source
             and 'single_select=True' in search_source),
-        "Mechanics and Subtype use the requested concise picker instructions": (
-            'help_text="Choose one or several card mechanics."' in search_source
-            and 'help_text="Choose one or several card subtypes."' in search_source),
+        "Mechanics and Subtype use standardized count-aware picker instructions": (
+            'Choose one or more mechanics. Counts show matches under the other' in search_source
+            and 'Choose one or more subtypes. Counts show matches under the other' in search_source
+            and 'available matches appear first.' in search_source),
         "Search Printings has no title-level instruction while shared popup supports it": (
             'intro_text=""' in printing_source
             and 'if self._intro_text:' in set_source

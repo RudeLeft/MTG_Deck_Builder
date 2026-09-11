@@ -21,8 +21,16 @@ from mtgdb.images.service import (
     card_needs_rotation,
     card_viewable_faces,
 )
-from mtgdb.ui.card_detail import CardDetailMixin, _CardZoomWindow
-from mtgdb.ui.tokens import CARD_ZOOM_WINDOW_MIN_SIZE
+from mtgdb.ui.card_detail import (
+    CardDetailMixin, _CardZoomWindow, _GalleryCardPeekWindow,
+    _ResultsGalleryWindow, results_gallery_layout_metrics,
+)
+from mtgdb.ui.tokens import (
+    CARD_ZOOM_WINDOW_MIN_SIZE, RESULT_GALLERY_CARD_MAX_WIDTH,
+    RESULT_GALLERY_CARD_MIN_WIDTH, RESULT_GALLERY_CARD_TARGET_WIDTH,
+    RESULT_GALLERY_MAX_COLUMNS,
+    RESULT_GALLERY_MAX_VISIBLE_ROWS,
+)
 
 
 def _jpeg_bytes():
@@ -48,6 +56,13 @@ def main():
     detail_source = (ROOT / "mtgdb/ui/card_detail.py").read_text(encoding="utf-8")
     comparison_source = (
         ROOT / "mtgdb/ui/comparison.py").read_text(encoding="utf-8")
+    results_source = (ROOT / "mtgdb/ui/results.py").read_text(encoding="utf-8")
+    gallery_source = detail_source.split(
+        "class _ResultsGalleryWindow", 1)[1].split("class _CardZoomWindow", 1)[0]
+    zoom_source = detail_source.split("class _CardZoomWindow", 1)[1].split(
+        "class CardDetailMixin", 1)[0]
+    comparison_controls_source = (
+        ROOT / "mtgdb/ui/comparison_controls.py").read_text(encoding="utf-8")
     gui_methods, gui_class = _class_methods(gui_source, "DeckBuilderApp")
     detail_methods, _detail_class = _class_methods(
         detail_source, "CardDetailMixin")
@@ -352,8 +367,10 @@ def main():
             and "self._image_poll_after = self.after(" not in detail_source.split(
                 "def _image_ready", 1)[1]
             and '"_image_ready_after"' in gui_source),
-        "main preview owns Legality Rotate and Zoom controls with dark popups": (
-            'text="Legality"' in detail_source
+        "main preview owns Gallery Legality Rotate and Zoom controls": (
+            'text="Gallery"' in detail_source
+            and 'role="compact_primary"' in detail_source
+            and 'text="Legality"' in detail_source
             and 'text="Rotate"' in detail_source
             and 'text="Zoom"' in detail_source
             and "def _open_card_legality(" in detail_source
@@ -363,6 +380,48 @@ def main():
             and "class _CardZoomWindow" in detail_source
             and "card_image_service.request(" in detail_source
             and "Image.open(" not in detail_source),
+        "Results Gallery is dense resizable bounded and follows the current Results view": (
+            issubclass(_ResultsGalleryWindow, object)
+            and results_gallery_layout_metrics(1920, 1000)["slot_count"]
+                > results_gallery_layout_metrics(1240, 860)["slot_count"]
+            and results_gallery_layout_metrics(5000, 5000)["slot_count"]
+                <= RESULT_GALLERY_MAX_COLUMNS * RESULT_GALLERY_MAX_VISIBLE_ROWS
+            and results_gallery_layout_metrics(1240, 860, 320)["slot_count"]
+                < results_gallery_layout_metrics(1240, 860, 140)["slot_count"]
+            and results_gallery_layout_metrics(1240, 860, 320)["image_w"] == 320
+            and results_gallery_layout_metrics(1240, 860, 1)["image_w"]
+                == RESULT_GALLERY_CARD_MIN_WIDTH
+            and results_gallery_layout_metrics(1240, 860, 9999)["image_w"]
+                == RESULT_GALLERY_CARD_MAX_WIDTH
+            and 'transient=False, resizable=True' in gallery_source
+            and 'self.top.resizable(True, True)' in gallery_source
+            and 'text="Card Size"' in gallery_source
+            and 'self.card_size_value' not in gallery_source
+            and RESULT_GALLERY_CARD_TARGET_WIDTH == 280
+            and 'ttk.Scale(' in gallery_source
+            and 'style="Gallery.Horizontal.TScale"' in gallery_source
+            and 'self.card_size_scale = tk.Scale(' not in gallery_source
+            and 'RESULTS GALLERY | {count:,} CARDS' in gallery_source
+            and 'self._scroll_y = 0.0' in gallery_source
+            and 'self._top_row' not in gallery_source
+            and 'cell.place(' in gallery_source
+            and 'row_offset = int(round(self._scroll_y - first_row * stride))' in gallery_source
+            and 'pixels = amount * max(28, min(72, self._layout["image_h"] // 5))' in gallery_source
+            and 'def _position_bound_slots(' in gallery_source
+            and 'slot["cell"].place_configure(x=x, y=y)' in gallery_source
+            and 'def _scroll_to_y(' in gallery_source
+            and 'name_label = tk.Label(' not in gallery_source
+            and 'channel=f"results-gallery-slot-{slot}"' in gallery_source
+            and '"<Button-1>"' in gallery_source
+            and '"<Button-3>"' in gallery_source
+            and issubclass(_GalleryCardPeekWindow, object)
+            and 'channel="results-gallery-peek"' in detail_source
+            and "self._result_store.visible_count" in results_source
+            and "source_index_at_view(position)" in results_source
+            and "gallery.refresh_results()" in results_source
+            and "context_menu_fn=self._show_gallery_card_context_menu" in results_source
+            and 'label="Add to Mainboard"' in comparison_controls_source
+            and 'label="Add to Sideboard"' in comparison_controls_source),
         "separately imaged faces are detected without a layout allowlist": (
             [index for index, _name, _url in transform_faces] == [0, 1]
             and split_faces == []
@@ -407,8 +466,8 @@ def main():
             and _zoom_title("AAAAAAAAAAAAAAAAAAAAAAAAAAAA", 100).endswith("…")
             and len(_zoom_title("AAAAAAAAAAAAAAAAAAAAAAAAAAAA", 100)) < 28
             # Controls are packed before the title so Tk squeezes the title.
-            and detail_source.index('text="Close"')
-            < detail_source.index("self.title_label = tk.Label(")
+            and zoom_source.index('text="Close"')
+            < zoom_source.index("self.title_label = ttk.Label(")
             and CARD_ZOOM_WINDOW_MIN_SIZE[0] >= 720),
         "shutdown leaves no task queued by an in-flight request": (
             shutdown_blocked and no_orphaned_task and race_future_settled),
