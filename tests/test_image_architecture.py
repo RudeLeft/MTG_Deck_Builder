@@ -404,10 +404,14 @@ def main():
             and 'RESULTS GALLERY | {count:,} CARDS' in gallery_source
             and 'self._scroll_y = 0.0' in gallery_source
             and 'self._top_row' not in gallery_source
-            and 'cell.place(' in gallery_source
+            and 'slot["cell"].place(' in gallery_source
             and 'row_offset = int(round(self._scroll_y - first_row * stride))' in gallery_source
             and 'pixels = amount * max(28, min(72, self._layout["image_h"] // 5))' in gallery_source
-            and 'def _position_bound_slots(' in gallery_source
+            # Scrolling rebinds only the rows that enter the viewport: a wrapped
+            # slot map plus a diff-based bind reposition already-shown cards
+            # instead of re-rendering (and re-requesting) the whole grid.
+            and 'def _slot_for_position(' in gallery_source
+            and 'def _bind_visible(' in gallery_source
             and 'slot["cell"].place_configure(x=x, y=y)' in gallery_source
             and 'def _scroll_to_y(' in gallery_source
             and 'name_label = tk.Label(' not in gallery_source

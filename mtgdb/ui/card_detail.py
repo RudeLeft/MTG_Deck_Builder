@@ -446,35 +446,25 @@ class _ResultsGalleryWindow:
         stride = max(1, self._layout["row_stride"])
         return int(max(0.0, self._scroll_y) // stride)
 
-    def _position_bound_slots(self):
-        """Slide already-bound cells without rebinding/re-requesting images."""
-        stride = max(1, self._layout["row_stride"])
-        first_row = self._first_visible_row()
-        row_offset = int(round(self._scroll_y - first_row * stride))
+    def _slot_for_position(self, position):
+        """Map a card position to a live slot by wrapping its row modulo the pool.
+
+        Consecutive rows land on consecutive slot rows, so shifting the viewport
+        by one row only reassigns the row that scrolled out to the row that
+        scrolled in.  The visible window never spans more than ``rows`` rows (the
+        ``end`` cap in ``_bind_visible`` guarantees it), so this is collision-free
+        across the visible set and lets scroll keep the images it already holds.
+        """
         columns = max(1, self._layout["columns"])
-        gap = self._layout["gap"]
-        for slot in self._slots:
-            position = slot.get("position")
-            if position is None:
-                continue
-            absolute_row, column = divmod(int(position), columns)
-            relative_row = absolute_row - first_row
-            x = column * (self._layout["image_w"] + gap)
-            y = relative_row * stride - row_offset
-            try:
-                slot["cell"].place_configure(x=x, y=y)
-            except tk.TclError:
-                pass
+        rows = max(1, self._layout["rows"])
+        row, column = divmod(int(position), columns)
+        return (row % rows) * columns + column
 
     def _scroll_to_y(self, value):
-        old_first_row = self._first_visible_row()
         self._scroll_y = float(value)
         self._clamp_scroll_y()
-        if self._first_visible_row() == old_first_row:
-            self._position_bound_slots()
-            self._update_scrollbar()
-        else:
-            self._render()
+        self._bind_visible()
+        self._update_scrollbar()
 
     def _update_scrollbar(self):
         total_height = self._total_scroll_height()
@@ -549,7 +539,13 @@ class _ResultsGalleryWindow:
                 pass
 
         self._ensure_gallery_slots(self._layout["slot_count"])
+        # A full render drops every binding so each visible position rebinds its
+        # card afresh; without clearing ``position`` here a shrunk result set
+        # would leave stale positions that _bind_visible would re-place as ghost
+        # cells.
         for slot in self._slots:
+            slot["position"] = None
+            slot["card"] = {}
             try:
                 slot["cell"].place_forget()
                 slot["image"].configure(image="", text="")
@@ -567,36 +563,85 @@ class _ResultsGalleryWindow:
             self._empty_label.place(relx=0.5, rely=0.5, anchor="center")
             return
 
-        columns = self._layout["columns"]
-        stride = self._layout["row_stride"]
+        self._bind_visible()
+
+    def _bind_visible(self):
+        """Place the visible positions, rebinding only slots whose card changed.
+
+        Reused by both a full render and every scroll.  Slots already bound to a
+        still-visible position are only re-placed (their image is kept, so
+        scrolling never flashes a whole viewport back to "Loading image…"); only
+        the positions that just entered the viewport request a new image.
+        """
+        count = self._total_count()
+        if not count:
+            for slot in self._slots:
+                if slot.get("position") is None:
+                    continue
+                slot["position"] = None
+                slot["card"] = {}
+                try:
+                    slot["cell"].place_forget()
+                    slot["image"].configure(image="", text="")
+                except tk.TclError:
+                    pass
+            return
+        self._ensure_gallery_slots(self._layout["slot_count"])
+        columns = max(1, self._layout["columns"])
+        stride = max(1, self._layout["row_stride"])
+        gap = self._layout["gap"]
+        image_w = self._layout["image_w"]
+        image_h = self._layout["image_h"]
         self._clamp_scroll_y()
         first_row = self._first_visible_row()
         row_offset = int(round(self._scroll_y - first_row * stride))
         start = first_row * columns
+        # The slot_count cap keeps the visible span within ``rows`` rows, which
+        # is what makes _slot_for_position collision-free over this set.
         end = min(count, start + self._layout["slot_count"])
-        generation = self._image_generation
+        targets = {}
         for position in range(start, end):
-            slot_index = position - start
+            targets[self._slot_for_position(position)] = position
+        generation = self._image_generation
+        for slot_index, slot in enumerate(self._slots):
+            position = targets.get(slot_index)
+            if position is None:
+                if slot.get("position") is not None:
+                    slot["position"] = None
+                    slot["card"] = {}
+                    self._image_requests.pop(slot_index, None)
+                    self._photos.pop(slot_index, None)
+                    try:
+                        slot["cell"].place_forget()
+                        slot["image"].configure(image="", text="")
+                    except tk.TclError:
+                        pass
+                continue
             absolute_row, column = divmod(position, columns)
             relative_row = absolute_row - first_row
+            x = column * (image_w + gap)
+            y = relative_row * stride - row_offset
+            if slot.get("position") == position:
+                # Same card already displayed here: just slide the cell.
+                try:
+                    slot["cell"].place_configure(x=x, y=y)
+                except tk.TclError:
+                    pass
+                continue
             try:
                 card = dict(self._card_at_fn(position) or {})
             except Exception:
                 card = {}
-            slot = self._slots[slot_index]
-            cell = slot["cell"]
-            image_box = slot["image_box"]
             image_label = slot["image"]
-            gap = self._layout["gap"]
-            x = column * (self._layout["image_w"] + gap)
-            y = relative_row * stride - row_offset
-            cell.place(
-                x=x, y=y, width=self._layout["image_w"],
-                height=self._layout["image_h"], anchor="nw",
-            )
-            image_box.configure(
-                width=self._layout["image_w"], height=self._layout["image_h"])
-            image_label.configure(image="", text="Loading image…", width=0, height=0)
+            self._photos.pop(slot_index, None)
+            try:
+                slot["cell"].place(
+                    x=x, y=y, width=image_w, height=image_h, anchor="nw")
+                slot["image_box"].configure(width=image_w, height=image_h)
+                image_label.configure(
+                    image="", text="Loading image…", width=0, height=0)
+            except tk.TclError:
+                pass
             slot["card"] = card
             slot["position"] = position
             self._queue_gallery_image(
