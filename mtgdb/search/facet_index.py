@@ -25,8 +25,9 @@ from mtgdb.database.semantics import (
 from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
     _PIP_KEYS, _SPECIAL_PROPERTY_KEYS, _STATUS_PROPERTY_KEYS,
-    _catalog_values, _comma_members, _finite, _has_meaningful_mana_cost,
-    _json_object, _keyword_values, _relaxed, _trait_keys,
+    _cast_real, _catalog_values, _comma_members, _finite, _glob_numeric,
+    _has_meaningful_mana_cost, _json_object, _keyword_values, _relaxed,
+    _trait_keys,
 )
 
 _NUMERIC_FIELDS = ("cmc", "power", "toughness", "loyalty", "defense")
@@ -38,27 +39,6 @@ _GAME_PLATFORMS = ("paper", "mtgo", "arena")
 
 def _type_key(value):
     return str(value or "").replace("’", "'").replace("‘", "'").casefold()
-
-
-_NON_NUMERIC = re.compile(r"[^0-9.\-]")
-_NUMERIC_PREFIX = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
-
-
-def _glob_numeric(value):
-    """True when a TEXT stat passes the search filter's GLOB numeric guard."""
-    text = "" if value is None else str(value)
-    return text != "" and _NON_NUMERIC.search(text) is None
-
-
-def _cast_real(text):
-    """Approximate SQLite ``CAST(x AS REAL)`` for a GLOB-numeric stored value."""
-    match = _NUMERIC_PREFIX.match(str(text or "").strip())
-    if not match:
-        return 0.0
-    try:
-        return float(match.group(0))
-    except ValueError:
-        return 0.0
 
 
 def _trait_filter_keys(row):

@@ -152,17 +152,17 @@ def main():
                 print("    context mismatch %s.%s: %s != %s" % (name, field, aa, bb))
     checks["context_counts matches the worker per field"] = context_ok
 
-    # 3. top_heavy divergence is preserved: the "1-2" card is top_heavy under the
-    #    GLOB/CAST filter but not under the float-based predictive count.
+    # 3. top_heavy count equals its filter: both bear (2/1) and Odd Stats
+    #    ("1-2"/"0", CAST 1>0) satisfy the GLOB/CAST rule the count now shares
+    #    with the filter, so selecting top_heavy returns exactly what the count
+    #    predicts (no gap).
     th_filter = SearchCriteria(content_types=("card",),
         special_properties=("top_heavy",), special_property_mode="any")
     filter_count = index.popcount(index.filter_bitset(th_filter))
     predictive = index.context_counts(
         SearchCriteria(content_types=("card",)), vocab)["special_property_counts"]
-    # bear (2/1) and Odd Stats ("1-2"/"0", CAST 1>0) satisfy the filter; only
-    # bear satisfies the float-based predictive count.
-    checks["top_heavy filter and predictive semantics stay distinct"] = (
-        filter_count == 2 and predictive.get("top_heavy") == 1)
+    checks["top_heavy count matches its filter (GLOB/CAST)"] = (
+        filter_count == 2 and predictive.get("top_heavy") == 2)
 
     # 4. Subtype matching is whitespace-bounded: "Urza" must NOT match
     #    "Urza's Saga" (they are different subtypes), while the full subtype

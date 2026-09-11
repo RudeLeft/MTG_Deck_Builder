@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import queue
+import re
 import sqlite3
 import threading
 import time
@@ -180,6 +181,31 @@ def _finite(value):
     return number if math.isfinite(number) else None
 
 
+_NON_NUMERIC = re.compile(r"[^0-9.\-]")
+_NUMERIC_PREFIX = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _glob_numeric(value):
+    """True when a TEXT stat passes the search filter's GLOB numeric guard.
+
+    Mirrors ``field NOT GLOB '*[^0-9.-]*' AND field <> ''`` so a predictive count
+    classifies power/toughness exactly as ``TRAIT_CLAUSES`` does.
+    """
+    text = "" if value is None else str(value)
+    return text != "" and _NON_NUMERIC.search(text) is None
+
+
+def _cast_real(text):
+    """Approximate SQLite ``CAST(x AS REAL)`` for a GLOB-numeric stored value."""
+    match = _NUMERIC_PREFIX.match(str(text or "").strip())
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return 0.0
+
+
 def _has_faces(value):
     if isinstance(value, (tuple, list)):
         return bool(value)
@@ -215,8 +241,12 @@ def _trait_keys(row):
     toughness = str(row.get("toughness") or "")
     if "*" in power or "*" in toughness:
         values.add("variable_stats")
-    p_num, t_num = _finite(power), _finite(toughness)
-    if p_num is not None and t_num is not None and p_num > t_num:
+    # top_heavy uses the same GLOB/CAST rule as the search filter (TRAIT_CLAUSES)
+    # rather than float(), so the predictive count equals the result of selecting
+    # it -- they disagree only on exotic stats like "1e2" that float() parses but
+    # the filter rejects.
+    if (_glob_numeric(power) and _glob_numeric(toughness)
+            and _cast_real(power) > _cast_real(toughness)):
         values.add("top_heavy")
     return values
 
