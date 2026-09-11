@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field, replace
 import json
+import logging
 import math
 import queue
 import sqlite3
@@ -23,6 +24,8 @@ from mtgdb.database.semantics import (
     _type_key, _type_line_search_parts,
 )
 from mtgdb.search.models import SearchCriteria
+
+log = logging.getLogger("mtg")
 
 
 CONTEXT_COLUMNS = (
@@ -679,7 +682,41 @@ class SearchContextController:
         self._active_reader = None
         self._closed = False
         self._cache = OrderedDict()
+        self._facet_index = None
+        self._facet_index_disabled = False
         self._thread = spawn_daemon(self._run, "search-context")
+
+    def reset_facet_index(self):
+        """Drop the cached bitset index so it rebuilds after a card-DB change."""
+        with self._condition:
+            self._facet_index = None
+            self._facet_index_disabled = False
+
+    def _ensure_facet_index(self, reader):
+        """Build (once) and return the in-memory bitset index, or None on failure.
+
+        Rebuilt lazily on the worker thread; ``reset_facet_index`` drops it after
+        a database sync so it never serves stale counts.
+        """
+        with self._condition:
+            if self._facet_index is not None:
+                return self._facet_index
+            if self._facet_index_disabled:
+                return None
+        try:
+            from mtgdb.search.facet_index import FacetIndex
+            columns = ", ".join(FacetIndex.INDEX_COLUMNS)
+            rows = [dict(row) for row in
+                    reader.execute(f"SELECT {columns} FROM cards")]
+            index = FacetIndex(rows)
+        except Exception:
+            log.exception("Could not build Search facet index; using SQLite path")
+            with self._condition:
+                self._facet_index_disabled = True
+            return None
+        with self._condition:
+            self._facet_index = index
+        return index
 
     @property
     def generation(self):
@@ -792,6 +829,25 @@ class SearchContextController:
             if generation == self._generation:
                 self._active_reader = reader
         try:
+            index = self._ensure_facet_index(reader)
+            if not self._is_current(generation):
+                return None
+            if index is not None:
+                counts = index.context_counts(criteria, vocabulary)
+                if counts is not None:
+                    if not self._is_current(generation):
+                        return None
+                    result_count = int(counts.pop("result_count"))
+                    suggestions, mode_suggestions = self._zero_result_suggestions(
+                        criteria, reader, generation, result_count)
+                    if suggestions is None:
+                        return None
+                    return SearchContextSnapshot(
+                        result_count=result_count,
+                        suggestions=suggestions,
+                        mode_suggestions=mode_suggestions,
+                        **counts)
+
             result_count = self.repository.count(criteria, reader)
             if not self._is_current(generation):
                 return None
@@ -924,29 +980,14 @@ class SearchContextController:
                     output["content_counts"] = _predict_content(
                         rows, criteria.content_types)
 
-            suggestions = []
-            mode_suggestions = []
-            if result_count == 0:
-                for label, relaxed in _active_relaxations(criteria):
-                    if not self._is_current(generation):
-                        return None
-                    count = self.repository.count(relaxed, reader)
-                    if count:
-                        suggestions.append((label, int(count)))
-                suggestions.sort(key=lambda item: (-item[1], item[0].casefold()))
-                for label, mode, alternate in _mode_relaxations(criteria):
-                    if not self._is_current(generation):
-                        return None
-                    count = self.repository.count(alternate, reader)
-                    if count:
-                        mode_suggestions.append((label, mode, int(count)))
-                mode_suggestions.sort(
-                    key=lambda item: (-item[2], item[0].casefold(), item[1]))
-
+            suggestions, mode_suggestions = self._zero_result_suggestions(
+                criteria, reader, generation, result_count)
+            if suggestions is None:
+                return None
             return SearchContextSnapshot(
                 result_count=int(result_count),
-                suggestions=tuple(suggestions[:5]),
-                mode_suggestions=tuple(mode_suggestions[:4]),
+                suggestions=suggestions,
+                mode_suggestions=mode_suggestions,
                 **output)
         finally:
             with self._condition:
@@ -956,6 +997,34 @@ class SearchContextController:
                 reader.close()
             except Exception:
                 pass
+
+    def _zero_result_suggestions(self, criteria, reader, generation, result_count):
+        """Zero-result relaxation hints; (None, None) signals cancellation.
+
+        Shared by the SQLite bucket path and the bitset fast path.  These counts
+        are only computed when nothing matches, so their handful of SQLite
+        COUNT(*) queries never touch the common non-empty case.
+        """
+        if result_count != 0:
+            return (), ()
+        suggestions = []
+        for label, relaxed in _active_relaxations(criteria):
+            if not self._is_current(generation):
+                return None, None
+            count = self.repository.count(relaxed, reader)
+            if count:
+                suggestions.append((label, int(count)))
+        suggestions.sort(key=lambda item: (-item[1], item[0].casefold()))
+        mode_suggestions = []
+        for label, mode, alternate in _mode_relaxations(criteria):
+            if not self._is_current(generation):
+                return None, None
+            count = self.repository.count(alternate, reader)
+            if count:
+                mode_suggestions.append((label, mode, int(count)))
+        mode_suggestions.sort(
+            key=lambda item: (-item[2], item[0].casefold(), item[1]))
+        return tuple(suggestions[:5]), tuple(mode_suggestions[:4])
 
     def _run(self):
         while True:

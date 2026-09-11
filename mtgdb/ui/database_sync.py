@@ -377,6 +377,9 @@ class DatabaseSyncMixin:
         # for startup and cold Search scopes; do not scan the new DB on Tk.
         self.search_catalog_controller.invalidate()
         self.search_context_controller.invalidate()
+        # The bitset facet index caches every card, so a rebuilt database must
+        # drop it or it would serve stale contextual counts.
+        self.search_context_controller.reset_facet_index()
         self._update_search_filter_summary()
         self._refresh_search_catalogs()
         popup = self._sync_popup
