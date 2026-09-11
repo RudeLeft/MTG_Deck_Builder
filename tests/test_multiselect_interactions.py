@@ -160,6 +160,52 @@ class _CompareBatchHarness(SearchResultsMixin, DeckEditorMixin, ComparisonFeatur
 
 
 
+class _GalleryAddHarness(SearchResultsMixin, DeckEditorMixin, ComparisonFeatureMixin):
+    """Drive the Results Gallery right-click -> Add-to-deck path off Tk.
+
+    ``results_tv`` deliberately lists a single live row while the store holds
+    several cards: the Gallery browses the whole logical result set, so adding a
+    card it shows must resolve by id through the store, never through the small
+    live Treeview window.
+    """
+
+    def __init__(self, cards):
+        cards = list(cards)
+        self._result_store = SearchResultStore.from_rows(cards)
+        self.search_repository = _SearchRepository(cards)
+        self._result_selected_ids = {card["id"] for card in cards}
+        self._result_focus_id = cards[0]["id"] if cards else None
+        self._result_selection_anchor_id = None
+        self._result_top = 0
+        # Only the first row is "live" in the Treeview; the Gallery still shows
+        # every card, so an add must not depend on Treeview membership.
+        self.results_tv = _Tree(("0",))
+        self.deck = Deck()
+        self.dirty_count = 0
+        self.refreshes = []
+        self.statuses = []
+        self.shown = []
+        self.popups = []
+
+    def _mark_deck_dirty(self):
+        self.dirty_count += 1
+
+    def _refresh_changed_deck_views(self, *views):
+        self.refreshes.append(tuple(views))
+
+    def _status(self, message):
+        self.statuses.append(message)
+
+    def _show_card(self, card):
+        self.shown.append(card)
+
+    def _popup_result_add_menu(self, x_root, y_root):
+        self.popups.append((x_root, y_root))
+
+    def _populate_result_window(self, **_kwargs):
+        return None
+
+
 def _card(card_id, name):
     # legalities/image_normal make this a complete Results record so the
     # regression never needs repository access.
@@ -182,6 +228,33 @@ def main():
         result_harness.deck.total("main") == 2
         and result_harness.dirty_count == 1
         and result_harness.results_tv.selection() == ("0", "1")
+    )
+
+    # Results Gallery right-click adds the clicked card, resolved by id through
+    # the store -- not the current Results selection or the live Treeview window.
+    card_d = _card("d", "Delta")
+    gallery_harness = _GalleryAddHarness((card_a, card_b, card_c, card_d))
+    gallery_pre_multi = len(gallery_harness._selected_result_ids_in_view_order()) == 4
+    clicked = gallery_harness._result_gallery_card_at(3)  # card_d, beyond the live row
+    gallery_harness._show_gallery_card_context_menu(clicked, 11, 22)
+    gallery_harness._add_to_deck("main")
+    gallery_add_clicked_card = (
+        clicked["id"] == "d"
+        # the prior four-card selection is replaced by only the clicked card
+        and set(gallery_harness._selected_result_ids_in_view_order()) == {"d"}
+        and gallery_harness.deck.total("main") == 1
+        and gallery_harness.deck.entries("main")[0]["card"]["id"] == "d"
+        and gallery_harness.popups == [(11, 22)]
+        and gallery_harness.shown and gallery_harness.shown[-1]["id"] == "d"
+    )
+    missing_harness = _GalleryAddHarness((card_a, card_b, card_c))
+    missing_harness._show_gallery_card_context_menu(
+        {"id": "zzz", "name": "Ghost"}, 0, 0)
+    gallery_missing_card_ignored = (
+        missing_harness.popups == []
+        and missing_harness.deck.total("main") == 0
+        # a card no longer in the view is refused before the selection is touched
+        and len(missing_harness._selected_result_ids_in_view_order()) == 3
     )
 
     compare_harness = _CompareBatchHarness((card_a, card_b))
@@ -348,6 +421,8 @@ def main():
     checks = {
         "highlighted Search rows bulk-add to Mainboard without losing selection": result_bulk_add,
         "highlighted Search rows bulk-add to comparison without losing selection": result_bulk_compare,
+        "Gallery right-click adds the clicked card resolved by id, not the live window": gallery_add_clicked_card,
+        "Gallery right-click on a card no longer in view is safely ignored": gallery_missing_card_ignored,
         "deck plus increments every highlighted printing": plus_ok,
         "deck minus decrements every highlighted printing": minus_ok,
         "deck Remove deletes every highlighted entry and advances selection": remove_all_selected_ok,
