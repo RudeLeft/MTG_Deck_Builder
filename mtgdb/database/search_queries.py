@@ -618,10 +618,28 @@ class CardSearchQueryMixin:
             set_codes=criteria.get("set_codes"), columns=columns, ordered=False)
         if connection is None:
             with self._lock:
-                rows = self.conn.execute(sql, params).fetchall()
-        else:
-            rows = connection.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+                return self._fetch_dicts(self.conn, sql, params)
+        return self._fetch_dicts(connection, sql, params)
+
+    @staticmethod
+    def _fetch_dicts(connection, sql, params):
+        """Run a projection and build plain-dict rows from tuples.
+
+        ``dict(sqlite3.Row)`` walks the row's mapping protocol column by column
+        and is roughly three times slower than zipping a plain tuple against the
+        column names -- material on the ~100k-row contextual scans.  A private
+        cursor with its own ``row_factory`` cleared yields plain tuples without
+        disturbing the connection's Row factory that every other caller relies
+        on.  The resulting dicts are identical to the former ``dict(row)`` path.
+        """
+        cursor = connection.cursor()
+        try:
+            cursor.row_factory = None
+            cursor.execute(sql, params)
+            keys = [description[0] for description in cursor.description]
+            return [dict(zip(keys, row)) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
 
     def count_search(self, *, connection=None, **criteria):
         """Count Search matches using SQL COUNT(*) and canonical criteria clauses."""
