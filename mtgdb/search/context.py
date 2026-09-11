@@ -856,33 +856,34 @@ class SearchContextController:
                     output["produces_counts"] = _predict_colors(
                         rows, "produced_mana", (*COLORS, "C"), criteria.produces,
                         criteria.produces_mode, produced=True)
-                if "traits" in facets:
-                    predictor = _PredictiveMembershipCounts(
-                        _LEGACY_TRAIT_KEYS, criteria.traits, criteria.trait_mode)
+                # The four property facets derive from the same per-row trait
+                # keys.  When they share a bucket (nothing in any of them is
+                # selected -- the broad, slow case) this derives those keys once
+                # per row instead of up to four times, then fans each predictor
+                # out over the shared list.  Each predictor already filters the
+                # full key set to its own vocabulary, so the counts are
+                # unchanged.
+                property_predictors = [
+                    (facet, _PredictiveMembershipCounts(keys, selected, mode), out_key)
+                    for facet, keys, selected, mode, out_key in (
+                        ("traits", _LEGACY_TRAIT_KEYS, criteria.traits,
+                         criteria.trait_mode, "trait_counts"),
+                        ("mana_features", _MANA_FEATURE_KEYS, criteria.mana_features,
+                         criteria.mana_feature_mode, "mana_feature_counts"),
+                        ("special_properties", _SPECIAL_PROPERTY_KEYS,
+                         criteria.special_properties, criteria.special_property_mode,
+                         "special_property_counts"),
+                        ("status_properties", _STATUS_PROPERTY_KEYS,
+                         criteria.status_properties, criteria.status_property_mode,
+                         "status_property_counts"))
+                    if facet in facets]
+                if property_predictors:
                     for row in rows:
-                        predictor.add(_trait_keys(row))
-                    output["trait_counts"] = predictor.finish()
-                if "mana_features" in facets:
-                    predictor = _PredictiveMembershipCounts(
-                        _MANA_FEATURE_KEYS, criteria.mana_features,
-                        criteria.mana_feature_mode)
-                    for row in rows:
-                        predictor.add(_trait_keys(row))
-                    output["mana_feature_counts"] = predictor.finish()
-                if "special_properties" in facets:
-                    predictor = _PredictiveMembershipCounts(
-                        _SPECIAL_PROPERTY_KEYS, criteria.special_properties,
-                        criteria.special_property_mode)
-                    for row in rows:
-                        predictor.add(_trait_keys(row))
-                    output["special_property_counts"] = predictor.finish()
-                if "status_properties" in facets:
-                    predictor = _PredictiveMembershipCounts(
-                        _STATUS_PROPERTY_KEYS, criteria.status_properties,
-                        criteria.status_property_mode)
-                    for row in rows:
-                        predictor.add(_trait_keys(row))
-                    output["status_property_counts"] = predictor.finish()
+                        keys = _trait_keys(row)
+                        for _facet, predictor, _out_key in property_predictors:
+                            predictor.add(keys)
+                    for _facet, predictor, out_key in property_predictors:
+                        output[out_key] = predictor.finish()
                 if "layouts" in facets:
                     output["layout_counts"] = _predict_set_candidates(
                         rows, "layout", layouts, criteria.layouts,
