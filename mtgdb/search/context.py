@@ -681,7 +681,11 @@ _FACET_COLUMNS = {
     "status_properties": ("universes_beyond", "reserved", "game_changer"),
     "layouts": ("layout",),
     "pips": ("mana_cost", "pips_w", "pips_u", "pips_b", "pips_r", "pips_g", "pips_c"),
-    "cmc": ("cmc",),
+    # Mana Value applicability counts only rows with a meaningful mana cost, so
+    # the cmc bucket must carry the cost columns _has_meaningful_mana_cost reads.
+    # Without them, relaxing cmc (its own filter active) projected only "cmc" and
+    # reported applicability 0 for every row.
+    "cmc": ("cmc", "mana_cost", "card_faces"),
     "power": ("power",),
     "toughness": ("toughness",),
     "loyalty": ("loyalty",),

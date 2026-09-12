@@ -121,6 +121,18 @@ def main():
         "ub_all": SearchCriteria(content_types=("card",),
             status_properties=("universes_beyond",), status_property_mode="all"),
         "all_content": SearchCriteria(content_types=("card", "token", "emblem", "art")),
+        # Format legality and numeric ranges are now bitset-representable, so
+        # they must match count_search and the worker exactly rather than
+        # falling back.
+        "format_modern": SearchCriteria(content_types=("card",), fmt="modern"),
+        "format_modern_creatures": SearchCriteria(content_types=("card",),
+            fmt="modern", card_types=("Creature",)),
+        "cmc_range": SearchCriteria(content_types=("card",),
+            cmc_min=1.0, cmc_max=3.0),
+        "cmc_min_only": SearchCriteria(content_types=("card",), cmc_min=3.0),
+        "power_range": SearchCriteria(content_types=("card",),
+            power_min=1.0, power_max=3.0),
+        "toughness_max": SearchCriteria(content_types=("card",), toughness_max=1.0),
     }
 
     checks = {}
@@ -179,14 +191,20 @@ def main():
     checks["subtype match is whitespace-bounded (Urza != Urza's Saga)"] = (
         urza_partial == 0 and saga_full == 1 and saga_word == 1)
 
-    # 5. Non-representable filters decline so the caller keeps the SQLite worker.
-    checks["text/pip/format/numeric criteria fall back (None)"] = all(
+    # 5. Free-text and mana-symbol minimums still decline so the caller keeps
+    #    the SQLite worker; format and numeric ranges no longer fall back.
+    checks["text/pip criteria fall back (None)"] = all(
         index.filter_bitset(c) is None and index.context_counts(c, vocab) is None
         for c in (
             SearchCriteria(content_types=("card",), text=("bear",)),
             SearchCriteria(content_types=("card",), pips=("G",)),
+            SearchCriteria(content_types=("card",), pip_min=2)))
+    checks["format and numeric ranges are represented (no fallback)"] = all(
+        index.filter_bitset(c) is not None and index.context_counts(c, vocab) is not None
+        for c in (
             SearchCriteria(content_types=("card",), fmt="modern"),
-            SearchCriteria(content_types=("card",), cmc_min=1.0)))
+            SearchCriteria(content_types=("card",), cmc_min=1.0),
+            SearchCriteria(content_types=("card",), power_min=1.0, power_max=3.0)))
 
     ok = True
     for label, passed in checks.items():

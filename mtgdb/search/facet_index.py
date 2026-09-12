@@ -8,17 +8,21 @@ intersection AND the candidate value -- microseconds instead of a per-bucket
 SQLite rescan.
 
 The bitsets mirror ``SearchQueryBuilder`` exactly; anything a bitset cannot yet
-reproduce (free-text name/rules/type-line search, mana-symbol minimums, format
-legality, numeric ranges) makes :meth:`filter_bitset` return ``None`` so the
-caller falls back to the canonical SQLite worker.  Coverage is verified
-byte-identical against ``count_search`` before use.
+reproduce (free-text name/rules/type-line search and mana-symbol minimums)
+makes :meth:`filter_bitset` return ``None`` so the caller falls back to the
+canonical SQLite worker.  Format legality and numeric ranges (mana value,
+power, toughness, loyalty, defense) ARE represented, so the common
+deck-building filters recompute in ~1 ms instead of a multi-second SQLite
+rescan.  Coverage is verified byte-identical against ``count_search`` before
+use.
 """
 
 from __future__ import annotations
 
 import re
 
-from mtgdb.database.constants import ART_LAYOUTS, COLORS
+from mtgdb.database.constants import (
+    ART_LAYOUTS, COLORS, PLAYABLE_LEGALITY_STATUSES)
 from mtgdb.database.semantics import (
     _card_content_kind, _mana_cost_symbol_colors, _type_line_search_parts,
 )
@@ -241,6 +245,13 @@ class FacetIndex:
         nbytes = (n + 7) // 8
         numeric = {field: _Bitsets(n) for field in _NUMERIC_FIELDS}
         numeric_finite = {field: bytearray(nbytes) for field in _NUMERIC_FIELDS}
+        # Separate value bitsets for the numeric *filter*: the range filter in
+        # SearchQueryBuilder gates stats with the SQL GLOB guard and reads
+        # CAST(... AS REAL), which differs from the float() the count side uses
+        # for a handful of real values (e.g. power "+1").  Keeping a distinct set
+        # lets filter_bitset match count_search exactly while the counts keep
+        # matching the SQLite worker.
+        numeric_filter = {field: _Bitsets(n) for field in _NUMERIC_FIELDS}
         meaningful = bytearray(nbytes)
         pip_repr = {color: bytearray(nbytes) for color in _PIP_KEYS}
         legality = {}   # fmt -> state -> bytearray
@@ -254,6 +265,15 @@ class FacetIndex:
                 if value is not None:
                     numeric[field].set(value, i)
                     mark(numeric_finite[field], i)
+                if field == "cmc":
+                    # cmc is a REAL column; SQL filters it directly, so float()
+                    # matches CAST here.
+                    if value is not None:
+                        numeric_filter[field].set(value, i)
+                else:
+                    raw = row.get(field)
+                    if _glob_numeric(raw):
+                        numeric_filter[field].set(_cast_real(raw), i)
             if _finite(row.get("cmc")) is not None and _has_meaningful_mana_cost(row):
                 mark(meaningful, i)
             represented = set()
@@ -275,6 +295,9 @@ class FacetIndex:
         self.numeric = {f: bs.finish() for f, bs in numeric.items()}
         self.numeric_sorted = {
             f: tuple(sorted(values)) for f, values in self.numeric.items()}
+        self.numeric_filter = {f: bs.finish() for f, bs in numeric_filter.items()}
+        self.numeric_filter_sorted = {
+            f: tuple(sorted(values)) for f, values in self.numeric_filter.items()}
         self.numeric_finite = {f: as_int(buf) for f, buf in numeric_finite.items()}
         self.meaningful_mana = as_int(meaningful)
         self.pip_repr = {c: as_int(buf) for c, buf in pip_repr.items()}
@@ -288,19 +311,16 @@ class FacetIndex:
         return int(bitset).bit_count()
 
     def representable(self, q):
-        """True when every active filter has a bitset predicate."""
+        """True when every active filter has a bitset predicate.
+
+        Free-text name/rules/type-line search and mana-symbol minimums have no
+        bitset predicate, so they still fall back to the SQLite worker.  Format
+        legality and numeric ranges are represented (see ``_fragments``).
+        """
         if q.name or q.names or q.text:
             return False
         if q.pips or q.pip_min is not None:
             return False
-        if q.fmt:
-            return False
-        for lo, hi in (
-                (q.cmc_min, q.cmc_max), (q.power_min, q.power_max),
-                (q.toughness_min, q.toughness_max),
-                (q.loyalty_min, q.loyalty_max), (q.defense_min, q.defense_max)):
-            if lo is not None or hi is not None:
-                return False
         return True
 
     def _fragments(self, q):
@@ -339,7 +359,45 @@ class FacetIndex:
             "set_types": set_type_bs,
             "set_codes": set_code_bs,
             "lang": lang_bs,
+            "format": self._format_filter(q.fmt, q.fmt_status),
+            "cmc": self._numeric_range_bitset("cmc", q.cmc_min, q.cmc_max),
+            "power": self._numeric_range_bitset(
+                "power", q.power_min, q.power_max),
+            "toughness": self._numeric_range_bitset(
+                "toughness", q.toughness_min, q.toughness_max),
+            "loyalty": self._numeric_range_bitset(
+                "loyalty", q.loyalty_min, q.loyalty_max),
+            "defense": self._numeric_range_bitset(
+                "defense", q.defense_min, q.defense_max),
         }
+
+    def _format_filter(self, fmt, status):
+        """Mirror SearchQueryBuilder.add_rarity_and_format's legality clause."""
+        if not fmt:
+            return self.universe
+        states = self.legality.get(str(fmt).strip(), {})
+        chosen = str(status or "playable").casefold()
+        if chosen == "banned":
+            wanted = ("banned",)
+        elif chosen == "restricted":
+            wanted = ("restricted",)
+        else:
+            wanted = tuple(PLAYABLE_LEGALITY_STATUSES)
+        result = 0
+        for state in wanted:
+            result |= states.get(state, 0)
+        return result
+
+    def _numeric_range_bitset(self, field, low, high):
+        """Mirror the SQL numeric range (GLOB/CAST for stats, REAL for cmc)."""
+        if low is None and high is None:
+            return self.universe
+        bitsets = self.numeric_filter[field]
+        result = 0
+        for value in self.numeric_filter_sorted[field]:
+            if (low is None or value >= low) and (high is None or value <= high):
+                result |= bitsets[value]
+        return result
 
     # Facets that ``_relaxed`` drops together with their own fragment.
     _RELAX_EXTRA = {"games": ("paper",)}
@@ -369,9 +427,9 @@ class FacetIndex:
         """Return contextual counts for a representable criteria, else None.
 
         Mirrors the per-value counts the SQLite context worker emits, computed as
-        popcounts of the relevant relaxed bitset.  Numeric ranges, mana-symbol
-        (pip) and format counts are not produced here yet; the caller keeps the
-        worker for those until they are added.
+        popcounts of the relevant relaxed bitset.  Format legality and numeric
+        ranges are represented (their fragments are relaxed per facet); only
+        mana-symbol (pip) minimums and free-text still force a ``None`` fallback.
         """
         fragments = self._fragments(q)
         if fragments is None:
