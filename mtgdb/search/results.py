@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 import logging
 import queue
+import re
 import threading
 import time
 
@@ -617,6 +618,70 @@ def filter_numeric_value(card, key, qty=None):
         return None
 
 
+# The Cost column filters by which kinds of mana symbol appear in the printed
+# cost, so a user picks recognizable options (with pips) instead of typing brace
+# syntax.  This ordered list is the single source of truth shared by the popup
+# editor (which builds the checkboxes) and ``cost_symbol_groups`` (which the
+# matcher uses), so the two can never disagree about what a group means.
+COST_SYMBOL_GROUP_LABELS = (
+    ("W", "White"),
+    ("U", "Blue"),
+    ("B", "Black"),
+    ("R", "Red"),
+    ("G", "Green"),
+    ("C", "Colorless"),
+    ("generic", "Generic"),
+    ("x", "X"),
+    ("hybrid", "Hybrid"),
+    ("phyrexian", "Phyrexian"),
+    ("snow", "Snow"),
+    ("none", "No mana cost"),
+)
+COST_SYMBOL_GROUP_ORDER = tuple(key for key, _label in COST_SYMBOL_GROUP_LABELS)
+
+_COST_TOKEN = re.compile(r"\{([^}]+)\}")
+
+
+def cost_symbol_groups(mana_cost):
+    """Classify a printed mana cost into the symbol groups it contains.
+
+    Only the front face's cost is read (matching how the Cost column is drawn).
+    A hybrid/phyrexian symbol contributes both its class and its colour(s), so a
+    ``{W/U}`` card matches White, Blue, and Hybrid, and ``{W/P}`` matches White
+    and Phyrexian.  A cost with no brace symbols is ``{"none"}`` so lands and
+    other no-cost objects are pickable too.
+    """
+    front = str(mana_cost or "").split("//")[0]
+    groups = set()
+    for token in _COST_TOKEN.findall(front):
+        t = token.upper().strip()
+        if "/" in t:
+            parts = [p for p in t.split("/") if p]
+            if "P" in parts:
+                groups.add("phyrexian")
+            elif "2" in parts:
+                groups.add("hybrid")
+                groups.add("generic")
+            else:
+                groups.add("hybrid")
+            for part in parts:
+                if part in ("W", "U", "B", "R", "G"):
+                    groups.add(part)
+                elif part == "C":
+                    groups.add("C")
+        elif t in ("W", "U", "B", "R", "G"):
+            groups.add(t)
+        elif t == "C":
+            groups.add("C")
+        elif t in ("X", "Y", "Z"):
+            groups.add("x")
+        elif t == "S":
+            groups.add("snow")
+        elif t.isdigit():
+            groups.add("generic")
+    return frozenset(groups) if groups else frozenset({"none"})
+
+
 def row_passes_filters(
         card, filters, *, qty=None, skip_col=None, derived=None, source_index=None):
     for key, rule in filters.items():
@@ -639,6 +704,21 @@ def row_passes_filters(
                      and source_index is not None else table_value(card, key, qty=qty))
             if value not in allowed:
                 return False
+        elif kind == "cost":
+            selected = set(rule.get("groups") or ())
+            if not selected:
+                continue
+            present = cost_symbol_groups(card.get("mana_cost"))
+            mode = rule.get("mode", "Any")
+            if mode == "All":
+                if not selected <= present:
+                    return False
+            elif mode == "None":
+                if selected & present:
+                    return False
+            else:  # Any
+                if not (selected & present):
+                    return False
         elif kind == "text":
             needle = str(rule.get("value") or "").casefold()
             if not needle:
@@ -665,6 +745,8 @@ def freeze_filters(filters):
         copy = dict(rule)
         if "values" in copy:
             copy["values"] = frozenset(copy["values"])
+        if "groups" in copy:
+            copy["groups"] = frozenset(copy["groups"])
         frozen[str(key)] = copy
     return frozen
 

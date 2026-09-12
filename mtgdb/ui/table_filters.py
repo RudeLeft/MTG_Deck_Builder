@@ -4,12 +4,26 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
+from tkinter import ttk
 
 from mtgdb.ui.components import AppCombobox, ClassicButton, ClassicEntry
 from mtgdb.ui.search_checklist import VirtualChecklistView
-from mtgdb.ui.tokens import FONT_HELPER, FONT_HELPER_BOLD, PALETTE
-from mtgdb.search.results import row_passes_filters, table_value
+from mtgdb.ui.tokens import FILTER_PIP_SIZE, FONT_HELPER, FONT_HELPER_BOLD, PALETTE
+from mtgdb.search.results import (
+    COST_SYMBOL_GROUP_LABELS, row_passes_filters, table_value)
 from mtgdb.ui.tables import TABLE_COLUMNS
+
+try:
+    from PIL import ImageTk
+except Exception:
+    ImageTk = None
+
+# Cost groups that map to a single, recognizable mana symbol get a pip; the
+# abstract classes (Generic/Hybrid/Phyrexian/No cost) read as plain text.
+_COST_PIP_TOKENS = {
+    "W": "W", "U": "U", "B": "B", "R": "R", "G": "G", "C": "C",
+    "x": "X", "snow": "S",
+}
 
 
 def _finite_bound(text):
@@ -34,6 +48,10 @@ class TableFilterMixin:
 
     def _filter_kind(self, key):
         """Choose the most useful filter editor for a table column."""
+        if key == "cost":
+            # Mana cost is symbol-encoded, so free text ("what do I type?") is
+            # useless. Offer a pip checkbox picker over the symbol groups.
+            return "cost"
         if key in ("qty", "cmc", "power", "toughness", "year"):
             return "numeric"
         if key in ("rarity", "set", "collector", "ability", "colors"):
@@ -119,6 +137,9 @@ class TableFilterMixin:
         editor.pack(fill="both", expand=True)
         if kind == "numeric":
             apply_filter = self._build_numeric_filter_editor(
+                editor, view, key, current)
+        elif kind == "cost":
+            apply_filter = self._build_cost_filter_editor(
                 editor, view, key, current)
         elif kind == "text":
             apply_filter = self._build_text_filter_editor(
@@ -215,6 +236,77 @@ class TableFilterMixin:
             else:
                 self._table_filters[view][key] = {
                     "kind": "numeric", "min": low, "max": high}
+            self._refresh_table_after_filter(view)
+            self._hide_filter_popup()
+
+        return apply_filter
+
+    def _cost_group_pip_image(self, group):
+        """Return a mana-pip image for one symbol group, or None for text-only.
+
+        Colours and Colorless reuse the loaded filter pips; X and Snow are
+        composited from the symbol sheet.  Abstract classes (Generic, Hybrid,
+        Phyrexian, No mana cost) have no single glyph and stay text-only.
+        """
+        token = _COST_PIP_TOKENS.get(group)
+        if token is None:
+            return None
+        if group in ("W", "U", "B", "R", "G", "C"):
+            getter = getattr(self, "_filter_pip_image", None)
+            if callable(getter):
+                spec = getter(group)
+                if spec is not None:
+                    return spec
+        symbol_pil = getattr(self, "_symbol_pil", None)
+        if ImageTk is None or not callable(symbol_pil):
+            return None
+        try:
+            return ImageTk.PhotoImage(symbol_pil(token, FILTER_PIP_SIZE))
+        except Exception:
+            return None
+
+    def _build_cost_filter_editor(self, editor, view, key, current):
+        p = PALETTE
+        mode_var = tk.StringVar(value=current.get("mode", "Any"))
+        modes = tk.Frame(editor, bg=p["surface2"])
+        modes.pack(fill="x", pady=(0, 6))
+        tk.Label(modes, text="Match", bg=p["surface2"], fg=p["muted"],
+                 font=FONT_HELPER).pack(side="left", padx=(0, 6))
+        AppCombobox(
+            modes, textvariable=mode_var, values=("Any", "All", "None"),
+            state="readonly", width=8).pack(side="left")
+
+        selected_prev = current.get("groups")
+        grid = tk.Frame(editor, bg=p["surface2"])
+        grid.pack(fill="both", expand=True)
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        # Hold image references so Tk does not garbage-collect the pips.
+        self._cost_filter_pip_refs = []
+        group_vars = {}
+        for index, (group, label) in enumerate(COST_SYMBOL_GROUP_LABELS):
+            variable = tk.BooleanVar(
+                value=bool(selected_prev) and group in selected_prev)
+            group_vars[group] = variable
+            image = self._cost_group_pip_image(group)
+            kw = {"text": " " + label, "variable": variable,
+                  "style": "Color.TCheckbutton"}
+            if image is not None:
+                kw["image"] = image
+                kw["compound"] = "left"
+                self._cost_filter_pip_refs.append(image)
+            check = ttk.Checkbutton(grid, **kw)
+            check.grid(row=index // 2, column=index % 2, sticky="w",
+                       padx=4, pady=2)
+
+        def apply_filter():
+            chosen = {group for group, variable in group_vars.items()
+                      if variable.get()}
+            if not chosen:
+                self._table_filters[view].pop(key, None)
+            else:
+                self._table_filters[view][key] = {
+                    "kind": "cost", "mode": mode_var.get(), "groups": chosen}
             self._refresh_table_after_filter(view)
             self._hide_filter_popup()
 

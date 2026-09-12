@@ -297,22 +297,42 @@ def main():
     every_column_has_a_filter_value = all(
         str(table_value(filterable_card, key, qty=2))
         for key in TABLE_COLUMN_ORDER if key not in numeric_columns)
-    cost_filters_on_the_printed_cost = (
+    from mtgdb.search.results import cost_symbol_groups
+    cost_filters_by_mana_symbol = (
+        # Cost is filtered by which mana-symbol groups appear, not free text, so
+        # a user picks recognizable pips instead of guessing brace syntax.
         table_value(filterable_card, "cost") == "{G}"
+        and cost_symbol_groups("{G}") == frozenset({"G"})
+        and cost_symbol_groups("{2}{W}{U}") == frozenset({"generic", "W", "U"})
+        and cost_symbol_groups("{X}{R}") == frozenset({"x", "R"})
+        and cost_symbol_groups("{G/U}") == frozenset({"hybrid", "G", "U"})
+        and cost_symbol_groups("{W/P}") == frozenset({"phyrexian", "W"})
+        and cost_symbol_groups("") == frozenset({"none"})
+        # Any/All/None over the selected groups.
         and row_passes_filters(
-            filterable_card,
-            {"cost": {"kind": "text", "mode": "Contains", "value": "{G}"}})
+            filterable_card, {"cost": {"kind": "cost", "mode": "Any",
+                                       "groups": {"G"}}})
         and not row_passes_filters(
-            filterable_card,
-            {"cost": {"kind": "text", "mode": "Contains", "value": "{W}"}})
-        # One lookup for both: a second spelling in the filter layer is how
-        # the popup and the matcher disagreed in the first place.
-        and 'if key == "cost"' not in filter_source)
+            filterable_card, {"cost": {"kind": "cost", "mode": "Any",
+                                       "groups": {"W"}}})
+        and not row_passes_filters(
+            filterable_card, {"cost": {"kind": "cost", "mode": "None",
+                                       "groups": {"G"}}})
+        and row_passes_filters(
+            filterable_card, {"cost": {"kind": "cost", "mode": "All",
+                                       "groups": {"G"}}})
+        # The editor builds its checkboxes from the same shared group list the
+        # matcher classifies with, so popup and matcher can never diverge.
+        and "COST_SYMBOL_GROUP_LABELS" in filter_source
+        and "_build_cost_filter_editor" in filter_source
+        and 'return "cost"' in filter_source)
 
     checks = {
+        "Cost column filters by mana-symbol group, not free text": (
+            cost_filters_by_mana_symbol),
         "every column can be filtered by what its popup shows": (
             every_column_has_a_filter_value
-            and cost_filters_on_the_printed_cost),
+            and cost_filters_by_mana_symbol),
         "table numeric filters refuse non-finite bounds": finite_filter_bounds,
         "column drag reorder lands on the dropped slot, including the last": (
             _column_reorder_matches_oracle()),
