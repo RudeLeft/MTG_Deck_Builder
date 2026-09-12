@@ -327,9 +327,39 @@ def main():
         and "_build_cost_filter_editor" in filter_source
         and 'return "cost"' in filter_source)
 
+    from mtgdb.search.results import card_color_groups
+    from mtgdb.ui.table_filters import TableFilterMixin
+    _kind = TableFilterMixin._filter_kind
+    colors_filter_by_pips = (
+        # Colors filters by colour pips (Any/All/None), not a combo checklist.
+        _kind(object(), "colors") == "colors"
+        and card_color_groups({"colors": "G"}) == frozenset({"G"})
+        and card_color_groups({"colors": ["W", "U"]}) == frozenset({"W", "U"})
+        and card_color_groups({"colors": ""}) == frozenset({"C"})
+        and row_passes_filters(
+            {"colors": "G"},
+            {"colors": {"kind": "colors", "mode": "Any", "groups": {"G"}}})
+        and not row_passes_filters(
+            {"colors": "G"},
+            {"colors": {"kind": "colors", "mode": "Any", "groups": {"U"}}})
+        and row_passes_filters(
+            {"colors": ""},
+            {"colors": {"kind": "colors", "mode": "Any", "groups": {"C"}}})
+        and "COLOR_FILTER_GROUP_LABELS" in filter_source
+        and "_build_colors_filter_editor" in filter_source)
+    collector_is_sort_only = (
+        # The Collector # column is no longer filterable (sort-only heading).
+        _kind(object(), "collector") == "none"
+        and 'return "none"' in filter_source
+        and 'if kind == "none":' in filter_source)
+
     checks = {
         "Cost column filters by mana-symbol group, not free text": (
             cost_filters_by_mana_symbol),
+        "Colors column filters by colour pips with Any/All/None": (
+            colors_filter_by_pips),
+        "Collector # column is sort-only (filter removed)": (
+            collector_is_sort_only),
         "every column can be filtered by what its popup shows": (
             every_column_has_a_filter_value
             and cost_filters_by_mana_symbol),

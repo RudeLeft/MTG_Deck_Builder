@@ -639,7 +639,39 @@ COST_SYMBOL_GROUP_LABELS = (
 )
 COST_SYMBOL_GROUP_ORDER = tuple(key for key, _label in COST_SYMBOL_GROUP_LABELS)
 
+# The Colors column filters by the card's own colours (not its cost), offered as
+# the same recognizable pip checkboxes.  "C" here means the card is colourless
+# (an empty colour set), distinct from the Cost picker's colourless-mana pip.
+COLOR_FILTER_GROUP_LABELS = (
+    ("W", "White"),
+    ("U", "Blue"),
+    ("B", "Black"),
+    ("R", "Red"),
+    ("G", "Green"),
+    ("C", "Colorless"),
+)
+COLOR_FILTER_GROUP_ORDER = tuple(key for key, _label in COLOR_FILTER_GROUP_LABELS)
+
 _COST_TOKEN = re.compile(r"\{([^}]+)\}")
+
+
+def card_color_groups(card):
+    """Return the card's colours as filter groups, or ``{"C"}`` when colourless."""
+    raw = card.get("colors") or ""
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+            if isinstance(decoded, list):
+                raw = decoded
+        except Exception:
+            pass
+    if isinstance(raw, (list, tuple)):
+        letters = [str(value).upper() for value in raw]
+    else:
+        letters = [part.strip().upper() for part in str(raw).split(",")
+                   if part.strip()]
+    groups = {letter for letter in letters if letter in ("W", "U", "B", "R", "G")}
+    return frozenset(groups) if groups else frozenset({"C"})
 
 
 def cost_symbol_groups(mana_cost):
@@ -704,11 +736,12 @@ def row_passes_filters(
                      and source_index is not None else table_value(card, key, qty=qty))
             if value not in allowed:
                 return False
-        elif kind == "cost":
+        elif kind in ("cost", "colors"):
             selected = set(rule.get("groups") or ())
             if not selected:
                 continue
-            present = cost_symbol_groups(card.get("mana_cost"))
+            present = (cost_symbol_groups(card.get("mana_cost"))
+                       if kind == "cost" else card_color_groups(card))
             mode = rule.get("mode", "Any")
             if mode == "All":
                 if not selected <= present:

@@ -10,7 +10,8 @@ from mtgdb.ui.components import AppCombobox, ClassicButton, ClassicEntry
 from mtgdb.ui.search_checklist import VirtualChecklistView
 from mtgdb.ui.tokens import FILTER_PIP_SIZE, FONT_HELPER, FONT_HELPER_BOLD, PALETTE
 from mtgdb.search.results import (
-    COST_SYMBOL_GROUP_LABELS, row_passes_filters, table_value)
+    COLOR_FILTER_GROUP_LABELS, COST_SYMBOL_GROUP_LABELS,
+    row_passes_filters, table_value)
 from mtgdb.ui.tables import TABLE_COLUMNS
 
 try:
@@ -52,9 +53,17 @@ class TableFilterMixin:
             # Mana cost is symbol-encoded, so free text ("what do I type?") is
             # useless. Offer a pip checkbox picker over the symbol groups.
             return "cost"
+        if key == "colors":
+            # Card colours are best picked as pips with Any/All/None rather than
+            # ticking every comma-joined colour combination.
+            return "colors"
+        if key == "collector":
+            # Collector numbers are arbitrary per-set identifiers; filtering by
+            # them is not useful, so the heading offers sorting only.
+            return "none"
         if key in ("qty", "cmc", "power", "toughness", "year"):
             return "numeric"
-        if key in ("rarity", "set", "collector", "ability", "colors"):
+        if key in ("rarity", "set", "ability"):
             return "values"
         return "text"
 
@@ -128,10 +137,16 @@ class TableFilterMixin:
         """Open the Excel-style smart filter for a clicked column heading."""
         pop, outer = self._create_table_filter_popup(view, key)
         self._build_filter_sort_controls(outer, view, key)
+
+        kind = self._filter_kind(key)
+        if kind == "none":
+            # Sort-only column (e.g. Collector #): no filter editor at all.
+            self._position_table_filter_popup(pop)
+            return
+
         tk.Frame(outer, bg=PALETTE["border"], height=1).pack(
             fill="x", pady=(0, 7))
 
-        kind = self._filter_kind(key)
         current = self._table_filters[view].get(key, {})
         editor = tk.Frame(outer, bg=PALETTE["surface2"])
         editor.pack(fill="both", expand=True)
@@ -140,6 +155,9 @@ class TableFilterMixin:
                 editor, view, key, current)
         elif kind == "cost":
             apply_filter = self._build_cost_filter_editor(
+                editor, view, key, current)
+        elif kind == "colors":
+            apply_filter = self._build_colors_filter_editor(
                 editor, view, key, current)
         elif kind == "text":
             apply_filter = self._build_text_filter_editor(
@@ -266,6 +284,24 @@ class TableFilterMixin:
             return None
 
     def _build_cost_filter_editor(self, editor, view, key, current):
+        return self._build_symbol_group_filter_editor(
+            editor, view, key, current, kind="cost",
+            group_labels=COST_SYMBOL_GROUP_LABELS,
+            image_for=self._cost_group_pip_image)
+
+    def _build_colors_filter_editor(self, editor, view, key, current):
+        return self._build_symbol_group_filter_editor(
+            editor, view, key, current, kind="colors",
+            group_labels=COLOR_FILTER_GROUP_LABELS,
+            image_for=self._color_group_pip_image)
+
+    def _color_group_pip_image(self, group):
+        getter = getattr(self, "_filter_pip_image", None)
+        return getter(group) if callable(getter) else None
+
+    def _build_symbol_group_filter_editor(
+            self, editor, view, key, current, *, kind, group_labels, image_for):
+        """Shared pip checkbox picker (Any/All/None) for Cost and Colors."""
         p = PALETTE
         mode_var = tk.StringVar(value=current.get("mode", "Any"))
         modes = tk.Frame(editor, bg=p["surface2"])
@@ -282,19 +318,19 @@ class TableFilterMixin:
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
         # Hold image references so Tk does not garbage-collect the pips.
-        self._cost_filter_pip_refs = []
+        self._symbol_filter_pip_refs = []
         group_vars = {}
-        for index, (group, label) in enumerate(COST_SYMBOL_GROUP_LABELS):
+        for index, (group, label) in enumerate(group_labels):
             variable = tk.BooleanVar(
                 value=bool(selected_prev) and group in selected_prev)
             group_vars[group] = variable
-            image = self._cost_group_pip_image(group)
+            image = image_for(group)
             kw = {"text": " " + label, "variable": variable,
                   "style": "Color.TCheckbutton"}
             if image is not None:
                 kw["image"] = image
                 kw["compound"] = "left"
-                self._cost_filter_pip_refs.append(image)
+                self._symbol_filter_pip_refs.append(image)
             check = ttk.Checkbutton(grid, **kw)
             check.grid(row=index // 2, column=index % 2, sticky="w",
                        padx=4, pady=2)
@@ -306,7 +342,7 @@ class TableFilterMixin:
                 self._table_filters[view].pop(key, None)
             else:
                 self._table_filters[view][key] = {
-                    "kind": "cost", "mode": mode_var.get(), "groups": chosen}
+                    "kind": kind, "mode": mode_var.get(), "groups": chosen}
             self._refresh_table_after_filter(view)
             self._hide_filter_popup()
 
