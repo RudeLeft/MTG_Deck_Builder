@@ -388,11 +388,21 @@ def main():
                 <= RESULT_GALLERY_MAX_COLUMNS * RESULT_GALLERY_MAX_VISIBLE_ROWS
             and results_gallery_layout_metrics(1240, 860, 320)["slot_count"]
                 < results_gallery_layout_metrics(1240, 860, 140)["slot_count"]
-            and results_gallery_layout_metrics(1240, 860, 320)["image_w"] == 320
+            # Cards fill the row: image_w stays within the min/max art size, a
+            # larger target yields a larger (or equal) filled card, and the row
+            # spans nearly the whole viewport (no big dead space on the right).
+            and RESULT_GALLERY_CARD_MIN_WIDTH
+                <= results_gallery_layout_metrics(1240, 860, 320)["image_w"]
+                <= RESULT_GALLERY_CARD_MAX_WIDTH
+            and results_gallery_layout_metrics(1240, 860, 360)["image_w"]
+                >= results_gallery_layout_metrics(1240, 860, 140)["image_w"]
             and results_gallery_layout_metrics(1240, 860, 1)["image_w"]
-                == RESULT_GALLERY_CARD_MIN_WIDTH
+                >= RESULT_GALLERY_CARD_MIN_WIDTH
             and results_gallery_layout_metrics(1240, 860, 9999)["image_w"]
-                == RESULT_GALLERY_CARD_MAX_WIDTH
+                <= RESULT_GALLERY_CARD_MAX_WIDTH
+            and (results_gallery_layout_metrics(1240, 860, 320)["columns"]
+                 * results_gallery_layout_metrics(1240, 860, 320)["image_w"]
+                 >= 1240 - RESULT_GALLERY_CARD_MAX_WIDTH)
             and 'transient=False, resizable=True' in gallery_source
             and 'self.top.resizable(True, True)' in gallery_source
             and 'text="Card Size"' in gallery_source

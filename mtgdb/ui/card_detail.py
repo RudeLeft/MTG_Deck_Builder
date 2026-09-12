@@ -30,7 +30,6 @@ from mtgdb.ui.tokens import (
     RESULT_GALLERY_CARD_MAX_WIDTH,
     RESULT_GALLERY_CARD_MIN_WIDTH,
     RESULT_GALLERY_CARD_TARGET_WIDTH,
-    RESULT_GALLERY_CARD_SLIDER_STEP,
     RESULT_GALLERY_GAP,
     RESULT_GALLERY_MAX_COLUMNS,
     RESULT_GALLERY_MAX_VISIBLE_ROWS,
@@ -72,14 +71,31 @@ def results_gallery_layout_metrics(width, height, target_width=None):
     viewport_height = max(260, int(height))
     gap = RESULT_GALLERY_GAP
     target = RESULT_GALLERY_CARD_TARGET_WIDTH if target_width is None else target_width
+    target = max(RESULT_GALLERY_CARD_MIN_WIDTH,
+                 min(RESULT_GALLERY_CARD_MAX_WIDTH, int(round(float(target)))))
+    # Cards fill the row instead of sitting at a fixed width with dead space on
+    # the right: the slider picks the column count whose resulting per-card width
+    # is closest to the requested target, and every card then stretches to share
+    # the full viewport width evenly.  Bounding the column count keeps the filled
+    # width within the min/max art size.
+    min_columns = max(1, math.ceil(
+        (viewport_width + gap) / (RESULT_GALLERY_CARD_MAX_WIDTH + gap)))
+    max_columns = max(1, (viewport_width + gap) // (RESULT_GALLERY_CARD_MIN_WIDTH + gap))
+    max_columns = min(max_columns, RESULT_GALLERY_MAX_COLUMNS)
+    min_columns = min(min_columns, max_columns)
+    # Map the slider position evenly across the achievable column range so the
+    # whole slider is useful: left (min target) = most columns/smallest cards,
+    # right (max target) = fewest columns/largest cards.  A raw pixel width would
+    # leave a large dead zone at the big end, where reducing the width further
+    # cannot drop the column count without overflowing the max art size.
+    span = max(1, RESULT_GALLERY_CARD_MAX_WIDTH - RESULT_GALLERY_CARD_MIN_WIDTH)
+    fraction = min(1.0, max(0.0, (target - RESULT_GALLERY_CARD_MIN_WIDTH) / span))
+    columns = max(min_columns, min(max_columns, int(round(
+        max_columns - fraction * (max_columns - min_columns)))))
     image_width = max(
         RESULT_GALLERY_CARD_MIN_WIDTH,
-        min(RESULT_GALLERY_CARD_MAX_WIDTH, int(round(float(target)))),
-    )
-    columns = max(1, min(
-        RESULT_GALLERY_MAX_COLUMNS,
-        max(1, (viewport_width + gap) // (image_width + gap)),
-    ))
+        min(RESULT_GALLERY_CARD_MAX_WIDTH,
+            (viewport_width - (columns - 1) * gap) // columns))
     image_height = max(
         1, int(round(image_width * RESULT_GALLERY_CARD_ASPECT)))
     cell_height = image_height
@@ -347,27 +363,29 @@ class _ResultsGalleryWindow:
             self.owner._results_gallery_window = None
 
     def _on_card_size_change(self, value):
+        # The slider is continuous (no size quantization); the fill layout maps
+        # it to a column count and only actually re-renders when that count
+        # changes, so dragging within a band is a cheap no-op rather than a
+        # per-pixel re-fetch.
         try:
-            size = int(round(float(value) / RESULT_GALLERY_CARD_SLIDER_STEP)
-                       * RESULT_GALLERY_CARD_SLIDER_STEP)
+            size = float(value)
         except (TypeError, ValueError):
             return
-        size = max(RESULT_GALLERY_CARD_MIN_WIDTH,
-                   min(RESULT_GALLERY_CARD_MAX_WIDTH, size))
-        self._card_size = size
+        self._card_size = max(RESULT_GALLERY_CARD_MIN_WIDTH,
+                              min(RESULT_GALLERY_CARD_MAX_WIDTH, size))
         if self._size_after is not None:
             try:
                 self.top.after_cancel(self._size_after)
             except tk.TclError:
                 pass
         try:
-            self._size_after = self.top.after(45, self._finish_card_size_change)
+            self._size_after = self.top.after(30, self._finish_card_size_change)
         except tk.TclError:
             self._size_after = None
 
     def _finish_card_size_change(self):
         self._size_after = None
-        if self._sync_layout(force=True):
+        if self._sync_layout(force=False):
             self._render()
 
     def _on_viewport_configure(self, _event=None):
