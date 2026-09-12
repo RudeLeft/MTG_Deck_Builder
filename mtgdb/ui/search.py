@@ -995,9 +995,7 @@ class SearchFeatureMixin:
                 for key in keys
             ],
             selected, apply, mode_var=mode_var, mode_label=MATCH_MODE_LABEL,
-            help_text=(help_text or
-                       "Choose one or more properties. Each count shows how many cards match "
-                       "that choice with the other current filters."))
+            help_text=(help_text or "Choose one or more properties to filter by."))
 
     def _build_trait_subset_button(self, parent, keys, button_attr, title, noun, *,
                                    selected_attr, mode_var, count_attr,
@@ -1080,16 +1078,17 @@ class SearchFeatureMixin:
             ))
         self._open_search_multi_picker(
             "Search Scope", values, selected, apply,
-            help_text=(
-                "Choose which object types Search includes. Each count shows how many objects "
-                "of that type match the other current filters."))
+            help_text="Pick what kinds of things to show — cards, tokens, emblems, or art.")
 
     def _build_filter_mana_cost_features(self, parent):
         self._build_trait_subset_button(
             parent, MANA_COST_FEATURE_KEYS, "_mana_cost_features_btn",
             "Mana Cost Features", "features",
             selected_attr="_selected_mana_features",
-            mode_var=self.q_mana_feature_mode, count_attr="mana_feature_counts")
+            mode_var=self.q_mana_feature_mode, count_attr="mana_feature_counts",
+            help_text=(
+                "Find cards whose mana cost has special traits like hybrid or "
+                "Phyrexian mana, or an X cost."))
 
     def _reset_filter_mana_cost_features(self):
         self._reset_trait_subset(
@@ -1104,8 +1103,8 @@ class SearchFeatureMixin:
             mode_var=self.q_special_property_mode, count_attr="special_property_counts",
             picker_labels=SPECIAL_PROPERTY_PICKER_LABELS,
             help_text=(
-                "Choose rare or unusual card characteristics. Counts show how many cards "
-                "match each property with the other current filters."))
+                "Find cards with unusual traits like variable power or toughness, "
+                "a color indicator, or multiple faces."))
 
     def _reset_filter_special_properties(self):
         self._reset_trait_subset(
@@ -1117,7 +1116,10 @@ class SearchFeatureMixin:
             parent, STATUS_PROPERTY_KEYS, "_status_properties_btn",
             "Product / Status", "status properties",
             selected_attr="_selected_status_properties",
-            mode_var=self.q_status_property_mode, count_attr="status_property_counts")
+            mode_var=self.q_status_property_mode, count_attr="status_property_counts",
+            help_text=(
+                "Filter by product or status, like reserved list, Universes "
+                "Beyond, or game changer."))
 
     def _reset_filter_status_properties(self):
         self._reset_trait_subset(
@@ -1189,8 +1191,8 @@ class SearchFeatureMixin:
             mode_var=self.q_layout_mode,
             mode_label=MATCH_MODE_LABEL,
             help_text=(
-                "Choose one or more card forms. Current matches appear first; "
-                "zero-count values remain visible but unavailable."),
+                "Filter by a card's form or layout, like split, adventure, "
+                "or double-faced."),
             mode_choices=self.ANY_NONE_CHOICES)
 
     LAYOUT_LABELS = {
@@ -2148,8 +2150,7 @@ class SearchFeatureMixin:
             self._selected_subtypes, apply,
             mode_var=self.q_subtype_mode,
             mode_label=MATCH_MODE_LABEL,
-            help_text=("Choose one or more subtypes. Counts show matches under the other "
-                       "current filters; available matches appear first."))
+            help_text="Filter by subtypes like Elf, Equipment, or Aura.")
 
 
     def _choose_keywords(self):
@@ -2167,8 +2168,7 @@ class SearchFeatureMixin:
             self._selected_keywords, apply,
             mode_var=self.q_keyword_mode,
             mode_label=MATCH_MODE_LABEL,
-            help_text=("Choose one or more mechanics. Counts show matches under the other "
-                       "current filters; available matches appear first."))
+            help_text="Filter by keyword mechanics like Flying, Trample, or Flashback.")
 
 
     def _contextual_picker_values(self, catalog, count_attribute, selected=()):
@@ -2574,8 +2574,8 @@ class SearchFeatureMixin:
             selected,
             apply,
             help_text=(
-                "Choose a format and the legality it must have. "
-                "Only formats available for that legality are shown."),
+                "Show only cards from one format, and whether they must be "
+                "legal, banned, or restricted there."),
             single_select=True,
             mode_var=self.q_format_status,
             mode_label="Legality",
@@ -2596,8 +2596,7 @@ class SearchFeatureMixin:
                 [(r, r.replace("_", " ").capitalize()) for r in self._rarity_catalog],
                 "rarity_counts", self._selected_rarities),
             self._selected_rarities, apply,
-            help_text=("Choose one or more rarities. Counts show qualifying matches under the "
-                       "other current filters; available matches appear first."))
+            help_text="Filter by rarity — common, uncommon, rare, or mythic.")
 
     def _capture_catalog_filter_state(self):
         return {

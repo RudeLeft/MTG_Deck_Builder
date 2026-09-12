@@ -868,8 +868,7 @@ class DeckEditorMixin:
                 for fmt in self._format_catalog
             ],
             selected=selected, apply_callback=apply,
-            help_text=("Choose a format from the same Scryfall legality catalog "
-                       "used by Search."),
+            help_text="Set the format your deck is built for — used for its legality checks.",
             single_select=True)
 
     def _on_deck_format_selected(self, _event=None):

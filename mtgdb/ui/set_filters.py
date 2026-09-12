@@ -151,8 +151,8 @@ class PrintingFilter:
         self._header_text = str(header_text or "PRINTINGS")
         self._tooltips_enabled = bool(tooltips_enabled)
         self._intro_text = str(
-            ("Optional printing filters. Leaving Set Type and Set empty means "
-             "any observed Scryfall set in the current content scope.")
+            ("Optional printing filters. Leave Set Type and Set empty to include "
+             "every printing in the current scope.")
             if intro_text is None else intro_text)
 
         # DATA-010: default interactive Search to every platform (Paper, Arena,

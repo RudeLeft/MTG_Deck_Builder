@@ -510,6 +510,9 @@ def main():
     }
 
     checks = {
+        "Deck Format picker helper explains its purpose without provenance jargon": (
+            "Set the format your deck is built for" in sources_by_name["mtgdb/ui/deck.py"]
+            and "Scryfall legality catalog" not in sources_by_name["mtgdb/ui/deck.py"]),
         "a decklist opens whatever encoding it arrived in":
             _decklist_encoding_check(),
         "one format is named the same way on every surface":

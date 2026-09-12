@@ -26,6 +26,25 @@ _COST_PIP_TOKENS = {
     "x": "X", "snow": "S",
 }
 
+# One short line under each column filter's header explaining its purpose.
+# Collector # is sort-only, so its text describes sorting rather than filtering.
+COLUMN_FILTER_HELP = {
+    "cost": "Filter by the mana symbols in a card's cost.",
+    "qty": "Filter by how many copies are in the deck.",
+    "name": "Filter by card name.",
+    "type": "Filter by type line, like Creature or Instant.",
+    "set": "Filter by the set a card comes from.",
+    "collector": "Sort cards by collector number.",
+    "year": "Filter by the year a card was released.",
+    "ability": "Filter by keyword abilities, like Flying or Trample.",
+    "rarity": "Filter by rarity — common, uncommon, rare, or mythic.",
+    "cmc": "Filter by total mana value.",
+    "power": "Filter by a creature's power.",
+    "toughness": "Filter by a creature's toughness.",
+    "colors": "Filter by a card's colors.",
+    "rules": "Filter by words in the rules text.",
+}
+
 
 def _finite_bound(text):
     """Parse one numeric filter bound, rejecting non-finite values.
@@ -202,6 +221,12 @@ class TableFilterMixin:
             outer, text=TABLE_COLUMNS[key]["label"].upper(),
             bg=p["surface2"], fg=p["accent"],
             font=FONT_HELPER_BOLD).pack(anchor="w")
+        help_text = COLUMN_FILTER_HELP.get(key)
+        if help_text:
+            tk.Label(
+                outer, text=help_text, bg=p["surface2"], fg=p["muted"],
+                font=FONT_HELPER, justify="left", wraplength=320).pack(
+                    anchor="w", pady=(1, 4))
         return pop, outer
 
     def _build_filter_sort_controls(self, outer, view, key):

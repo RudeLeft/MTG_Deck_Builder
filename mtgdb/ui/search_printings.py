@@ -23,7 +23,9 @@ class SearchPrintingFilter(PrintingFilter):
             scope_change_callback=None,
             popup_title="Search Printings",
             header_text="PRINTINGS",
-            intro_text="",
+            intro_text=(
+                "Limit results by where a card was printed — platform, set type, "
+                "or a specific set. Leave a section empty to include all."),
             tooltips_enabled=True,
         )
         self._pending_restore_types = None

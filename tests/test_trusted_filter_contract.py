@@ -334,14 +334,20 @@ def main():
             and 'value = "" if "" in normalized else next(iter(normalized), "")'
                 in search_source
             and 'single_select=True' in search_source),
-        "Mechanics and Subtype use standardized count-aware picker instructions": (
-            'Choose one or more mechanics. Counts show matches under the other' in search_source
-            and 'Choose one or more subtypes. Counts show matches under the other' in search_source
-            and 'available matches appear first.' in search_source),
-        "Search Printings has no title-level instruction while shared popup supports it": (
-            'intro_text=""' in printing_source
+        "Picker helper text states each filter's purpose without provenance jargon": (
+            'Filter by keyword mechanics like Flying' in search_source
+            and 'Filter by subtypes like Elf' in search_source
+            and 'Filter by rarity' in search_source
+            and 'Pick what kinds of things to show' in search_source
+            # The old count/implementation-flavoured wording is gone.
+            and 'Counts show matches under the other' not in search_source
+            and 'Choose which object types Search includes' not in search_source),
+        "Search Printings shows a plain-language intro via the shared popup": (
+            'Limit results by where a card was printed' in printing_source
             and 'if self._intro_text:' in set_source
-            and 'if intro_text is None else intro_text' in set_source),
+            and 'if intro_text is None else intro_text' in set_source
+            # The shared default no longer names a provenance.
+            and 'observed Scryfall set' not in set_source),
         "workspace restoration cannot insert taxonomy vocabulary": (
             'set(pending["subtypes"]).intersection(valid_subtypes)' in search_source
             and 'set(pending["keywords"]).intersection(valid_keywords)' in search_source
