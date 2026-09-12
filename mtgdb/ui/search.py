@@ -1015,9 +1015,10 @@ class SearchFeatureMixin:
         setattr(self, button_attr, button)
 
     def _reset_trait_subset(self, keys, button_attr, selected_attr, mode_var):
+        # In-place: clear state, keep the button. Its caption is refreshed by
+        # _refresh_split_trait_button_texts after all advanced resets run.
         setattr(self, selected_attr, set())
         mode_var.set("any")
-        setattr(self, button_attr, None)
 
     def _refresh_split_trait_button_texts(self):
         groups = (
@@ -1049,8 +1050,9 @@ class SearchFeatureMixin:
         self._search_scope_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_search_scope(self):
+        # In-place: reset to the default scope; the button caption is refreshed
+        # by _refresh_split_trait_button_texts.
         self._selected_traits = set(DEFAULT_CONTENT_TRAITS)
-        self._search_scope_btn = None
 
     def _choose_search_scope(self):
         selected = {key for key in self._selected_traits if key in CONTENT_TRAIT_KEYS}
@@ -1145,7 +1147,7 @@ class SearchFeatureMixin:
     def _reset_filter_card_form(self):
         self._selected_layouts = set()
         self.q_layout_mode.set("any")
-        self._card_form_btn = None
+        self._set_picker_text(getattr(self, "_card_form_btn", None), "Any")
 
     def _contextual_layout_catalog(self):
         snapshot = getattr(self, "_context_snapshot", None)
@@ -1278,27 +1280,34 @@ class SearchFeatureMixin:
                 row=0, column=2, sticky="w", padx=(SECONDARY_HELPER_GAP, 0))
 
     def _reset_filter_mana_pips(self):
+        # In-place: uncheck the colour boxes (keep the vars/widgets) and restore
+        # the Minimum spinbox to 1 rather than dropping the handles.
         for variable in self.pip_vars.values():
             variable.set(False)
-        self.pip_vars = {}
         self.q_pip_mode.set("all")
-        self.q_pip_min = None
+        pip_min = getattr(self, "q_pip_min", None)
+        if pip_min is not None:
+            try:
+                pip_min.delete(0, "end")
+                pip_min.insert(0, "1")
+            except tk.TclError:
+                pass
 
     def _build_filter_loyalty(self, parent):
         self._numeric_pair(parent, "q_loyalty", "loyalty").grid(
             row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_loyalty(self):
-        self.q_loyalty_min = None
-        self.q_loyalty_max = None
+        self._set_search_entry_text(getattr(self, "q_loyalty_min", None), "")
+        self._set_search_entry_text(getattr(self, "q_loyalty_max", None), "")
 
     def _build_filter_defense(self, parent):
         self._numeric_pair(parent, "q_defense", "defense").grid(
             row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_defense(self):
-        self.q_defense_min = None
-        self.q_defense_max = None
+        self._set_search_entry_text(getattr(self, "q_defense_min", None), "")
+        self._set_search_entry_text(getattr(self, "q_defense_max", None), "")
 
     def _build_filter_released(self, parent):
         """Year pickers rather than spinners.
@@ -1323,8 +1332,15 @@ class SearchFeatureMixin:
                 lambda _event: self._update_search_filter_summary(), add="+")
 
     def _reset_filter_released(self):
-        self.q_released_min = None
-        self.q_released_max = None
+        # Readonly comboboxes: reset the selection in place rather than dropping
+        # the handles.
+        for name in ("q_released_min", "q_released_max"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.set("")
+                except tk.TclError:
+                    pass
 
     @staticmethod
     def _set_picker_text(button, text):
@@ -1519,33 +1535,20 @@ class SearchFeatureMixin:
         self._reset_results_viewport()
 
     def _reset_advanced_filter_values(self):
-        """Empty every advanced filter without taking any of them away."""
+        """Empty every advanced filter in place, keeping its controls.
+
+        Each row's reset clears its own state and updates its existing widget, so
+        Clear no longer destroys and rebuilds ~15 rows of controls (which was the
+        bulk of the old Clear cost).  Advanced rows are built once at startup and
+        are never rebuilt, so the handles the form holds stay valid.
+        """
         for key in advanced_filter_keys():
             reset = getattr(self, f"_reset_filter_{key}", None)
-            frame = self._advanced_filter_rows.get(key)
-            if reset is None or frame is None:
+            if reset is None or self._advanced_filter_rows.get(key) is None:
                 continue
             reset()
-            # Printings owns a persistent shared controller/popup adapter.
-            # Clearing its state must not destroy/rebuild that controller merely
-            # because the row now lives inside Advanced.
-            if key == "printings":
-                continue
-            for child in frame.winfo_children():
-                if child.winfo_manager() != "grid":
-                    continue
-                try:
-                    column = int(child.grid_info().get("column", -1))
-                except (TypeError, ValueError):
-                    continue
-                # Column 0 is the label the row keeps; column 1 is the control
-                # the builder is about to make again.
-                if column == 1:
-                    child.destroy()
-            builder = getattr(self, f"_build_filter_{key}", None)
-            if builder is not None:
-                builder(frame)
-                self._tooltip_row_controls(frame, filter_tooltip(key))
+        # Search Scope and the three trait-subset pickers share one caption pass.
+        self._refresh_split_trait_button_texts()
         self._refresh_search_blur_widgets()
 
     def _build_filter_produces(self, parent):
@@ -1568,12 +1571,17 @@ class SearchFeatureMixin:
         self._rules_pending_shadow = ""
 
     def _reset_filter_rules_text(self):
-        # Removing a filter clears what it contributed, exactly like the
-        # spinbox rows whose widgets simply cease to exist.
+        # In-place: empty the token entry (keep the widget) rather than dropping
+        # the handle and rebuilding the row.
         self._rules_text_shadow = []
         self._rules_pending_shadow = ""
-        self.q_rules = None
         self.q_rules_mode.set("all")
+        rules = getattr(self, "q_rules", None)
+        if rules is not None:
+            try:
+                rules.clear()
+            except tk.TclError:
+                pass
 
     def _build_filter_format(self, parent):
         self._format_btn = AppButton(
@@ -1584,7 +1592,7 @@ class SearchFeatureMixin:
     def _reset_filter_format(self):
         self.q_format.set("")
         self.q_format_status.set("playable")
-        self._format_btn = None
+        self._set_picker_text(getattr(self, "_format_btn", None), "Any")
 
     def _build_filter_rarity(self, parent):
         self._rarity_btn = AppButton(
@@ -1595,7 +1603,7 @@ class SearchFeatureMixin:
 
     def _reset_filter_rarity(self):
         self._selected_rarities = set()
-        self._rarity_btn = None
+        self._set_picker_text(getattr(self, "_rarity_btn", None), "Any")
 
     MODE_ROW_CHOICES = (("Any", "any"), ("All", "all"), ("None", "none"))
     # A card has exactly one shape, so All could only ever find nothing.
@@ -1679,7 +1687,7 @@ class SearchFeatureMixin:
     def _reset_filter_mechanics(self):
         self._selected_keywords = set()
         self.q_keyword_mode.set("any")
-        self._keyword_btn = None
+        self._set_picker_text(getattr(self, "_keyword_btn", None), "Any")
 
     def _build_filter_subtype(self, parent):
         self._subtype_btn = AppButton(
@@ -1692,15 +1700,15 @@ class SearchFeatureMixin:
     def _reset_filter_subtype(self):
         self._selected_subtypes = set()
         self.q_subtype_mode.set("any")
-        self._subtype_btn = None
+        self._set_picker_text(getattr(self, "_subtype_btn", None), "Any")
 
     def _build_filter_mana_value(self, parent):
         pair = self._numeric_pair(parent, "q_cmc", "mana_value")
         pair.grid(row=0, column=1, sticky="w", pady=ADVANCED_ROW_PADY)
 
     def _reset_filter_mana_value(self):
-        self.q_cmc_min = None
-        self.q_cmc_max = None
+        self._set_search_entry_text(getattr(self, "q_cmc_min", None), "")
+        self._set_search_entry_text(getattr(self, "q_cmc_max", None), "")
 
     def _build_filter_stats(self, parent, *, row=0):
         """Build Power and Toughness as two aligned primary-range rows."""

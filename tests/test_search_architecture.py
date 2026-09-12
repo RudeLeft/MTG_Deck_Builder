@@ -1264,10 +1264,15 @@ def main():
             # can reveal -- the class of bug that shipped as _rarity_btn.
             'getattr(self, "_search_actions_frame", None)' in _method_body(
                 search_source, "_toggle_advanced_filters")),
-        "the row rebuild reads the grid column as a number": (
-            # grid_info() returns Tcl values; comparing one to 1 by identity
-            # silently destroys nothing and stacks a second control on the row.
-            'int(child.grid_info().get("column", -1))' in _method_body(
+        "clearing advanced rows resets them in place without rebuilding": (
+            # Clear no longer destroys and rebuilds ~15 controls (the bulk of the
+            # old Clear cost); each row's reset clears state in place and the
+            # shared caption pass refreshes the picker buttons.
+            "child.destroy()" not in _method_body(
+                search_source, "_reset_advanced_filter_values")
+            and "_build_filter_" not in _method_body(
+                search_source, "_reset_advanced_filter_values")
+            and "_refresh_split_trait_button_texts()" in _method_body(
                 search_source, "_reset_advanced_filter_values")),
         "collapsing advanced returns Results to the first row": (
             "self._reset_results_viewport()" in _method_body(
@@ -1286,11 +1291,11 @@ def main():
             # People hover the picker or the box they are about to use, not
             # the word beside it, so a tooltip only on the label is one most
             # of them never see.
+            # Controls are tooltipped once when the rows are built and are never
+            # rebuilt, so the tooltips persist across a Clear.
             "def _tooltip_row_controls(" in search_source
             and "self._tooltip_row_controls(frame, entry[\"tooltip\"])"
             in _method_body(search_source, "_build_advanced_filter_rows")
-            and "self._tooltip_row_controls(frame, filter_tooltip(key))"
-            in _method_body(search_source, "_reset_advanced_filter_values")
             # Two tooltips on one widget both fire, so bulk tagging has to
             # know which controls already carry their own wording.
             and 'getattr(widget, "_mtg_tooltip", None) is not None'
