@@ -60,6 +60,9 @@ def main():
     results_source = (ROOT / "mtgdb/ui/results.py").read_text(encoding="utf-8")
     gallery_source = detail_source.split(
         "class _ResultsGalleryWindow", 1)[1].split("class _CardZoomWindow", 1)[0]
+    peek_source = detail_source.split(
+        "class _GalleryCardPeekWindow", 1)[1].split(
+        "class _ResultsGalleryWindow", 1)[0]
     zoom_source = detail_source.split("class _CardZoomWindow", 1)[1].split(
         "class CardDetailMixin", 1)[0]
     comparison_controls_source = (
@@ -465,6 +468,28 @@ def main():
             and "context_menu_fn=self._show_gallery_card_context_menu" in results_source
             and 'label="Add to Mainboard"' in comparison_controls_source
             and 'label="Add to Sideboard"' in comparison_controls_source),
+        "Gallery peek can flip multi-faced cards and rotate art (SRCH-046)": (
+            # The enlarged peek offers Rotate always and Flip only when the card
+            # has more than one separately imaged face, and re-requests art at
+            # the new face/rotation.
+            'text="Rotate"' in peek_source
+            and 'text="Flip"' in peek_source
+            and "def _rotate(" in peek_source
+            and "def _flip(" in peek_source
+            and "card_viewable_faces(self.card)" in peek_source
+            and "card_display_rotation_degrees(" in peek_source
+            and "self._rotation_turns = (self._rotation_turns + 1) % 4" in peek_source
+            # Focus-out dismiss (SRCH-046) is preserved.
+            and 'self.top.bind("<FocusOut>"' in peek_source),
+        "Gallery resolves any available image and retries transient failures": (
+            # A card with only an art crop or a single face image still shows,
+            # and a dropped download self-heals with a one-shot retry rather
+            # than sticking on "Image unavailable".
+            "def _gallery_face_image_url(" in detail_source
+            and 'card.get("image_art_crop")' in detail_source
+            and "_gallery_face_image_url(card, 0)" in gallery_source
+            and "def _retry_gallery_image(" in gallery_source
+            and "self._image_retries" in gallery_source),
         "separately imaged faces are detected without a layout allowlist": (
             [index for index, _name, _url in transform_faces] == [0, 1]
             and split_faces == []

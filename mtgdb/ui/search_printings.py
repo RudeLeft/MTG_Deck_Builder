@@ -33,8 +33,8 @@ class SearchPrintingFilter(PrintingFilter):
             owner._build_search_row_label(
                 parent, "Printings", row=row, pady=2, tooltip_key="printings")
         self.button = AppButton(
-            parent, text="Paper Only · Any set type · Any set", role="search_picker",
-            command=self.toggle_popup)
+            parent, text="Paper + Arena + MTGO · Any set type · Any set",
+            role="search_picker", command=self.toggle_popup)
         self.button.grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)
         # The button is what a user clicks; the label beside it is not.
         owner._add_standard_filter_tooltip(self.button, "printings")
@@ -59,12 +59,12 @@ class SearchPrintingFilter(PrintingFilter):
         self._notify_change()
 
     def clear(self):
-        # Reset the platform checkboxes to the paper default and derive
-        # paper_only from them; selected_games() reads game_vars, so clearing
-        # paper_only alone would leave a stale Arena/MTGO selection driving the
+        # Reset the platform checkboxes to the all-platform default (DATA-010)
+        # and derive paper_only from them; selected_games() reads game_vars, so
+        # clearing paper_only alone would leave a stale selection driving the
         # summary, the catalog scope, and the captured search criteria.
-        for key, variable in self.game_vars.items():
-            variable.set(key == "paper")
+        for variable in self.game_vars.values():
+            variable.set(True)
         self._sync_paper_only_from_games()
         self._pending_restore_types = set()
         self._pending_restore_codes = set()

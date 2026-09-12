@@ -49,11 +49,31 @@ log = logging.getLogger("mtg")
 
 
 def _card_image_url(card):
-    """Return the interactive-display image URL using the established priority."""
+    """Return the interactive-display image URL using the established priority.
+
+    ``image_art_crop`` is a last resort so a card that only stored an art crop
+    (some tokens/art printings) still shows something instead of "Image
+    unavailable"; the normal/small/png web sizes are always preferred.
+    """
     return (
         card.get("image_normal") or card.get("image_small")
-        or card.get("image_png")
+        or card.get("image_png") or card.get("image_art_crop")
     )
+
+
+def _gallery_face_image_url(card, face_index=0):
+    """Best image URL for one face, falling back to the card-level image.
+
+    A card whose only image lives on face 0 (single viewable face) still
+    resolves through the card-level columns; a genuinely multi-faced card uses
+    the requested face's own image.
+    """
+    url = card_face_image_url(card, face_index)
+    if url:
+        return url
+    if int(face_index) == 0:
+        return _card_image_url(card)
+    return None
 
 
 def _target_for_rotation(portrait_size, rotation_degrees):
@@ -125,6 +145,11 @@ class _GalleryCardPeekWindow:
         self._poll_after = None
         self._photo = None
         self._closed = False
+        # Manual view state so the peek can show the other side of a multi-faced
+        # card and rotate horizontal art, mirroring the main preview/zoom.
+        self._face_index = 0
+        self._rotation_turns = 0
+        self._presented = False
         name = str(self.card.get("name") or "Card")
         self.top = owner._create_hidden_popup(
             name, transient=parent, resizable=False)
@@ -132,29 +157,88 @@ class _GalleryCardPeekWindow:
         self.top.protocol("WM_DELETE_WINDOW", self.close)
         self.top.bind("<Escape>", lambda _event: self.close())
         self.top.bind("<FocusOut>", self._focus_out, add="+")
+        controls = tk.Frame(self.top, bg=PALETTE["surface"])
+        controls.pack(fill="x")
+        self.rotate_btn = AppButton(
+            controls, text="Rotate", role="compact", command=self._rotate)
+        self.rotate_btn.pack(side="left", padx=4, pady=4)
+        faces = card_viewable_faces(self.card)
+        if len(faces) > 1:
+            self.flip_btn = AppButton(
+                controls, text="Flip", role="compact", command=self._flip)
+            self.flip_btn.pack(side="left", padx=(0, 4), pady=4)
+        else:
+            self.flip_btn = None
         self.image = tk.Label(
             self.top, text="Loading image…", bg=PALETTE["input"],
             fg=PALETTE["muted"], font=FONT_BODY, bd=0,
             highlightthickness=1, highlightbackground=PALETTE["border"],
         )
         self.image.pack(fill="both", expand=True, padx=3, pady=3)
-        rotation = card_display_rotation_degrees(self.card, 0, face_index=0)
+        self._render(center=True)
+
+    def _current_url(self):
+        return _gallery_face_image_url(self.card, self._face_index)
+
+    def _render(self, *, center):
+        """Size the window to the current face/rotation and (re)request its art."""
+        rotation = card_display_rotation_degrees(
+            self.card, self._rotation_turns, self._face_index)
         target = _target_for_rotation(CARD_ZOOM_BASE_PORTRAIT_SIZE, rotation)
-        owner._center_popup_with_visible_actions(
-            self.top, preferred_width=target[0] + 10,
-            preferred_height=target[1] + 10, min_width=360, min_height=500,
-            lock_size=True, screen_margin_x=24, screen_margin_y=24)
-        owner._present_hidden_popup(self.top, center=False, focus=self.image)
+        try:
+            self.owner._center_popup_with_visible_actions(
+                self.top, preferred_width=target[0] + 10,
+                preferred_height=target[1] + 56, min_width=360, min_height=520,
+                lock_size=True, screen_margin_x=24, screen_margin_y=24)
+        except tk.TclError:
+            pass
+        if not self._presented:
+            self._presented = True
+            self.owner._present_hidden_popup(
+                self.top, center=False, focus=self.image)
         self._request_image(target, rotation)
 
-    def _request_image(self, target, rotation):
-        url = card_face_image_url(self.card, 0) or _card_image_url(self.card)
-        if ImageTk is None or not self.owner.card_image_service.available or not url:
-            self.image.configure(text="Image unavailable")
+    def _rotate(self):
+        self._rotation_turns = (self._rotation_turns + 1) % 4
+        self._render(center=False)
+        self._keep_focus()
+
+    def _flip(self):
+        faces = card_viewable_faces(self.card)
+        if len(faces) < 2:
             return
+        order = [index for index, _name, _url in faces]
+        position = order.index(self._face_index) if self._face_index in order else 0
+        self._face_index = order[(position + 1) % len(order)]
+        # A new face has its own posture, so drop any manual rotation.
+        self._rotation_turns = 0
+        self._render(center=False)
+        self._keep_focus()
+
+    def _keep_focus(self):
+        # Keep focus inside this toplevel so the focus-out auto-dismiss does not
+        # fire when a control button does not itself take keyboard focus.
+        try:
+            self.image.focus_set()
+        except tk.TclError:
+            pass
+
+    def _request_image(self, target, rotation):
+        if self._poll_after is not None:
+            try:
+                self.top.after_cancel(self._poll_after)
+            except tk.TclError:
+                pass
+            self._poll_after = None
+        self._future = None
+        url = self._current_url()
+        if ImageTk is None or not self.owner.card_image_service.available or not url:
+            self.image.configure(text="Image unavailable", image="")
+            return
+        self.image.configure(text="Loading image…")
         try:
             self._future = self.owner.card_image_service.request(
-                self.card, url, face_index=0, target_size=target,
+                self.card, url, face_index=self._face_index, target_size=target,
                 rotation_degrees=rotation, allow_upscale=True,
                 channel="results-gallery-peek")
         except Exception:
@@ -273,6 +357,11 @@ class _ResultsGalleryWindow:
         self._scale_dragging = False
         self._preview_after = None
         self._pil_by_card = OrderedDict()
+        # One-shot retry per slot for transient image failures (a dropped
+        # download shows "Image unavailable"; retrying once lets it self-heal
+        # without a full re-scroll).  Genuinely image-less cards simply fail
+        # again and settle on the message.
+        self._image_retries = {}
 
         self._build_shell()
         self.top.bind("<Button-1>", self._dismiss_peek_from_outside, add="+")
@@ -365,6 +454,7 @@ class _ResultsGalleryWindow:
         self._image_requests.clear()
         self._photos.clear()
         self._pil_by_card.clear()
+        self._image_retries.clear()
         if self._peek_window is not None:
             self._peek_window.close()
             self._peek_window = None
@@ -579,6 +669,7 @@ class _ResultsGalleryWindow:
         self._image_generation += 1
         generation = self._image_generation
         self._image_requests.clear()
+        self._image_retries.clear()
         self._last_prefetch_key = None
         self._ensure_gallery_slots(self._layout["slot_count"])
         targets, geom, start, end, count = self._visible_geometry()
@@ -838,6 +929,7 @@ class _ResultsGalleryWindow:
         self._image_generation += 1
         self._image_requests.clear()
         self._photos.clear()
+        self._image_retries.clear()
         # A full render invalidates any prior prefetch band (layout/data may have
         # changed), so allow the next bind to prefetch again.
         self._last_prefetch_key = None
@@ -925,6 +1017,7 @@ class _ResultsGalleryWindow:
                     slot["pil"] = None
                     self._image_requests.pop(slot_index, None)
                     self._photos.pop(slot_index, None)
+                    self._image_retries.pop(slot_index, None)
                     try:
                         slot["cell"].place_forget()
                         slot["image"].configure(image="", text="")
@@ -948,6 +1041,7 @@ class _ResultsGalleryWindow:
                 card = {}
             image_label = slot["image"]
             self._photos.pop(slot_index, None)
+            self._image_retries.pop(slot_index, None)
             try:
                 slot["cell"].place(
                     x=x, y=y, width=image_w, height=image_h, anchor="nw")
@@ -985,7 +1079,7 @@ class _ResultsGalleryWindow:
                 card = dict(self._card_at_fn(position) or {})
             except Exception:
                 continue
-            url = card_face_image_url(card, 0) or _card_image_url(card)
+            url = _gallery_face_image_url(card, 0)
             if not url:
                 continue
             try:
@@ -1068,7 +1162,7 @@ class _ResultsGalleryWindow:
         if ImageTk is None or not self.owner.card_image_service.available:
             label.configure(text="Image unavailable")
             return
-        url = card_face_image_url(card, 0) or _card_image_url(card)
+        url = _gallery_face_image_url(card, 0)
         if not url:
             label.configure(text="Image unavailable")
             return
@@ -1108,12 +1202,42 @@ class _ResultsGalleryWindow:
             except (IndexError, TypeError):
                 pass
             self._remember_source(slot, image)
+            self._image_retries.pop(slot, None)
             label.configure(image=photo, text="", width=0, height=0)
         except Exception:
+            if not self._retry_gallery_image(slot, label, generation):
+                try:
+                    label.configure(text="Image unavailable", image="")
+                except tk.TclError:
+                    pass
+
+    def _retry_gallery_image(self, slot, label, generation):
+        """Re-request one failed image once, for transient download failures."""
+        if generation != self._image_generation:
+            return False
+        if self._image_retries.get(slot):
+            return False
+        try:
+            card = self._slots[slot].get("card") or {}
+        except (IndexError, TypeError):
+            return False
+        if not card:
+            return False
+        self._image_retries[slot] = True
+        def _again(slot=slot, label=label, card=card, generation=generation):
+            if generation != self._image_generation:
+                return
             try:
-                label.configure(text="Image unavailable", image="")
-            except tk.TclError:
-                pass
+                if self._slots[slot].get("position") is None:
+                    return
+            except (IndexError, TypeError):
+                return
+            self._queue_gallery_image(slot, card, label, generation=generation)
+        try:
+            self.top.after(600, _again)
+        except tk.TclError:
+            return False
+        return True
 
     def _poll_gallery_images(self):
         self._image_after = None

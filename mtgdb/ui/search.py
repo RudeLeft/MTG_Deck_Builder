@@ -642,7 +642,8 @@ class SearchFeatureMixin:
         self._card_type_chip_widgets = self._render_trusted_chips(
             self._card_type_chip_frame, self._card_type_catalog, self.card_type_vars,
             columns=CARD_TYPE_MIN_COLUMNS, tooltip_key="card_type",
-            loading_placeholders=CARD_TYPE_LOADING_SLOTS)
+            loading_placeholders=CARD_TYPE_LOADING_SLOTS,
+            empty_label="No Card Types in this scope")
         self._layout_card_type_chips()
         self._build_mode_row(
             typebox, self.q_card_type_mode, "card types",
@@ -1647,7 +1648,8 @@ class SearchFeatureMixin:
             columns=SUPERTYPE_COLUMNS,
             tooltip_key="supertypes",
             loading_placeholders=SUPERTYPE_LOADING_SLOTS,
-            force_placeholders=force_placeholders)
+            force_placeholders=force_placeholders,
+            empty_label="No Supertypes in this scope")
 
     def _build_filter_supertypes(self, parent):
         box = ttk.Frame(parent)
@@ -1754,7 +1756,8 @@ class SearchFeatureMixin:
 
     def _render_trusted_chips(
             self, frame, values, variables, *, columns=3,
-            tooltip_key=None, loading_placeholders=0, force_placeholders=False):
+            tooltip_key=None, loading_placeholders=0, force_placeholders=False,
+            empty_label=None):
         selected = {key for key, variable in variables.items() if bool(variable.get())}
         for child in frame.winfo_children():
             child.destroy()
@@ -1809,6 +1812,34 @@ class SearchFeatureMixin:
                 frame.columnconfigure(
                     chip_column, weight=1, uniform="search-trusted-chip")
                 widgets.append(chip)
+        elif (not values and empty_label
+                and not getattr(self, "_search_type_line_cold_start", False)
+                and not force_placeholders):
+            # The taxonomy is authoritative and this scope genuinely has no such
+            # values (e.g. Emblems have no supertype/card type, Art Series has
+            # neither). Rather than leave an empty gap, show one disabled chip
+            # carrying the same red ✕ unavailable convention used elsewhere, so
+            # the row reads as intentionally-empty instead of broken.
+            shell = tk.Frame(
+                frame, bg=PALETTE["border"], bd=0, highlightthickness=0,
+                takefocus=0)
+            placeholder_var = tk.BooleanVar(master=self, value=False)
+            chip = self._filter_chip(
+                shell, f"✕ {empty_label}", placeholder_var, anchor="center")
+            chip._ui_chip_border_shell = shell
+            chip._mtg_empty_scope_placeholder = True
+            chip.pack(fill="both", expand=True, padx=1, pady=1)
+            try:
+                chip.configure(
+                    state="disabled", fg=PALETTE["bad"],
+                    disabledforeground=PALETTE["bad"])
+            except tk.TclError:
+                pass
+            shell.grid(
+                row=0, column=0, columnspan=max(1, columns), sticky="ew",
+                padx=_chip_grid_padx(0, 1), pady=_chip_grid_pady(0, 1))
+            frame.columnconfigure(0, weight=1)
+            widgets.append(chip)
         return tuple(widgets)
 
     def _layout_card_type_chips(self, _event=None):
@@ -1840,11 +1871,18 @@ class SearchFeatureMixin:
                 layout_widget = _chip_layout_widget(widget)
                 if not layout_widget.winfo_exists():
                     return
+                # The single "No Card Types in this scope" chip spans the row so
+                # it reads as an intentional placeholder, not one narrow chip.
+                if getattr(widget, "_mtg_empty_scope_placeholder", False):
+                    layout_widget.grid_configure(
+                        row=0, column=0, columnspan=max(1, desired), sticky="ew",
+                        padx=_chip_grid_padx(0, 1), pady=_chip_grid_pady(0, 1))
+                    continue
                 chip_row = index // desired
                 chip_column = index % desired
                 chip_rows = max(1, math.ceil(len(widgets) / desired))
                 layout_widget.grid_configure(
-                    row=chip_row, column=chip_column, sticky="ew",
+                    row=chip_row, column=chip_column, sticky="ew", columnspan=1,
                     padx=_chip_grid_padx(chip_column, desired),
                     pady=_chip_grid_pady(chip_row, chip_rows))
             for column in range(CARD_TYPE_MAX_COLUMNS):
@@ -2583,6 +2621,8 @@ class SearchFeatureMixin:
                 self, "_supertype_authority_available", False) else "disabled")
         for widget in tuple(getattr(self, "_card_type_chip_widgets", ())):
             try:
+                if getattr(widget, "_mtg_empty_scope_placeholder", False):
+                    continue
                 if enabled and getattr(widget, "_mtg_loading_placeholder", False):
                     continue
                 widget.configure(state=card_type_state)
@@ -2590,6 +2630,8 @@ class SearchFeatureMixin:
                 pass
         for widget in tuple(getattr(self, "_property_chip_widgets", ())):
             try:
+                if getattr(widget, "_mtg_empty_scope_placeholder", False):
+                    continue
                 if enabled and getattr(widget, "_mtg_loading_placeholder", False):
                     continue
                 widget.configure(state=supertype_state)
@@ -2716,7 +2758,8 @@ class SearchFeatureMixin:
             self._card_type_chip_frame, self._card_type_catalog, self.card_type_vars,
             columns=CARD_TYPE_MIN_COLUMNS, tooltip_key="card_type",
             loading_placeholders=CARD_TYPE_LOADING_SLOTS,
-            force_placeholders=not card_type_authority_available)
+            force_placeholders=not card_type_authority_available,
+            empty_label="No Card Types in this scope")
         for value, variable in self.card_type_vars.items():
             variable.set(value in pending["card_types"])
         self._layout_card_type_chips()

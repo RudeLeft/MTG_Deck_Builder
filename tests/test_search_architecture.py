@@ -1002,6 +1002,16 @@ def main():
         selected_pip, _FakeBoolVar(True), False)
 
     checks = {
+        "Empty Type Line scopes show a labelled placeholder, not a blank gap": (
+            # Emblems have no supertype; Art Series has neither supertype nor
+            # card type. When the taxonomy is authoritative but the scope is
+            # genuinely empty, the row shows one disabled ✕ placeholder chip
+            # instead of an odd empty gap.
+            "empty_label" in search_source
+            and "_mtg_empty_scope_placeholder" in search_source
+            and 'empty_label="No Supertypes in this scope"' in search_source
+            and 'empty_label="No Card Types in this scope"' in search_source
+            and 'f"✕ {empty_label}"' in search_source),
         "Dungeon live context treats no-cost mana value 0 as inapplicable": (
             dungeon_dynamic_applicability),
         "Mana Value applicability accepts literal zero costs and face-derived costs": (

@@ -194,9 +194,11 @@ def main():
     printing.clear()
     clear_resets_platforms = (
         before_clear_digital
-        and printing.selected_games() == ("paper",)
-        and bool(printing.paper_only.get()) is True
-        and platform_selection_summary(printing.selected_games()) == "Paper Only")
+        # DATA-010: Clear restores the all-platform default, not paper-only.
+        and printing.selected_games() == ("paper", "arena", "mtgo")
+        and bool(printing.paper_only.get()) is False
+        and platform_selection_summary(printing.selected_games())
+            == "Paper + Arena + MTGO")
 
     # The repository receives selected observed Set Types rather than a hardcoded
     # set-family mapping.

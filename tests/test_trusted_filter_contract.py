@@ -302,8 +302,8 @@ def main():
             and "Supplemental" not in search_source
             and FILTER_BY_KEY["search_scope"]["category"] == "Search Scope"
             and "def _choose_search_scope(" in search_source),
-        "Printings default to Paper Only and Any set": (
-            'text="Paper Only · Any set type · Any set"' in printing_source
+        "Printings default to all platforms and Any set (DATA-010)": (
+            'text="Paper + Arena + MTGO · Any set type · Any set"' in printing_source
             and "SET_TYPE_DEFAULT_ON" not in combined
             and "SET_TYPE_GROUPS" not in combined
             and "Recommended" not in combined),

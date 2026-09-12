@@ -155,12 +155,15 @@ class PrintingFilter:
              "any observed Scryfall set in the current content scope.")
             if intro_text is None else intro_text)
 
-        self.paper_only = tk.BooleanVar(master=owner, value=True)
-        # Paper is the default scope, matching the boolean this replaces.
+        # DATA-010: default interactive Search to every platform (Paper, Arena,
+        # and MTGO), which is no platform restriction; paper_only is derived from
+        # the selection, so it starts False whenever more than paper is ticked.
         self.game_vars = {
-            key: tk.BooleanVar(master=owner, value=(key == "paper"))
+            key: tk.BooleanVar(master=owner, value=True)
             for key, _label in GAME_PLATFORM_LABELS
         }
+        self.paper_only = tk.BooleanVar(
+            master=owner, value=self.selected_games() == ("paper",))
         self.set_type_vars = {}
         self._present_set_types = set()
         self._set_vars = {}
@@ -360,12 +363,12 @@ class PrintingFilter:
             ).pack(anchor="w")
 
     def clear(self):
-        # Reset the platform checkboxes to the paper default and derive
-        # paper_only from them; selected_games() reads game_vars, so clearing
-        # paper_only alone would leave a stale Arena/MTGO selection driving the
+        # Reset the platform checkboxes to the all-platform default (DATA-010)
+        # and derive paper_only from them; selected_games() reads game_vars, so
+        # clearing paper_only alone would leave a stale selection driving the
         # summary, the catalog scope, and the next search.
-        for key, variable in self.game_vars.items():
-            variable.set(key == "paper")
+        for variable in self.game_vars.values():
+            variable.set(True)
         self._sync_paper_only_from_games()
         for variable in self.set_type_vars.values():
             variable.set(False)
