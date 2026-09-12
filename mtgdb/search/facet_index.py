@@ -7,14 +7,15 @@ filters' bitsets, and per-value contextual counts are popcounts of that
 intersection AND the candidate value -- microseconds instead of a per-bucket
 SQLite rescan.
 
-The bitsets mirror ``SearchQueryBuilder`` exactly; anything a bitset cannot yet
-reproduce (free-text name/rules/type-line search and mana-symbol minimums)
-makes :meth:`filter_bitset` return ``None`` so the caller falls back to the
-canonical SQLite worker.  Format legality and numeric ranges (mana value,
-power, toughness, loyalty, defense) ARE represented, so the common
-deck-building filters recompute in ~1 ms instead of a multi-second SQLite
-rescan.  Coverage is verified byte-identical against ``count_search`` before
-use.
+The bitsets mirror ``SearchQueryBuilder`` exactly; the only filters a bitset
+cannot reproduce -- free-text name/rules/type-line search, and a mana-symbol
+*minimum* count (its hybrid-counts-once rule is per-query) -- make
+:meth:`filter_bitset` return ``None`` so the caller falls back to the canonical
+SQLite worker.  Everything else, including format legality, numeric ranges
+(mana value, power, toughness, loyalty, defense), and default mana-symbol color
+presence, is represented, so the common deck-building filters recompute in
+~1 ms instead of a multi-second SQLite rescan.  Coverage is verified
+byte-identical against ``count_search`` before use.
 """
 
 from __future__ import annotations
@@ -313,13 +314,16 @@ class FacetIndex:
     def representable(self, q):
         """True when every active filter has a bitset predicate.
 
-        Free-text name/rules/type-line search and mana-symbol minimums have no
-        bitset predicate, so they still fall back to the SQLite worker.  Format
-        legality and numeric ranges are represented (see ``_fragments``).
+        Free-text name/rules/type-line search has no bitset predicate, so it
+        still falls back to the SQLite worker.  A mana-symbol *minimum* count
+        (with the hybrid-counts-once rule) is per-query and also falls back.
+        Everything else -- including format legality, numeric ranges, and
+        mana-symbol color presence (the default, no-minimum pip filter) -- is
+        represented (see ``_fragments``).
         """
         if q.name or q.names or q.text:
             return False
-        if q.pips or q.pip_min is not None:
+        if q.pip_min is not None:
             return False
         return True
 
@@ -360,6 +364,7 @@ class FacetIndex:
             "set_codes": set_code_bs,
             "lang": lang_bs,
             "format": self._format_filter(q.fmt, q.fmt_status),
+            "pips": self._pip_filter(q.pips, q.pip_mode),
             "cmc": self._numeric_range_bitset("cmc", q.cmc_min, q.cmc_max),
             "power": self._numeric_range_bitset(
                 "power", q.power_min, q.power_max),
@@ -386,6 +391,37 @@ class FacetIndex:
         result = 0
         for state in wanted:
             result |= states.get(state, 0)
+        return result
+
+    def _pip_filter(self, pips, mode):
+        """Mirror add_pip_filters at the default minimum (color presence).
+
+        The SQL applies a per-color presence prefilter plus a minimum-count
+        helper; at the default minimum of 1 that reduces to color presence, so
+        this ANDs/ORs the per-color pip-presence bitsets by Match mode.  An
+        explicit minimum is rejected by ``representable`` and never reaches here.
+        """
+        selected = sorted({
+            str(value).strip().upper() for value in (pips or [])
+            if str(value).strip().upper() in (*COLORS, "C")})
+        if not selected:
+            return self.universe
+        normalized = str(mode or "all").casefold()
+        if normalized not in {"any", "all", "none"}:
+            normalized = "all"
+        if normalized == "any":
+            result = 0
+            for color in selected:
+                result |= self.pip_repr.get(color, 0)
+            return result
+        if normalized == "none":
+            result = self.universe
+            for color in selected:
+                result &= self.universe ^ self.pip_repr.get(color, 0)
+            return result
+        result = self.universe
+        for color in selected:
+            result &= self.pip_repr.get(color, 0)
         return result
 
     def _numeric_range_bitset(self, field, low, high):
@@ -427,9 +463,10 @@ class FacetIndex:
         """Return contextual counts for a representable criteria, else None.
 
         Mirrors the per-value counts the SQLite context worker emits, computed as
-        popcounts of the relevant relaxed bitset.  Format legality and numeric
-        ranges are represented (their fragments are relaxed per facet); only
-        mana-symbol (pip) minimums and free-text still force a ``None`` fallback.
+        popcounts of the relevant relaxed bitset.  Format legality, numeric
+        ranges, and default mana-symbol presence are represented (their fragments
+        are relaxed per facet); only an explicit mana-symbol minimum and
+        free-text still force a ``None`` fallback.
         """
         fragments = self._fragments(q)
         if fragments is None:
@@ -514,7 +551,8 @@ class FacetIndex:
             bounds, applicable = self._numeric(relaxed(facet), facet)
             out["numeric_ranges"][facet] = bounds
             out["numeric_applicability"][facet] = applicable
-        out["pip_counts"] = self._pip_counts(relaxed("pips"), q.pip_mode)
+        out["pip_counts"] = self._pip_counts(
+            relaxed("pips"), q.pips, q.pip_mode)
         out["format_counts"] = self._format_counts(
             relaxed("format"), _catalog_values(vocabulary.get("formats")),
             q.fmt_status)
@@ -534,13 +572,34 @@ class FacetIndex:
         high = next(v for v in reversed(values) if relaxed & value_bitsets[v])
         return (low, high), applicable
 
-    def _pip_counts(self, relaxed, pip_mode):
+    def _pip_counts(self, relaxed, selected, pip_mode):
+        """Predict adding one mana-symbol color, mirroring ``_predict_pips``.
+
+        Only reached at the default minimum (threshold 1), where the total-symbol
+        count check reduces to color presence, so each candidate's count is the
+        popcount of the relaxed set under the mode applied to
+        ``selected + {candidate}``.  Ignoring ``selected`` (as an earlier version
+        did) only matched when nothing was selected.
+        """
         normalized = str(pip_mode or "all").casefold()
-        total = self.popcount(relaxed)
+        if normalized not in {"any", "all", "none"}:
+            normalized = "all"
+        sel = [c for c in (selected or ()) if c in _PIP_KEYS]
         result = {}
-        for color in _PIP_KEYS:
-            has = self.popcount(relaxed & self.pip_repr.get(color, 0))
-            result[color] = (total - has) if normalized == "none" else has
+        for candidate in _PIP_KEYS:
+            wanted = list(dict.fromkeys([*sel, candidate]))
+            if normalized == "none":
+                bucket = relaxed
+                for color in wanted:
+                    bucket &= self.universe ^ self.pip_repr.get(color, 0)
+            elif normalized == "any":
+                # Self-excluding union: a candidate's own compatible population.
+                bucket = relaxed & self.pip_repr.get(candidate, 0)
+            else:  # all
+                bucket = relaxed
+                for color in wanted:
+                    bucket &= self.pip_repr.get(color, 0)
+            result[candidate] = self.popcount(bucket)
         return result
 
     def _format_counts(self, relaxed, formats, status):

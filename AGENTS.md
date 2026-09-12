@@ -201,7 +201,7 @@ only in the module that owns X.
 | `mtgdb/search/results.py` | Compact immutable Search result rows/store, exact-printing hydration cache, pure table value/filter/sort semantics, complete logical view indexes, generation-protected Results and vocabulary preparation |
 | `mtgdb/search/catalogs.py` | Bounded Content/Platform/Paper/Set-Type trusted-taxonomy snapshot caches and latest-wins background catalog discovery |
 | `mtgdb/search/context.py` | Tk-free latest-wins live draft Search analysis: predictive self-excluding facet counts, numeric ranges, existing-property counts, cancellation/cache, and zero-result relaxation suggestions |
-| `mtgdb/search/facet_index.py` | Tk-free in-memory per-value bitset facet index: byte-identical bitset predicates mirroring SearchQueryBuilder for near-real-time contextual counts (including format legality and numeric ranges), with fallback for free-text and mana-symbol-minimum filters it cannot represent |
+| `mtgdb/search/facet_index.py` | Tk-free in-memory per-value bitset facet index: byte-identical bitset predicates mirroring SearchQueryBuilder for near-real-time contextual counts (including format legality, numeric ranges, and default mana-symbol color presence), built once and warmable off the request path, with fallback only for free-text and explicit-mana-symbol-minimum filters it cannot represent |
 | `mtgdb/deck/model.py` | Exact-printing deck state, quantities, board mutations, entry access, compat delegation |
 | `mtgdb/deck/io.py` | Portable TXT serialization, atomic user-selected TXT save, section parsing, printing tags, resolver import |
 | `mtgdb/deck/file_jobs.py` | Tk-free daemon submission wrapper for deck import/save/export file work |

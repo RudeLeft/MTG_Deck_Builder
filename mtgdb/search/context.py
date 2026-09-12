@@ -718,6 +718,7 @@ class SearchContextController:
         self._cache = OrderedDict()
         self._facet_index = None
         self._facet_index_disabled = False
+        self._warm_requested = False
         self._thread = spawn_daemon(self._run, "search-context")
 
     def reset_facet_index(self):
@@ -725,6 +726,30 @@ class SearchContextController:
         with self._condition:
             self._facet_index = None
             self._facet_index_disabled = False
+
+    def warm_facet_index(self):
+        """Ask the worker to build the index now, so the first pick isn't slow.
+
+        Opportunistic and idle-only: a real context request always takes
+        priority, and the build is skipped when the index already exists, is
+        manually disabled, or the database has no cards yet.  Safe to call at
+        startup and after a database sync.
+        """
+        with self._condition:
+            if (self._closed or self._facet_index is not None
+                    or self._facet_index_disabled):
+                return
+        try:
+            if not self.repository.has_cards():
+                return
+        except Exception:
+            return
+        with self._condition:
+            if (self._closed or self._facet_index is not None
+                    or self._facet_index_disabled):
+                return
+            self._warm_requested = True
+            self._condition.notify_all()
 
     def _ensure_facet_index(self):
         """Build (once) and return the in-memory bitset index, or None this cycle.
@@ -1074,13 +1099,26 @@ class SearchContextController:
     def _run(self):
         while True:
             with self._condition:
-                while self._pending is None and not self._closed:
+                while (self._pending is None and not self._warm_requested
+                       and not self._closed):
                     self._condition.wait()
                 if self._closed:
                     return
-                generation, criteria, vocabulary, cache_key = self._pending
-                self._pending = None
-                self._working_generation = generation
+                # A real request always wins; warm only when idle.
+                if self._pending is None:
+                    self._warm_requested = False
+                    warm_only = True
+                else:
+                    warm_only = False
+                    generation, criteria, vocabulary, cache_key = self._pending
+                    self._pending = None
+                    self._working_generation = generation
+            if warm_only:
+                try:
+                    self._ensure_facet_index()
+                except Exception:
+                    log.debug("Facet index warm-up deferred", exc_info=True)
+                continue
             started = time.perf_counter()
             try:
                 payload = self._prepare(generation, criteria, vocabulary)

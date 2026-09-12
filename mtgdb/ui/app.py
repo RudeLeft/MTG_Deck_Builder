@@ -518,6 +518,9 @@ class DeckBuilderApp(
     def _start_post_paint_initialization(self):
         self._refresh_search_catalogs()
         self._restore_workspace_session_async()
+        # Build the bitset facet index in the background now, so the first live
+        # filter pick is instant instead of paying the one-time build cost.
+        self.search_context_controller.warm_facet_index()
 
     # workspace autosave / crash recovery
     # ======================================================================

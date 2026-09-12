@@ -133,6 +133,13 @@ def main():
         "power_range": SearchCriteria(content_types=("card",),
             power_min=1.0, power_max=3.0),
         "toughness_max": SearchCriteria(content_types=("card",), toughness_max=1.0),
+        # Mana-symbol color presence (no explicit minimum) is representable.
+        "pips_any_wu": SearchCriteria(content_types=("card",),
+            pips=("W", "U"), pip_mode="any"),
+        "pips_all_wu": SearchCriteria(content_types=("card",),
+            pips=("W", "U"), pip_mode="all"),
+        "pips_none_g": SearchCriteria(content_types=("card",),
+            pips=("G",), pip_mode="none"),
     }
 
     checks = {}
@@ -191,20 +198,41 @@ def main():
     checks["subtype match is whitespace-bounded (Urza != Urza's Saga)"] = (
         urza_partial == 0 and saga_full == 1 and saga_word == 1)
 
-    # 5. Free-text and mana-symbol minimums still decline so the caller keeps
-    #    the SQLite worker; format and numeric ranges no longer fall back.
-    checks["text/pip criteria fall back (None)"] = all(
+    # 5. Free text and an explicit mana-symbol minimum still decline so the
+    #    caller keeps the SQLite worker; format, numeric ranges, and default
+    #    mana-symbol presence no longer fall back.
+    checks["text/pip-minimum criteria fall back (None)"] = all(
         index.filter_bitset(c) is None and index.context_counts(c, vocab) is None
         for c in (
             SearchCriteria(content_types=("card",), text=("bear",)),
-            SearchCriteria(content_types=("card",), pips=("G",)),
-            SearchCriteria(content_types=("card",), pip_min=2)))
-    checks["format and numeric ranges are represented (no fallback)"] = all(
+            SearchCriteria(content_types=("card",), pips=("G",), pip_min=2)))
+    checks["format, numeric, and pip presence are represented (no fallback)"] = all(
         index.filter_bitset(c) is not None and index.context_counts(c, vocab) is not None
         for c in (
             SearchCriteria(content_types=("card",), fmt="modern"),
             SearchCriteria(content_types=("card",), cmc_min=1.0),
-            SearchCriteria(content_types=("card",), power_min=1.0, power_max=3.0)))
+            SearchCriteria(content_types=("card",), power_min=1.0, power_max=3.0),
+            SearchCriteria(content_types=("card",), pips=("W", "U"), pip_mode="any")))
+
+    # 6. warm_facet_index builds the index off the request path (startup / post
+    #    sync) so the first live pick is instant.
+    import time as _time
+    warm_ctrl = SearchContextController(repo)
+    warm_ctrl.reset_facet_index()
+    assert warm_ctrl._facet_index is None
+    warm_ctrl.warm_facet_index()
+    deadline = _time.time() + 10
+    while warm_ctrl._facet_index is None and _time.time() < deadline:
+        _time.sleep(0.02)
+    checks["warm_facet_index builds the index off the request path"] = (
+        warm_ctrl._facet_index is not None)
+    warm_ctrl.shutdown()
+
+    app_src = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
+    sync_src = (ROOT / "mtgdb/ui/database_sync.py").read_text(encoding="utf-8")
+    checks["warm-up is wired at startup and after a database sync"] = (
+        "search_context_controller.warm_facet_index()" in app_src
+        and "search_context_controller.warm_facet_index()" in sync_src)
 
     ok = True
     for label, passed in checks.items():
