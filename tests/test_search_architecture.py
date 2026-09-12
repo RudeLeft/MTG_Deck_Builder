@@ -883,6 +883,10 @@ def main():
         def _update_search_filter_summary(self):
             self.summaries += 1
 
+        def _update_search_filter_summary_typing(self):
+            # Name editing coalesces on the longer typing debounce.
+            self.summaries += 1
+
     def _edit(batch, display, typed):
         probe = _NameBatchProbe(batch, display, typed)
         _SearchMixin._on_name_filter_edited(probe)
@@ -1576,8 +1580,25 @@ def main():
                 in _method_body(search_source, "_prepare_live_search_context")
             and "criteria = self._capture_search_criteria(commit_rules=True)"
                 in _method_body(search_source, "_do_search")
-            and "self.after(200, self._prepare_live_search_context)"
-                in _method_body(search_source, "_update_search_filter_summary")),
+            and "int(delay_ms), self._prepare_live_search_context"
+                in _method_body(search_source, "_schedule_live_search_context")),
+        "discrete controls debounce shorter than free-text/numeric typing": (
+            # Clicking a checkbox/picker refreshes context snappily; typing in a
+            # text or numeric field coalesces on a longer debounce.
+            "_CONTEXT_DEBOUNCE_DISCRETE_MS" in search_source
+            and "_CONTEXT_DEBOUNCE_TYPING_MS" in search_source
+            and SearchFeatureMixin._CONTEXT_DEBOUNCE_DISCRETE_MS
+                < SearchFeatureMixin._CONTEXT_DEBOUNCE_TYPING_MS
+            and "self._CONTEXT_DEBOUNCE_DISCRETE_MS" in _method_body(
+                search_source, "_update_search_filter_summary")
+            and "self._CONTEXT_DEBOUNCE_TYPING_MS" in _method_body(
+                search_source, "_update_search_filter_summary_typing")
+            and "def _update_search_filter_summary_typing(" in search_source
+            # Free-text / numeric typing routes to the longer debounce.
+            and "self._update_search_filter_summary_typing()" in _method_body(
+                search_source, "_on_name_filter_edited")
+            and "change_command=self._update_search_filter_summary_typing"
+                in search_source),
         "live context covers every existing search dimension without adding one": (
             all(name in SearchContextSnapshot.__dataclass_fields__ for name in (
                 "card_type_counts", "supertype_counts", "subtype_counts",

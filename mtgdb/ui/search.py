@@ -886,7 +886,7 @@ class SearchFeatureMixin:
         rules_box.columnconfigure(0, weight=1)
         self.q_rules = TokenBubbleEntry(
             rules_box, search_command=self._do_search,
-            change_command=self._update_search_filter_summary)
+            change_command=self._update_search_filter_summary_typing)
         self.q_rules.grid(row=0, column=0, sticky="ew")
         self._bind_editable_focus_behavior(self.q_rules.entry)
         self._add_tooltip(
@@ -946,13 +946,13 @@ class SearchFeatureMixin:
                 widget, f"{filter_help}\n\n{self.RANGE_BOUNDS_HELP}", wraplength=410)
             widget.bind(
                 "<KeyRelease>",
-                lambda _event: self._update_search_filter_summary(), add="+")
+                lambda _event: self._update_search_filter_summary_typing(), add="+")
             widget.bind(
                 "<ButtonRelease-1>",
-                lambda _event: self._update_search_filter_summary(), add="+")
+                lambda _event: self._update_search_filter_summary_typing(), add="+")
             widget.bind(
                 "<FocusOut>",
-                lambda _event: self._update_search_filter_summary(), add="+")
+                lambda _event: self._update_search_filter_summary_typing(), add="+")
         setattr(self, f"{attribute_prefix}_min", low)
         setattr(self, f"{attribute_prefix}_max", high)
         return box
@@ -1268,13 +1268,13 @@ class SearchFeatureMixin:
         self.q_pip_min.insert(0, "1")
         self.q_pip_min.bind(
             "<KeyRelease>",
-            lambda _event: self._update_search_filter_summary(), add="+")
+            lambda _event: self._update_search_filter_summary_typing(), add="+")
         self.q_pip_min.bind(
             "<ButtonRelease-1>",
-            lambda _event: self._update_search_filter_summary(), add="+")
+            lambda _event: self._update_search_filter_summary_typing(), add="+")
         self.q_pip_min.bind(
             "<FocusOut>",
-            lambda _event: self._update_search_filter_summary(), add="+")
+            lambda _event: self._update_search_filter_summary_typing(), add="+")
         ttk.Label(
             row, text="total selected symbols", style="Muted.TLabel").grid(
                 row=0, column=2, sticky="w", padx=(SECONDARY_HELPER_GAP, 0))
@@ -2006,7 +2006,8 @@ class SearchFeatureMixin:
                 self.q_name.get().strip() != self._search_name_batch_display):
             self._search_name_batch = ()
             self._search_name_batch_display = ""
-        self._update_search_filter_summary()
+        # Name is free-text (worker fallback); coalesce keystrokes.
+        self._update_search_filter_summary_typing()
 
     def _set_exact_name_batch(self, names):
         clean = []
@@ -2918,12 +2919,28 @@ class SearchFeatureMixin:
         self._do_search()
         return True
 
-    def _update_search_filter_summary(self):
-        """Debounce a live draft-facet refresh after any existing filter changes.
+    # Discrete controls (checkboxes, mode toggles, pickers) commit one value per
+    # click, so they refresh live context on a short debounce for a snappy feel.
+    # Free-text and numeric typing use a longer debounce so a multi-character
+    # edit coalesces into one refresh instead of thrashing per keystroke (and
+    # text/mana-symbol-minimum criteria still fall back to the slower worker).
+    _CONTEXT_DEBOUNCE_DISCRETE_MS = 90
+    _CONTEXT_DEBOUNCE_TYPING_MS = 200
 
-        Results remain manual: this schedules only Tk-free context analysis. A
-        later filter change invalidates the visible snapshot immediately, and
-        the latest-wins context worker cancels stale SQLite work.
+    def _update_search_filter_summary(self):
+        """Debounce a live context refresh after a discrete filter change."""
+        return self._schedule_live_search_context(self._CONTEXT_DEBOUNCE_DISCRETE_MS)
+
+    def _update_search_filter_summary_typing(self):
+        """Debounce a live context refresh after free-text / numeric typing."""
+        return self._schedule_live_search_context(self._CONTEXT_DEBOUNCE_TYPING_MS)
+
+    def _schedule_live_search_context(self, delay_ms):
+        """Schedule one latest-wins Tk-free context analysis after ``delay_ms``.
+
+        Results remain manual: this schedules only context analysis. A later
+        filter change invalidates the visible snapshot immediately, and the
+        latest-wins context worker cancels stale SQLite work.
         """
         self._context_snapshot = None
         self._context_applied_criteria = None
@@ -2934,7 +2951,8 @@ class SearchFeatureMixin:
             except tk.TclError:
                 pass
         try:
-            self._context_debounce_after = self.after(200, self._prepare_live_search_context)
+            self._context_debounce_after = self.after(
+                int(delay_ms), self._prepare_live_search_context)
         except tk.TclError:
             self._context_debounce_after = None
         return None
