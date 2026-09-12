@@ -28,6 +28,7 @@ from mtgdb.ui.card_detail import (
 from mtgdb.ui.tokens import (
     CARD_ZOOM_WINDOW_MIN_SIZE, RESULT_GALLERY_CARD_MAX_WIDTH,
     RESULT_GALLERY_CARD_MIN_WIDTH, RESULT_GALLERY_CARD_TARGET_WIDTH,
+    RESULT_GALLERY_GAP,
     RESULT_GALLERY_MAX_COLUMNS,
     RESULT_GALLERY_MAX_VISIBLE_ROWS,
 )
@@ -388,21 +389,49 @@ def main():
                 <= RESULT_GALLERY_MAX_COLUMNS * RESULT_GALLERY_MAX_VISIBLE_ROWS
             and results_gallery_layout_metrics(1240, 860, 320)["slot_count"]
                 < results_gallery_layout_metrics(1240, 860, 140)["slot_count"]
-            # Cards fill the row: image_w stays within the min/max art size, a
-            # larger target yields a larger (or equal) filled card, and the row
-            # spans nearly the whole viewport (no big dead space on the right).
+            # Card art is shown at the slider's exact per-pixel width (continuous
+            # scaling, live-resampled while dragging), clamped to the min/max art
+            # size; the column count is how many fit and the grid is centred so
+            # the leftover is a small balanced margin, never one wide gutter.
             and RESULT_GALLERY_CARD_MIN_WIDTH
                 <= results_gallery_layout_metrics(1240, 860, 320)["image_w"]
                 <= RESULT_GALLERY_CARD_MAX_WIDTH
+            # Card width tracks the slider per pixel: distinct positions give
+            # distinct sizes (not a handful of banded sizes), the width never
+            # exceeds the requested target, and it never decreases as the target
+            # grows.
+            and len({results_gallery_layout_metrics(1240, 860, t)["image_w"]
+                     for t in range(160, 341, 20)}) >= 8
+            and all(results_gallery_layout_metrics(1240, 860, t)["image_w"] <= t
+                    for t in range(160, 341, 20))
+            and all(results_gallery_layout_metrics(1240, 860, t + 20)["image_w"]
+                    >= results_gallery_layout_metrics(1240, 860, t)["image_w"]
+                    for t in range(160, 341, 20))
             and results_gallery_layout_metrics(1240, 860, 360)["image_w"]
                 >= results_gallery_layout_metrics(1240, 860, 140)["image_w"]
             and results_gallery_layout_metrics(1240, 860, 1)["image_w"]
                 >= RESULT_GALLERY_CARD_MIN_WIDTH
             and results_gallery_layout_metrics(1240, 860, 9999)["image_w"]
                 <= RESULT_GALLERY_CARD_MAX_WIDTH
+            # Cards still use the width: the centred remainder is under one card,
+            # so the row is not padded into wide gutters with a few big cards.
             and (results_gallery_layout_metrics(1240, 860, 320)["columns"]
                  * results_gallery_layout_metrics(1240, 860, 320)["image_w"]
                  >= 1240 - RESULT_GALLERY_CARD_MAX_WIDTH)
+            and results_gallery_layout_metrics(1240, 860, 320)["margin_x"] >= 0
+            and 2 * results_gallery_layout_metrics(1240, 860, 320)["margin_x"]
+                < RESULT_GALLERY_CARD_MAX_WIDTH + RESULT_GALLERY_GAP
+            # Dragging the slider rescales the images already held rather than
+            # requesting a fresh size per pixel, and settles to crisp art on
+            # release; the source images are kept for that in-memory resample.
+            and 'from PIL import Image, ImageTk' in detail_source
+            and 'def _live_rescale_visible(' in gallery_source
+            and 'def _settle_card_size(' in gallery_source
+            and 'def _resettle_crisp(' in gallery_source
+            and 'Image.BILINEAR' in gallery_source
+            and 'self._scale_dragging' in gallery_source
+            and 'self._pil_by_card' in gallery_source
+            and 'x = margin_x + column * (image_w + gap)' in gallery_source
             and 'transient=False, resizable=True' in gallery_source
             and 'self.top.resizable(True, True)' in gallery_source
             and 'text="Card Size"' in gallery_source

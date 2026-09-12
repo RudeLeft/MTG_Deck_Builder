@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import OrderedDict
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
@@ -38,8 +39,9 @@ from mtgdb.ui.tokens import (
 )
 
 try:
-    from PIL import ImageTk
+    from PIL import Image, ImageTk
 except Exception:
+    Image = None
     ImageTk = None
 
 
@@ -73,31 +75,22 @@ def results_gallery_layout_metrics(width, height, target_width=None):
     target = RESULT_GALLERY_CARD_TARGET_WIDTH if target_width is None else target_width
     target = max(RESULT_GALLERY_CARD_MIN_WIDTH,
                  min(RESULT_GALLERY_CARD_MAX_WIDTH, int(round(float(target)))))
-    # Cards fill the row instead of sitting at a fixed width with dead space on
-    # the right: the slider picks the column count whose resulting per-card width
-    # is closest to the requested target, and every card then stretches to share
-    # the full viewport width evenly.  Bounding the column count keeps the filled
-    # width within the min/max art size.
-    min_columns = max(1, math.ceil(
-        (viewport_width + gap) / (RESULT_GALLERY_CARD_MAX_WIDTH + gap)))
-    max_columns = max(1, (viewport_width + gap) // (RESULT_GALLERY_CARD_MIN_WIDTH + gap))
-    max_columns = min(max_columns, RESULT_GALLERY_MAX_COLUMNS)
-    min_columns = min(min_columns, max_columns)
-    # Map the slider position evenly across the achievable column range so the
-    # whole slider is useful: left (min target) = most columns/smallest cards,
-    # right (max target) = fewest columns/largest cards.  A raw pixel width would
-    # leave a large dead zone at the big end, where reducing the width further
-    # cannot drop the column count without overflowing the max art size.
-    span = max(1, RESULT_GALLERY_CARD_MAX_WIDTH - RESULT_GALLERY_CARD_MIN_WIDTH)
-    fraction = min(1.0, max(0.0, (target - RESULT_GALLERY_CARD_MIN_WIDTH) / span))
-    columns = max(min_columns, min(max_columns, int(round(
-        max_columns - fraction * (max_columns - min_columns)))))
-    image_width = max(
-        RESULT_GALLERY_CARD_MIN_WIDTH,
-        min(RESULT_GALLERY_CARD_MAX_WIDTH,
-            (viewport_width - (columns - 1) * gap) // columns))
+    # The card art follows the slider's per-pixel width so dragging scales it
+    # continuously (see the live-resample path in ``_ResultsGalleryWindow``)
+    # instead of jumping between column-quantised bands.  The column count is the
+    # count that best fits that width (nearest, not floor) and the width then
+    # shrinks a few pixels if needed so the row nearly fills the viewport: this
+    # keeps the leftover under one card at almost every size rather than padding
+    # a few big cards with a full card-width of dead gutter.  The tiny remainder
+    # is centred into balanced left/right margins.
+    columns = max(1, int(round((viewport_width + gap) / (target + gap))))
+    columns = min(columns, RESULT_GALLERY_MAX_COLUMNS)
+    available = max(1, (viewport_width - (columns - 1) * gap) // columns)
+    image_width = max(1, min(target, available))
     image_height = max(
         1, int(round(image_width * RESULT_GALLERY_CARD_ASPECT)))
+    margin_x = max(
+        0, (viewport_width - (columns * image_width + (columns - 1) * gap)) // 2)
     cell_height = image_height
     row_stride = cell_height + gap
     # One leading partial row plus one trailing partial row keeps the viewport
@@ -115,6 +108,7 @@ def results_gallery_layout_metrics(width, height, target_width=None):
         "cell_h": cell_height,
         "row_stride": row_stride,
         "gap": gap,
+        "margin_x": margin_x,
     }
 
 
@@ -228,6 +222,14 @@ class _ResultsGalleryWindow:
 
     RESIZE_DEBOUNCE_MS = 70
     IMAGE_POLL_MS = 30
+    # Coalesce slider motion to roughly one live rescale per frame so a fast drag
+    # does not queue a resample per pixel event.
+    PREVIEW_THROTTLE_MS = 16
+    # Bound the crisp source images kept for live resampling.  This is the
+    # on-screen working set (visible + a little scroll headroom), not the whole
+    # image cache, so a modest cap keeps every currently drawn card resamplable
+    # without duplicating the service's full processed cache.
+    LIVE_SOURCE_LIMIT = 160
     # Rows of card art to prepare just beyond the viewport in each direction, so
     # scrolling reaches already-cached images (applied synchronously) instead of
     # a "Loading image…" blink on first pass.
@@ -263,6 +265,14 @@ class _ResultsGalleryWindow:
         self._peek_window = None
         self._owner_click_binding = None
         self._last_prefetch_key = None
+        # Live card-size scaling: while the slider is dragged the gallery scales
+        # the crisp images it already holds instead of requesting new sizes (that
+        # would thrash the image cache per pixel), then settles to crisp art at
+        # the final size on release.  ``_pil_by_card`` is the bounded working set
+        # of source images (keyed by card identity) used for that fast resample.
+        self._scale_dragging = False
+        self._preview_after = None
+        self._pil_by_card = OrderedDict()
 
         self._build_shell()
         self.top.bind("<Button-1>", self._dismiss_peek_from_outside, add="+")
@@ -310,6 +320,13 @@ class _ResultsGalleryWindow:
             command=self._on_card_size_change,
         )
         self.card_size_scale.set(self._card_size)
+        # Track the drag so slider motion scales the held images live and only
+        # settles to crisp art when the button is released (or a keyboard/trough
+        # change lands, handled by the debounce in ``_on_card_size_change``).
+        self.card_size_scale.bind(
+            "<ButtonPress-1>", self._begin_card_size_drag, add="+")
+        self.card_size_scale.bind(
+            "<ButtonRelease-1>", self._end_card_size_drag, add="+")
         self.card_size_scale.pack(side="right", padx=(5, 15))
         tk.Label(
             header, text="Card Size", bg=PALETTE["surface"],
@@ -335,7 +352,8 @@ class _ResultsGalleryWindow:
             pass
 
     def close(self):
-        for attr in ("_image_after", "_resize_after", "_size_after"):
+        for attr in ("_image_after", "_resize_after", "_size_after",
+                     "_preview_after"):
             after_id = getattr(self, attr, None)
             if after_id is not None:
                 try:
@@ -346,6 +364,7 @@ class _ResultsGalleryWindow:
         self._image_generation += 1
         self._image_requests.clear()
         self._photos.clear()
+        self._pil_by_card.clear()
         if self._peek_window is not None:
             self._peek_window.close()
             self._peek_window = None
@@ -362,17 +381,35 @@ class _ResultsGalleryWindow:
         if getattr(self.owner, "_results_gallery_window", None) is self:
             self.owner._results_gallery_window = None
 
+    def _begin_card_size_drag(self, _event=None):
+        self._scale_dragging = True
+
+    def _end_card_size_drag(self, _event=None):
+        if not self._scale_dragging:
+            return
+        self._scale_dragging = False
+        # The final motion event may still be queued; settle after it drains so
+        # crisp art is requested for the exact width the slider came to rest at.
+        try:
+            self.top.after_idle(self._settle_card_size)
+        except tk.TclError:
+            self._settle_card_size()
+
     def _on_card_size_change(self, value):
-        # The slider is continuous (no size quantization); the fill layout maps
-        # it to a column count and only actually re-renders when that count
-        # changes, so dragging within a band is a cheap no-op rather than a
-        # per-pixel re-fetch.
+        # The card is drawn at the slider's exact pixel width, so scaling is
+        # continuous.  While dragging, the held images are resampled live (no new
+        # image requests -- that would thrash the cache per pixel); a keyboard or
+        # trough change with no drag settles straight to crisp art after a short
+        # debounce.
         try:
             size = float(value)
         except (TypeError, ValueError):
             return
         self._card_size = max(RESULT_GALLERY_CARD_MIN_WIDTH,
                               min(RESULT_GALLERY_CARD_MAX_WIDTH, size))
+        if self._scale_dragging:
+            self._schedule_preview()
+            return
         if self._size_after is not None:
             try:
                 self.top.after_cancel(self._size_after)
@@ -385,8 +422,253 @@ class _ResultsGalleryWindow:
 
     def _finish_card_size_change(self):
         self._size_after = None
-        if self._sync_layout(force=False):
+        self._settle_card_size()
+
+    def _schedule_preview(self):
+        if self._preview_after is not None:
+            return
+        try:
+            self._preview_after = self.top.after(
+                self.PREVIEW_THROTTLE_MS, self._run_preview)
+        except tk.TclError:
+            self._preview_after = None
+
+    def _run_preview(self):
+        self._preview_after = None
+        if self._apply_preview_layout():
+            self._live_rescale_visible()
+
+    def _apply_preview_layout(self):
+        """Adopt the layout for the current slider width without new requests.
+
+        Returns True when the geometry changed so the visible cells need
+        repositioning and live rescaling.
+        """
+        try:
+            width = max(1, self.viewport.winfo_width())
+            height = max(1, self.viewport.winfo_height())
+        except tk.TclError:
+            return False
+        if width <= 1 or height <= 1:
+            width, height = RESULT_GALLERY_WINDOW_SIZE
+        new_layout = results_gallery_layout_metrics(
+            width, height, target_width=self._card_size)
+        if new_layout == self._layout:
+            return False
+        self._reproject_scroll(self._layout, new_layout)
+        self._layout = new_layout
+        self._clamp_scroll_y()
+        return True
+
+    def _settle_card_size(self):
+        # Lock the final geometry and request crisp art at the exact resting
+        # width.  The live-resampled previews stay on screen until each crisp
+        # image resolves, so settling does not flash the grid back to loading.
+        if self._preview_after is not None:
+            try:
+                self.top.after_cancel(self._preview_after)
+            except tk.TclError:
+                pass
+            self._preview_after = None
+        # A live preview already advanced ``_layout`` to (near) the final size, so
+        # force the sync: recompute for the exact resting width and reproject the
+        # scroll even when the dict compares equal.
+        self._sync_layout(force=True)
+        self._resettle_crisp()
+
+    def _visible_geometry(self):
+        """Return the shared per-slot placement inputs for the current layout.
+
+        ``_bind_visible`` keeps its own inline copy (its tested scroll path stays
+        untouched); the live-scale and settle passes use this so their placement
+        arithmetic cannot drift from the layout metrics.
+        """
+        columns = max(1, self._layout["columns"])
+        stride = max(1, self._layout["row_stride"])
+        self._clamp_scroll_y()
+        first_row = self._first_visible_row()
+        row_offset = int(round(self._scroll_y - first_row * stride))
+        start = first_row * columns
+        count = self._total_count()
+        end = min(count, start + self._layout["slot_count"])
+        targets = {}
+        for position in range(start, end):
+            targets[self._slot_for_position(position)] = position
+        geom = {
+            "columns": columns,
+            "stride": stride,
+            "gap": self._layout["gap"],
+            "image_w": self._layout["image_w"],
+            "image_h": self._layout["image_h"],
+            "margin_x": self._layout.get("margin_x", 0),
+            "first_row": first_row,
+            "row_offset": row_offset,
+        }
+        return targets, geom, start, end, count
+
+    def _slot_geometry(self, position, geom):
+        absolute_row, column = divmod(position, geom["columns"])
+        x = geom["margin_x"] + column * (geom["image_w"] + geom["gap"])
+        y = (absolute_row - geom["first_row"]) * geom["stride"] - geom["row_offset"]
+        return x, y
+
+    def _live_rescale_visible(self):
+        """Scale the images already held to the current width, without requests.
+
+        Runs on every throttled slider frame while dragging: it repositions the
+        visible cells for the (possibly reflowed) column count and shows a fast
+        BILINEAR resample of each card's crisp source image, so the art grows and
+        shrinks smoothly between the crisp sizes.  A card that just scrolled or
+        reflowed into view and has no cached source yet simply shows its empty
+        cell until the drag settles and requests crisp art.
+        """
+        if Image is None or ImageTk is None:
+            return
+        count = self._total_count()
+        if not count:
+            return
+        self._ensure_gallery_slots(self._layout["slot_count"])
+        targets, geom, _start, _end, _count = self._visible_geometry()
+        image_w = geom["image_w"]
+        image_h = geom["image_h"]
+        for slot_index, slot in enumerate(self._slots):
+            position = targets.get(slot_index)
+            if position is None:
+                if slot.get("position") is not None:
+                    slot["position"] = None
+                    slot["card"] = {}
+                    slot["pil"] = None
+                    self._photos.pop(slot_index, None)
+                    try:
+                        slot["cell"].place_forget()
+                        slot["image"].configure(image="", text="")
+                    except tk.TclError:
+                        pass
+                continue
+            if slot.get("position") != position:
+                try:
+                    card = dict(self._card_at_fn(position) or {})
+                except Exception:
+                    card = {}
+                slot["card"] = card
+                slot["position"] = position
+                slot["pil"] = self._source_for_card(card)
+                self._image_requests.pop(slot_index, None)
+            x, y = self._slot_geometry(position, geom)
+            try:
+                slot["cell"].place(
+                    x=x, y=y, width=image_w, height=image_h, anchor="nw")
+                slot["image_box"].configure(width=image_w, height=image_h)
+            except tk.TclError:
+                pass
+            self._show_scaled(slot_index, slot, image_w, image_h)
+
+    def _resettle_crisp(self):
+        """Request crisp art for the resting size, keeping previews until ready.
+
+        Unlike ``_render`` this does not blank the grid to "Loading image…": each
+        visible cell keeps the resampled preview it is already showing and only
+        swaps to the freshly requested crisp image when that image resolves, so
+        releasing the slider never flashes the whole viewport back to loading.
+        """
+        count = self._total_count()
+        self._update_scrollbar()
+        if not count:
             self._render()
+            return
+        self._image_generation += 1
+        generation = self._image_generation
+        self._image_requests.clear()
+        self._last_prefetch_key = None
+        self._ensure_gallery_slots(self._layout["slot_count"])
+        targets, geom, start, end, count = self._visible_geometry()
+        image_w = geom["image_w"]
+        image_h = geom["image_h"]
+        for slot_index, slot in enumerate(self._slots):
+            position = targets.get(slot_index)
+            if position is None:
+                if slot.get("position") is not None:
+                    slot["position"] = None
+                    slot["card"] = {}
+                    slot["pil"] = None
+                    self._photos.pop(slot_index, None)
+                    try:
+                        slot["cell"].place_forget()
+                        slot["image"].configure(image="", text="")
+                    except tk.TclError:
+                        pass
+                continue
+            if slot.get("position") != position:
+                try:
+                    card = dict(self._card_at_fn(position) or {})
+                except Exception:
+                    card = {}
+                slot["card"] = card
+                slot["position"] = position
+                slot["pil"] = self._source_for_card(card)
+            else:
+                card = slot.get("card") or {}
+            x, y = self._slot_geometry(position, geom)
+            image_label = slot["image"]
+            try:
+                slot["cell"].place(
+                    x=x, y=y, width=image_w, height=image_h, anchor="nw")
+                slot["image_box"].configure(width=image_w, height=image_h)
+            except tk.TclError:
+                pass
+            # Show the best resample we have right now so the cell is never blank
+            # while the crisp future is in flight; a cell with no source at all
+            # keeps whatever it held.
+            if slot.get("pil") is not None:
+                self._show_scaled(slot_index, slot, image_w, image_h)
+            self._queue_gallery_image(
+                slot_index, card, image_label, generation=generation)
+        self._prefetch_gallery_neighbors(start, end, count, geom["columns"])
+
+    def _show_scaled(self, slot_index, slot, image_w, image_h):
+        """Display a fast in-memory resample of a slot's crisp source image."""
+        label = slot["image"]
+        source = slot.get("pil")
+        if source is None:
+            return
+        try:
+            resized = source.resize(
+                (max(1, int(image_w)), max(1, int(image_h))), Image.BILINEAR)
+            photo = ImageTk.PhotoImage(resized)
+            self._photos[slot_index] = photo
+            label.configure(image=photo, text="", width=0, height=0)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _card_identity(card):
+        if not isinstance(card, dict):
+            return ""
+        return str(
+            card.get("id") or card.get("oracle_id") or card.get("name") or "")
+
+    def _source_for_card(self, card):
+        identity = self._card_identity(card)
+        if not identity:
+            return None
+        source = self._pil_by_card.get(identity)
+        if source is not None:
+            self._pil_by_card.move_to_end(identity)
+        return source
+
+    def _remember_source(self, slot_index, image):
+        try:
+            card = self._slots[slot_index].get("card")
+        except (IndexError, TypeError):
+            return
+        identity = self._card_identity(card)
+        if not identity:
+            return
+        cache = self._pil_by_card
+        cache[identity] = image
+        cache.move_to_end(identity)
+        while len(cache) > self.LIVE_SOURCE_LIMIT:
+            cache.popitem(last=False)
 
     def _on_viewport_configure(self, _event=None):
         if self._resize_after is not None:
@@ -418,22 +700,24 @@ class _ResultsGalleryWindow:
         old_layout = self._layout
         if not force and new_layout == old_layout:
             return False
+        self._reproject_scroll(old_layout, new_layout)
+        self._layout = new_layout
+        self._clamp_scroll_y()
+        return True
 
+    def _reproject_scroll(self, old_layout, new_layout):
+        """Keep the same top card in view when the column count/stride changes."""
         old_columns = max(1, old_layout.get("columns", 1))
         old_stride = max(1, old_layout.get(
             "row_stride", old_layout.get("cell_h", 1) + old_layout.get("gap", 0)))
         old_first_row = int(max(0.0, self._scroll_y) // old_stride)
         old_row_fraction = (max(0.0, self._scroll_y) % old_stride) / old_stride
         first_position = old_first_row * old_columns
-
-        self._layout = new_layout
         new_columns = max(1, new_layout["columns"])
         new_stride = max(1, new_layout["row_stride"])
         new_first_row = first_position // new_columns
         self._scroll_y = (
             new_first_row * new_stride + old_row_fraction * new_stride)
-        self._clamp_scroll_y()
-        return True
 
     def _total_count(self):
         try:
@@ -572,6 +856,7 @@ class _ResultsGalleryWindow:
         for slot in self._slots:
             slot["position"] = None
             slot["card"] = {}
+            slot["pil"] = None
             try:
                 slot["cell"].place_forget()
                 slot["image"].configure(image="", text="")
@@ -606,6 +891,7 @@ class _ResultsGalleryWindow:
                     continue
                 slot["position"] = None
                 slot["card"] = {}
+                slot["pil"] = None
                 try:
                     slot["cell"].place_forget()
                     slot["image"].configure(image="", text="")
@@ -618,6 +904,7 @@ class _ResultsGalleryWindow:
         gap = self._layout["gap"]
         image_w = self._layout["image_w"]
         image_h = self._layout["image_h"]
+        margin_x = self._layout.get("margin_x", 0)
         self._clamp_scroll_y()
         first_row = self._first_visible_row()
         row_offset = int(round(self._scroll_y - first_row * stride))
@@ -635,6 +922,7 @@ class _ResultsGalleryWindow:
                 if slot.get("position") is not None:
                     slot["position"] = None
                     slot["card"] = {}
+                    slot["pil"] = None
                     self._image_requests.pop(slot_index, None)
                     self._photos.pop(slot_index, None)
                     try:
@@ -645,7 +933,7 @@ class _ResultsGalleryWindow:
                 continue
             absolute_row, column = divmod(position, columns)
             relative_row = absolute_row - first_row
-            x = column * (image_w + gap)
+            x = margin_x + column * (image_w + gap)
             y = relative_row * stride - row_offset
             if slot.get("position") == position:
                 # Same card already displayed here: just slide the cell.
@@ -726,7 +1014,7 @@ class _ResultsGalleryWindow:
             image_label.pack(fill="both", expand=True)
             slot = {
                 "cell": cell, "image_box": image_box, "image": image_label,
-                "card": {}, "position": None,
+                "card": {}, "position": None, "pil": None,
             }
             slot_index = len(self._slots)
             image_label.bind(
@@ -810,8 +1098,16 @@ class _ResultsGalleryWindow:
         if generation != self._image_generation:
             return
         try:
-            photo = ImageTk.PhotoImage(future.result())
+            image = future.result()
+            photo = ImageTk.PhotoImage(image)
             self._photos[slot] = photo
+            # Keep the crisp source so a slider drag can rescale it in-memory
+            # instead of requesting a fresh size for every pixel of travel.
+            try:
+                self._slots[slot]["pil"] = image
+            except (IndexError, TypeError):
+                pass
+            self._remember_source(slot, image)
             label.configure(image=photo, text="", width=0, height=0)
         except Exception:
             try:
