@@ -2023,12 +2023,37 @@ class SearchFeatureMixin:
             self._search_name_batch_display = ""
         return value, ()
 
+    def _catalog_request_signature(self):
+        """Scope inputs that decide the trusted-catalog snapshot's content.
+
+        Clearing filters usually leaves this unchanged (the scope was already at
+        the default), so the catalog need not be rebuilt -- only the visible
+        selection is reset.  A change here (content scope, platform, or set-type
+        selection) still forces one rebuild.
+        """
+        printing = getattr(self, "_search_printings", None)
+        content = tuple(sorted(self._selected_content_types()))
+        if printing is None:
+            return (content, True, (), (), ())
+        return (
+            content,
+            bool(printing.paper_only.get()),
+            tuple(sorted(printing.selected_games())),
+            tuple(sorted(printing.selected_set_types())),
+            tuple(sorted(printing.selected_set_codes())))
+
     def _clear_search(self):
         # Search Clear resets criteria and releases all highlighted source rows.
         # It deliberately leaves the comparison collection itself intact.
         # A Search clicked while trusted catalogs were loading is stale once the
         # user clears the form, so do not run it when that load later completes.
         self._pending_search_request = False
+        # Clearing rebuilds several controls; the scope-driven trusted catalog is
+        # rebuilt at most once, and only when the scope actually changed.  Any
+        # catalog refresh a reset would trigger is coalesced through this flag.
+        clear_scope_before = self._catalog_request_signature()
+        self._suppress_catalog_refresh = True
+        self._pending_catalog_refresh = False
         clear_highlights = getattr(self, "_clear_source_highlights", None)
         if callable(clear_highlights):
             clear_highlights()
@@ -2075,6 +2100,22 @@ class SearchFeatureMixin:
         }
         # Printings is now an Advanced row and was already cleared by its
         # owning reset above.
+        self._suppress_catalog_refresh = False
+        if self._pending_catalog_refresh and (
+                self._catalog_request_signature() != clear_scope_before):
+            # The scope genuinely changed (e.g. content scope or platform), so
+            # the trusted vocabulary must be rebuilt -- once, here.
+            self._refresh_search_catalogs()
+        else:
+            # Scope unchanged: skip the redundant catalog rebuild and just
+            # refresh the Printings summary so its button reflects the reset.
+            printings = getattr(self, "_search_printings", None)
+            if printings is not None:
+                try:
+                    printings._update_summary()
+                except Exception:
+                    log.debug("Printings summary refresh skipped", exc_info=True)
+        self._pending_catalog_refresh = False
         # Clearing can shorten what the rows display, so the Results viewport
         # would otherwise stay scrolled to wherever the taller panel had left
         # it. Return it to the first row along with the criteria.
@@ -2663,6 +2704,11 @@ class SearchFeatureMixin:
 
     def _refresh_search_catalogs(self, selected_set_types=None):
         """Request trusted vocabulary for the current scope without blocking Tk."""
+        if getattr(self, "_suppress_catalog_refresh", False):
+            # Coalesced during a multi-filter reset (Clear); the caller decides
+            # whether one rebuild is actually needed once the resets finish.
+            self._pending_catalog_refresh = True
+            return
         content = tuple(sorted(self._selected_content_types()))
         printing_filter = getattr(self, "_search_printings", None)
         paper_only = bool(printing_filter.paper_only.get()) if printing_filter else True

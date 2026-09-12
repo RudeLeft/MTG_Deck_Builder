@@ -1002,6 +1002,15 @@ def main():
         selected_pip, _FakeBoolVar(True), False)
 
     checks = {
+        "Clear coalesces catalog refresh and skips it when scope is unchanged": (
+            # Clearing filters must not rebuild the trusted catalog (and its
+            # chips) when the scope did not change -- that redundant rebuild was
+            # most of the Clear hang.
+            'if getattr(self, "_suppress_catalog_refresh", False):' in search_source
+            and "def _catalog_request_signature(" in search_source
+            and "clear_scope_before = self._catalog_request_signature()" in search_source
+            and "self._suppress_catalog_refresh = True" in search_source
+            and "self._catalog_request_signature() != clear_scope_before" in search_source),
         "Empty Type Line scopes show a labelled placeholder, not a blank gap": (
             # Emblems have no supertype; Art Series has neither supertype nor
             # card type. When the taxonomy is authoritative but the scope is
