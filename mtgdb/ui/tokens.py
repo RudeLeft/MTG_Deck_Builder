@@ -39,7 +39,20 @@ PALETTE = {
     # pulses between the two so the alerting text stays red the whole time
     # instead of dropping to another hue mid-pulse.
     "deck_bad_dim": "#6E2A24",
+    # "Working" status colours.  A brighter/dimmer gold pair the inline status
+    # pulse alternates between, so a busy indicator stays warm-gold the whole
+    # time and reads as working -- never the red used for errors/unavailable.
+    "working": "#E4C36A",
+    "working_dim": "#C39A4A",
 }
+
+# Inline "working" status timing (see ui.components.PulseStatus).  A status only
+# appears once work outlives THRESHOLD (so instant work never flashes), then
+# stays visible for at least MIN_DWELL (so it never blinks away), pulsing on the
+# PULSE interval.
+STATUS_THRESHOLD_MS = 300
+STATUS_MIN_DWELL_MS = 2500
+STATUS_PULSE_MS = 550
 
 MANA_NAMES = {
     "W": "White", "U": "Blue", "B": "Black", "R": "Red",

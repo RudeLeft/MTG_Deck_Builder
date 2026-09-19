@@ -165,6 +165,18 @@ def install_ui_styles(root):
                     foreground=p["deck_bad"], font=FONT_HELPER_BOLD)
     style.configure("SectionAlertDim.TLabel", background=p["surface"],
                     foreground=p["deck_bad_dim"], font=FONT_HELPER_BOLD)
+    # "Working" flash variants of the section heading and the muted status line.
+    # Same metrics as their idle style so a style swap never reflows the bar; the
+    # inline PulseStatus alternates bright/dim gold to read as busy (never the
+    # red reserved for errors).
+    style.configure("SectionWorking.TLabel", background=p["surface"],
+                    foreground=p["working"], font=FONT_HELPER_BOLD)
+    style.configure("SectionWorkingDim.TLabel", background=p["surface"],
+                    foreground=p["working_dim"], font=FONT_HELPER_BOLD)
+    style.configure("MutedWorking.TLabel", background=p["surface"],
+                    foreground=p["working"], font=FONT_HELPER)
+    style.configure("MutedWorkingDim.TLabel", background=p["surface"],
+                    foreground=p["working_dim"], font=FONT_HELPER)
     style.configure("PreviewCard.TLabel", background=p["surface"],
                     foreground=p["muted"], font=FONT_BODY)
     style.configure("PaneDivider.TSeparator", background=p["border"])

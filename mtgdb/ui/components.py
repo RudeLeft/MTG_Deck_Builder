@@ -1,6 +1,7 @@
 """Reusable, behavior-neutral UI components for MTG Deck Builder."""
 
 import logging
+import time
 import tkinter as tk
 import unicodedata
 from tkinter import ttk
@@ -19,9 +20,149 @@ from mtgdb.ui.tokens import (
     FONT_MICRO_BOLD,
     FONT_PANE_TITLE,
     PALETTE,
+    STATUS_MIN_DWELL_MS,
+    STATUS_PULSE_MS,
+    STATUS_THRESHOLD_MS,
 )
 
 log = logging.getLogger("mtg")
+
+
+class PulseStatus:
+    """Threshold + minimum-dwell + gold pulse for one inline status line.
+
+    Standardizes every "working" indicator so none of them flashes for a frame
+    and vanishes.  The owner supplies two render callbacks over a ttk label:
+
+    * ``set_working(text)`` -- paint the busy message (and make the line visible).
+    * ``restore_idle()`` -- repaint the line's normal content.
+
+    Behaviour:
+
+    * ``start(text)`` shows nothing until the work has run longer than
+      ``threshold_ms``; work that finishes first never flashes.
+    * Once shown, the line pulses between the bright/dim "working" styles and
+      stays up for at least ``dwell_ms`` before ``restore_idle`` runs, so a busy
+      cue is always readable.
+    * ``stop()`` restores the idle content -- immediately if the cue never
+      appeared, otherwise after the remaining dwell.
+
+    Timers are owned by the label, so they die with it; ``cancel()`` tears down
+    an in-flight indicator (e.g. when the surrounding view is reset).
+    """
+
+    def __init__(self, label, *, set_working, restore_idle,
+                 working_styles, threshold_ms=STATUS_THRESHOLD_MS,
+                 dwell_ms=STATUS_MIN_DWELL_MS, pulse_ms=STATUS_PULSE_MS,
+                 clock=None):
+        self._label = label
+        self._set_working = set_working
+        self._restore_idle = restore_idle
+        self._working_styles = tuple(working_styles)
+        self._threshold_ms = int(threshold_ms)
+        self._dwell_ms = int(dwell_ms)
+        self._pulse_ms = int(pulse_ms)
+        self._clock = clock or time.monotonic
+        self._text = ""
+        self._active = False
+        self._shown_at = None
+        self._pulse_step = 0
+        self._appear_after = None
+        self._pulse_after = None
+        self._hide_after = None
+
+    def _after(self, delay, callback):
+        try:
+            return self._label.after(int(delay), callback)
+        except tk.TclError:
+            return None
+
+    def _cancel(self, handle):
+        if handle is not None:
+            try:
+                self._label.after_cancel(handle)
+            except tk.TclError:
+                pass
+
+    def start(self, text):
+        """Begin (or update) a busy indicator for ``text``."""
+        self._text = str(text)
+        self._active = True
+        # A restart cancels any pending restore: we are busy again.
+        self._cancel(self._hide_after)
+        self._hide_after = None
+        if self._shown_at is not None:
+            # Already visible: just refresh the message in place.
+            try:
+                self._set_working(self._text)
+            except tk.TclError:
+                pass
+            return
+        if self._appear_after is not None:
+            return
+        self._appear_after = self._after(self._threshold_ms, self._appear)
+
+    def _appear(self):
+        self._appear_after = None
+        if not self._active:
+            return
+        self._shown_at = self._clock()
+        self._pulse_step = 0
+        try:
+            self._set_working(self._text)
+            self._label.configure(style=self._working_styles[0])
+        except tk.TclError:
+            return
+        self._pulse_after = self._after(self._pulse_ms, self._pulse)
+
+    def _pulse(self):
+        self._pulse_after = None
+        if self._shown_at is None:
+            return
+        self._pulse_step ^= 1
+        try:
+            self._label.configure(style=self._working_styles[self._pulse_step])
+        except tk.TclError:
+            return
+        self._pulse_after = self._after(self._pulse_ms, self._pulse)
+
+    def stop(self):
+        """End the busy state, honouring the minimum dwell if it was shown."""
+        self._active = False
+        if self._appear_after is not None:
+            # Never became visible (finished before the threshold): no flash.
+            self._cancel(self._appear_after)
+            self._appear_after = None
+            self._render_idle()
+            return
+        if self._shown_at is None:
+            self._render_idle()
+            return
+        elapsed_ms = (self._clock() - self._shown_at) * 1000.0
+        remaining = max(0, int(self._dwell_ms - elapsed_ms))
+        self._cancel(self._hide_after)
+        self._hide_after = self._after(remaining, self._hide)
+
+    def _hide(self):
+        self._hide_after = None
+        self._cancel(self._pulse_after)
+        self._pulse_after = None
+        self._shown_at = None
+        self._render_idle()
+
+    def _render_idle(self):
+        try:
+            self._restore_idle()
+        except tk.TclError:
+            pass
+
+    def cancel(self):
+        """Tear down any in-flight indicator without restoring content."""
+        self._active = False
+        self._shown_at = None
+        for name in ("_appear_after", "_pulse_after", "_hide_after"):
+            self._cancel(getattr(self, name))
+            setattr(self, name, None)
 
 
 def deck_board_label(board):

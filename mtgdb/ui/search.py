@@ -13,7 +13,7 @@ from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
     AppButton, AppCombobox, AppSpinbox, ClassicCheckbutton,
-    TokenBubbleEntry, format_display_name,
+    PulseStatus, TokenBubbleEntry, format_display_name,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.search_filters import (
@@ -1967,6 +1967,14 @@ class SearchFeatureMixin:
             parent, text="", style="Muted.TLabel", justify="left", wraplength=620)
         self._search_context_notice.pack(fill="x", pady=(0, 3))
         self._search_context_notice.pack_forget()
+        # Standardized "Updating…" cue for the live contextual recompute: it only
+        # appears when the recompute actually runs long (the worker fallback),
+        # never for the ~1 ms bitset path, and then stays readable.
+        self._context_status = PulseStatus(
+            self._search_context_notice,
+            set_working=self._show_context_notice_working,
+            restore_idle=self._render_context_notice,
+            working_styles=("MutedWorking.TLabel", "MutedWorkingDim.TLabel"))
 
         table = ttk.Frame(parent)
         self._results_table_frame = table
@@ -2273,6 +2281,9 @@ class SearchFeatureMixin:
         self._context_snapshot = None
         self._context_requested_criteria = None
         self._context_applied_criteria = None
+        status = getattr(self, "_context_status", None)
+        if status is not None:
+            status.cancel()
         controller = getattr(self, "search_context_controller", None)
         if controller is not None:
             controller.invalidate()
@@ -2471,23 +2482,37 @@ class SearchFeatureMixin:
         if printings is not None and hasattr(printings, "apply_context_snapshot"):
             printings.apply_context_snapshot(snapshot)
 
+        # The context notice is rendered through the "Updating…" status: if that
+        # cue was showing it stays up for its minimum dwell, then this snapshot's
+        # summary replaces it; otherwise the summary shows at once.
+        self._context_status.stop()
+
+    def _render_context_notice(self):
+        """Idle content of the context notice line (match count / suggestions)."""
         notice = getattr(self, "_search_context_notice", None)
         if notice is None:
             return
+        snapshot = getattr(self, "_context_snapshot", None)
+        criteria = getattr(self, "_context_applied_criteria", None)
+        try:
+            notice.configure(style="Muted.TLabel")
+        except tk.TclError:
+            pass
         text = ""
-        if snapshot.result_count == 0:
-            parts = []
-            for label, count in tuple(snapshot.suggestions or ())[:2]:
-                parts.append(f"remove {label} -> {count:,}")
-            for label, mode, count in tuple(snapshot.mode_suggestions or ())[:1]:
-                parts.append(f"{label} {mode} -> {count:,}")
-            text = "Current filters match 0 cards."
-            if parts:
-                text += " Try: " + " · ".join(parts) + "."
-        elif (getattr(self, "_active_search_signature", None)
-              != criteria.signature()):
-            text = f"Current filters match {snapshot.result_count:,} cards. Search to update Results."
-
+        if snapshot is not None and criteria is not None:
+            if snapshot.result_count == 0:
+                parts = []
+                for label, count in tuple(snapshot.suggestions or ())[:2]:
+                    parts.append(f"remove {label} -> {count:,}")
+                for label, mode, count in tuple(snapshot.mode_suggestions or ())[:1]:
+                    parts.append(f"{label} {mode} -> {count:,}")
+                text = "Current filters match 0 cards."
+                if parts:
+                    text += " Try: " + " · ".join(parts) + "."
+            elif (getattr(self, "_active_search_signature", None)
+                  != criteria.signature()):
+                text = (f"Current filters match {snapshot.result_count:,} cards. "
+                        "Search to update Results.")
         if text:
             notice.configure(text=text)
             table = getattr(self, "_results_table_frame", None)
@@ -2497,6 +2522,18 @@ class SearchFeatureMixin:
                 notice.pack(fill="x", pady=(0, 3))
         else:
             notice.pack_forget()
+
+    def _show_context_notice_working(self, text):
+        """Working state of the context notice line (styled by PulseStatus)."""
+        notice = getattr(self, "_search_context_notice", None)
+        if notice is None:
+            return
+        notice.configure(text=text)
+        table = getattr(self, "_results_table_frame", None)
+        if table is not None and table.winfo_exists():
+            notice.pack(fill="x", pady=(0, 3), before=table)
+        else:
+            notice.pack(fill="x", pady=(0, 3))
 
     def _request_search_context(self, criteria):
         controller = getattr(self, "search_context_controller", None)
@@ -2533,6 +2570,7 @@ class SearchFeatureMixin:
             return
         if event.kind == "error":
             log.warning("Search context analysis failed: %s", event.payload)
+            self._context_status.stop()
             return
         self._context_snapshot = event.payload
         self._context_applied_criteria = requested
@@ -2955,20 +2993,31 @@ class SearchFeatureMixin:
                 int(delay_ms), self._prepare_live_search_context)
         except tk.TclError:
             self._context_debounce_after = None
+        status = getattr(self, "_context_status", None)
+        if status is not None:
+            # Threshold-gated: only surfaces if the recompute outlives ~300 ms.
+            status.start("Updating…")
         return None
 
     def _prepare_live_search_context(self):
         self._context_debounce_after = None
+        status = getattr(self, "_context_status", None)
         if getattr(self, "_search_catalog_loading", False):
+            if status is not None:
+                status.stop()
             return
         repository = getattr(self, "search_repository", None)
         if repository is None or not repository.has_cards():
+            if status is not None:
+                status.stop()
             return
         try:
             criteria = self._capture_search_criteria(commit_rules=False)
         except (ValueError, tk.TclError):
             # Partial numeric edits such as '-' are allowed while typing. They
             # simply have no context snapshot until the field becomes valid.
+            if status is not None:
+                status.stop()
             return
         self._request_search_context(criteria)
 
