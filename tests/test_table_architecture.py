@@ -114,7 +114,7 @@ class _ResetHarness(TableInfrastructureMixin):
     def __init__(self):
         self.tree = _FakeTree()
         self._visible_columns = {
-            "results": ["cost", "rules", "collector"],
+            "results": ["cost", "rules", "set"],
             "main": list(TABLE_DEFAULTS["main"]),
             "side": list(TABLE_DEFAULTS["side"]),
         }
@@ -349,12 +349,13 @@ def main():
         and "_build_colors_filter_editor" in filter_source)
     from mtgdb.ui.tables import TABLE_COLUMNS as _TABLE_COLUMNS
     from mtgdb.ui.table_filters import COLUMN_FILTER_HELP
-    collector_has_no_popup = (
-        # Collector # is fully removed as a filter: its heading opens no popup
-        # (no command) and shows no filter/sort control, and the sort-only
-        # "none" machinery is gone.
-        'if key == "collector":' in table_source
-        and 'command=""' in table_source
+    collector_fully_removed = (
+        # Collector # is removed as a column entirely: not in the schema, not an
+        # available column in any view, not offered in the column chooser, and
+        # the old sort-only ("none") filter machinery is gone.
+        "collector" not in _TABLE_COLUMNS
+        and all("collector" not in available_columns(v)
+                for v in ("results", "main", "side"))
         and "collector" not in COLUMN_FILTER_HELP
         and 'return "none"' not in filter_source
         and 'if kind == "none":' not in filter_source)
@@ -373,8 +374,8 @@ def main():
             cost_filters_by_mana_symbol),
         "Colors column filters by colour pips with Any/All/None": (
             colors_filter_by_pips),
-        "Collector # heading has no filter or sort popup (fully removed)": (
-            collector_has_no_popup),
+        "Collector # is fully removed as a column": (
+            collector_fully_removed),
         "every column filter popup explains its purpose": (
             column_filter_help_present),
         "every column can be filtered by what its popup shows": (
@@ -398,7 +399,7 @@ def main():
              for key, value in TABLE_COLUMNS.items()} == {
                 "cost": ("Cost", 105), "qty": ("Qty", 48),
                 "name": ("Name", 240), "type": ("Type", 230),
-                "set": ("Set", 180), "collector": ("Collector #", 92),
+                "set": ("Set", 180),
                 "year": ("Year", 62), "ability": ("Ability", 170),
                 "rarity": ("Rarity", 78), "cmc": ("Mana Value", 92),
                 "power": ("Power", 68), "toughness": ("Toughness", 82),

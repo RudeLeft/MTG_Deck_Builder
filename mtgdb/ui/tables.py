@@ -20,7 +20,6 @@ TABLE_COLUMNS = {
     "name":      {"label": "Name",        "width": 240, "views": {"results", "main", "side"}},
     "type":      {"label": "Type",        "width": 230, "views": {"results", "main", "side"}},
     "set":       {"label": "Set",         "width": 180, "views": {"results", "main", "side"}},
-    "collector": {"label": "Collector #", "width": 92,  "views": {"results", "main", "side"}},
     "year":      {"label": "Year",        "width": 62,  "views": {"results", "main", "side"}},
     "ability":   {"label": "Ability",     "width": 170, "views": {"results", "main", "side"}},
     "rarity":    {"label": "Rarity",      "width": 78,  "views": {"results", "main", "side"}},
@@ -48,7 +47,7 @@ def table_column_minwidth(key):
         return 72
     return {
         "qty": 42, "rarity": 68, "name": 130, "type": 120,
-        "year": 50, "power": 56, "toughness": 68, "collector": 76,
+        "year": 50, "power": 56, "toughness": 68,
     }.get(key, 72)
 
 
@@ -162,11 +161,6 @@ class TableInfrastructureMixin:
         for key in available_columns(view):
             column_id = "#0" if key == "cost" else key
             label = TABLE_COLUMNS[key]["label"]
-            # Collector # has no filter or sort control: it is a plain heading
-            # with no popup, so it never shows filter/sort markers or a command.
-            if key == "collector":
-                tv.heading(column_id, text=label, anchor="w", command="")
-                continue
             if key in active_filters:
                 label += "  ●"
             if key == sort_column:
