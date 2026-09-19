@@ -204,6 +204,14 @@ def install_ui_styles(root):
         "SearchHover.Color.TCheckbutton",
         background=[("active", p["search_hover"])],
         foreground=[("disabled", p["muted"])])
+    # Mana pip checkbuttons inside the surface2 column-filter popup: match that
+    # background so each box does not paint a darker surface-coloured block.
+    style.configure("Filter.Color.TCheckbutton", background=p["surface2"],
+                    foreground=p["text"], font=FONT_BODY)
+    style.map(
+        "Filter.Color.TCheckbutton",
+        background=[("active", p["surface2"])],
+        foreground=[("disabled", p["muted"])])
     style.configure("TRadiobutton", background=p["surface"],
                     foreground=p["text"], font=FONT_BODY,
                     indicatorbackground=p["input"])

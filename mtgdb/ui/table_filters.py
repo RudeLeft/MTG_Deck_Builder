@@ -27,14 +27,13 @@ _COST_PIP_TOKENS = {
 }
 
 # One short line under each column filter's header explaining its purpose.
-# Collector # is sort-only, so its text describes sorting rather than filtering.
+# Collector # has no heading popup, so it needs no entry here.
 COLUMN_FILTER_HELP = {
     "cost": "Filter by the mana symbols in a card's cost.",
     "qty": "Filter by how many copies are in the deck.",
     "name": "Filter by card name.",
     "type": "Filter by type line, like Creature or Instant.",
     "set": "Filter by the set a card comes from.",
-    "collector": "Sort cards by collector number.",
     "year": "Filter by the year a card was released.",
     "ability": "Filter by keyword abilities, like Flying or Trample.",
     "rarity": "Filter by rarity — common, uncommon, rare, or mythic.",
@@ -76,10 +75,8 @@ class TableFilterMixin:
             # Card colours are best picked as pips with Any/All/None rather than
             # ticking every comma-joined colour combination.
             return "colors"
-        if key == "collector":
-            # Collector numbers are arbitrary per-set identifiers; filtering by
-            # them is not useful, so the heading offers sorting only.
-            return "none"
+        # Collector # has no heading popup at all (see _update_table_headings),
+        # so no filter kind is needed for it.
         if key in ("qty", "cmc", "power", "toughness", "year"):
             return "numeric"
         if key in ("rarity", "set", "ability"):
@@ -158,11 +155,6 @@ class TableFilterMixin:
         self._build_filter_sort_controls(outer, view, key)
 
         kind = self._filter_kind(key)
-        if kind == "none":
-            # Sort-only column (e.g. Collector #): no filter editor at all.
-            self._position_table_filter_popup(pop)
-            return
-
         tk.Frame(outer, bg=PALETTE["border"], height=1).pack(
             fill="x", pady=(0, 7))
 
@@ -351,7 +343,7 @@ class TableFilterMixin:
             group_vars[group] = variable
             image = image_for(group)
             kw = {"text": " " + label, "variable": variable,
-                  "style": "Color.TCheckbutton"}
+                  "style": "Filter.Color.TCheckbutton"}
             if image is not None:
                 kw["image"] = image
                 kw["compound"] = "left"

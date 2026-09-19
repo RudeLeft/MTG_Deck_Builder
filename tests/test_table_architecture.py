@@ -347,19 +347,24 @@ def main():
             {"colors": {"kind": "colors", "mode": "Any", "groups": {"C"}}})
         and "COLOR_FILTER_GROUP_LABELS" in filter_source
         and "_build_colors_filter_editor" in filter_source)
-    collector_is_sort_only = (
-        # The Collector # column is no longer filterable (sort-only heading).
-        _kind(object(), "collector") == "none"
-        and 'return "none"' in filter_source
-        and 'if kind == "none":' in filter_source)
     from mtgdb.ui.tables import TABLE_COLUMNS as _TABLE_COLUMNS
     from mtgdb.ui.table_filters import COLUMN_FILTER_HELP
+    collector_has_no_popup = (
+        # Collector # is fully removed as a filter: its heading opens no popup
+        # (no command) and shows no filter/sort control, and the sort-only
+        # "none" machinery is gone.
+        'if key == "collector":' in table_source
+        and 'command=""' in table_source
+        and "collector" not in COLUMN_FILTER_HELP
+        and 'return "none"' not in filter_source
+        and 'if kind == "none":' not in filter_source)
     column_filter_help_present = (
-        # Every filterable column heading shows a short purpose line, and the
-        # sort-only Collector # heading explains it sorts rather than filters.
-        all(key in COLUMN_FILTER_HELP for key in _TABLE_COLUMNS)
+        # Every column with a heading popup shows a short purpose line; Collector
+        # # has no popup, so it needs no entry.
+        all(key in COLUMN_FILTER_HELP
+            for key in _TABLE_COLUMNS if key != "collector")
+        and "collector" not in COLUMN_FILTER_HELP
         and "mana symbols" in COLUMN_FILTER_HELP["cost"]
-        and COLUMN_FILTER_HELP["collector"].lower().startswith("sort")
         and "COLUMN_FILTER_HELP.get(key)" in filter_source
         and "Scryfall" not in " ".join(COLUMN_FILTER_HELP.values()))
 
@@ -368,8 +373,8 @@ def main():
             cost_filters_by_mana_symbol),
         "Colors column filters by colour pips with Any/All/None": (
             colors_filter_by_pips),
-        "Collector # column is sort-only (filter removed)": (
-            collector_is_sort_only),
+        "Collector # heading has no filter or sort popup (fully removed)": (
+            collector_has_no_popup),
         "every column filter popup explains its purpose": (
             column_filter_help_present),
         "every column can be filtered by what its popup shows": (

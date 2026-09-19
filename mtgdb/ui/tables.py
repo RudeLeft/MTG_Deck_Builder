@@ -162,6 +162,11 @@ class TableInfrastructureMixin:
         for key in available_columns(view):
             column_id = "#0" if key == "cost" else key
             label = TABLE_COLUMNS[key]["label"]
+            # Collector # has no filter or sort control: it is a plain heading
+            # with no popup, so it never shows filter/sort markers or a command.
+            if key == "collector":
+                tv.heading(column_id, text=label, anchor="w", command="")
+                continue
             if key in active_filters:
                 label += "  ●"
             if key == sort_column:
