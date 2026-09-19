@@ -1021,7 +1021,31 @@ def main():
     SearchFeatureMixin._set_context_check_availability(
         selected_pip, _FakeBoolVar(True), False)
 
+    components_source = (ROOT / "mtgdb/ui/components.py").read_text(encoding="utf-8")
+    styles_source = (ROOT / "mtgdb/ui/styles.py").read_text(encoding="utf-8")
+    tokens_source = (ROOT / "mtgdb/ui/tokens.py").read_text(encoding="utf-8")
     checks = {
+        "inline working status is standardized through PulseStatus": (
+            # One reusable threshold + minimum-dwell + gold-pulse controller, used
+            # for both live-context "Updating…" and the RESULTS header states, so
+            # no status flashes for a frame or reads as the error red.
+            "class PulseStatus" in components_source
+            and "def start(self" in components_source
+            and "self._context_status = PulseStatus(" in search_source
+            and "self._results_status = PulseStatus(" in search_source
+            and 'working_styles=("MutedWorking.TLabel", "MutedWorkingDim.TLabel")'
+                in search_source
+            and 'working_styles=("SectionWorking.TLabel", "SectionWorkingDim.TLabel")'
+                in search_source
+            and 'status.start("Updating…")' in search_source
+            and 'self._results_status.start("RESULTS | Searching…")' in search_source
+            and all(name in styles_source for name in (
+                "SectionWorking.TLabel", "SectionWorkingDim.TLabel",
+                "MutedWorking.TLabel", "MutedWorkingDim.TLabel"))
+            and all(name in tokens_source for name in (
+                "STATUS_THRESHOLD_MS", "STATUS_MIN_DWELL_MS", "STATUS_PULSE_MS"))
+            # Gold, never the red reserved for errors/unavailable.
+            and '"working": "#E4C36A"' in tokens_source),
         "Clear coalesces catalog refresh and skips it when scope is unchanged": (
             # Clearing filters must not rebuild the trusted catalog (and its
             # chips) when the scope did not change -- that redundant rebuild was
