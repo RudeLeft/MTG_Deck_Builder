@@ -229,11 +229,27 @@ class _FakeBoolVar:
         return self.value
 
 
+class _FakeStatus:
+    """Stand-in for ui.components.PulseStatus: start() paints the label at once."""
+    def __init__(self, label):
+        self._label = label
+
+    def start(self, text):
+        self._label.configure(text=text)
+
+    def stop(self):
+        pass
+
+    def cancel(self):
+        pass
+
+
 class _LoadingSearchOwner:
     def __init__(self):
         self._search_catalog_loading = True
         self._pending_search_request = False
         self.results_count_lbl = _FakeLabel()
+        self._results_status = _FakeStatus(self.results_count_lbl)
         self.status = ""
 
     def _update_search_filter_summary(self):

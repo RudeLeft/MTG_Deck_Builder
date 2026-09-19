@@ -153,7 +153,10 @@ class SearchResultsMixin:
             self._apply_prepared_result_view()
             return
 
-        self._set_result_count(updating=True)
+        self._render_results_count()
+        status = getattr(self, "_results_status", None)
+        if status is not None:
+            status.start(f"{self._results_count_text()} · Updating…")
         self._result_view_worker.submit_view(
             store, self._table_filters["results"],
             sort_col=self._sort_col, sort_desc=self._sort_desc)
@@ -207,19 +210,30 @@ class SearchResultsMixin:
         self._update_comparison_bar()
         self._sync_results_gallery()
 
-    def _set_result_count(self, updating=False):
+    def _results_count_text(self):
         total = self._result_store.logical_count
         visible = self._result_store.visible_count
         filtered = bool(self._table_filters.get("results"))
         count = visible if filtered else total
-        text = f"RESULTS | {count:,} CARDS"
-        if updating:
-            text += " · Updating…"
+        return f"RESULTS | {count:,} CARDS"
+
+    def _render_results_count(self):
+        """Idle RESULTS header paint (the PulseStatus restore target)."""
         try:
-            self.results_count_lbl.configure(text=text)
+            self.results_count_lbl.configure(
+                text=self._results_count_text(), style="Section.TLabel")
         except (tk.TclError, AttributeError):
             pass
         self._sync_results_gallery_button()
+
+    def _set_result_count(self):
+        # Showing the count means "not working": end any working cue (honouring
+        # its minimum dwell) and paint the idle header.
+        status = getattr(self, "_results_status", None)
+        if status is not None:
+            status.stop()
+        else:
+            self._render_results_count()
 
     def _result_gallery_count(self):
         return self._result_store.visible_count

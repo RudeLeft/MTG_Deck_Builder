@@ -1954,6 +1954,13 @@ class SearchFeatureMixin:
         self.results_count_lbl = ttk.Label(
             result_head, text="RESULTS | 0 CARDS", style="Section.TLabel")
         self.results_count_lbl.pack(side="left")
+        # Standardized working cue for the RESULTS header (Updating…/Searching…/
+        # trusted-filter load): threshold-gated so a fast search never flashes.
+        self._results_status = PulseStatus(
+            self.results_count_lbl,
+            set_working=lambda text: self.results_count_lbl.configure(text=text),
+            restore_idle=self._render_results_count,
+            working_styles=("SectionWorking.TLabel", "SectionWorkingDim.TLabel"))
         results_columns_btn = AppButton(
             result_head, text="Edit Columns", role="compact",
             command=lambda: self._toggle_column_popup("results", results_columns_btn))
@@ -3442,7 +3449,7 @@ class SearchFeatureMixin:
             # Preserve one user Search intent across asynchronous trusted-catalog
             # preparation. The accepted latest snapshot resumes it exactly once.
             self._pending_search_request = True
-            self.results_count_lbl.configure(text="RESULTS | Trusted filters are loading…")
+            self._results_status.start("RESULTS | Trusted filters are loading…")
             self._status(
                 "Trusted Search filters are loading; Search will run automatically when ready.")
             return
@@ -3460,7 +3467,9 @@ class SearchFeatureMixin:
         try:
             criteria = self._capture_search_criteria(commit_rules=True)
         except ValueError as exc:
-            self.results_count_lbl.configure(text="RESULTS | Invalid search filter")
+            self._results_status.cancel()
+            self.results_count_lbl.configure(
+                text="RESULTS | Invalid search filter", style="Section.TLabel")
             self._status(str(exc))
             messagebox.showerror("Invalid Search Filter", str(exc))
             return
@@ -3479,7 +3488,7 @@ class SearchFeatureMixin:
             self._render_results()
             self._request_search_context(criteria)
             return
-        self.results_count_lbl.configure(text="RESULTS | Searching…")
+        self._results_status.start("RESULTS | Searching…")
         try:
             self._search_btn.state(["disabled"])
         except tk.TclError:
@@ -3518,7 +3527,9 @@ class SearchFeatureMixin:
 
         if event.kind == "error":
             log.error("Search failed: %s", event.payload)
-            self.results_count_lbl.configure(text="RESULTS | Search failed")
+            self._results_status.cancel()
+            self.results_count_lbl.configure(
+                text="RESULTS | Search failed", style="Section.TLabel")
             messagebox.showerror("Search error", event.payload)
             self._resume_pending_search_request()
             return
