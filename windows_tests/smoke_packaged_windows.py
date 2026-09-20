@@ -41,8 +41,10 @@ def seed_current_database(data_dir):
     Rules supertypes recorded, and a recent successful-sync timestamp.
     """
     from mtgdb.database.authorities import SCRYFALL_CATALOGS
+    from mtgdb.database.bulk_import import UNIVERSES_BEYOND_RULE
     from mtgdb.database.db import CardDB
-    from mtgdb.database.schema import RULES_SUPERTYPES_META_KEY
+    from mtgdb.database.schema import (
+        RULES_SUPERTYPES_META_KEY, UNIVERSES_BEYOND_META_KEY)
     from mtgdb.database.sync import DatabaseSyncService
 
     os.makedirs(data_dir, exist_ok=True)
@@ -62,6 +64,9 @@ def seed_current_database(data_dir):
         db.store_catalogs({name: ["Placeholder"] for name in SCRYFALL_CATALOGS})
         db.set_meta_many({
             RULES_SUPERTYPES_META_KEY: json.dumps(["Basic", "Legendary"]),
+            # due_reason() forces a classification_refresh until this marker
+            # matches the current rule, so a genuinely-current seed must set it.
+            UNIVERSES_BEYOND_META_KEY: UNIVERSES_BEYOND_RULE,
             "last_successful_sync_epoch": str(time.time()),
         })
         return DatabaseSyncService(db).due_reason()
