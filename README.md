@@ -73,14 +73,25 @@ the portable app in `dist/MTGDeckBuilder/`.
 
 ## Card data & legal
 
-Card data and imagery are provided by [Scryfall](https://scryfall.com) and are
-subject to Scryfall's and Wizards of the Coast's terms.
+**This is unofficial, fan-made software, provided as-is. Nothing here is legal
+advice, and you are responsible for how you use it.**
 
-This is an unofficial tool. It is **Fan Content** permitted under the
-[Wizards of the Coast Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy).
-It is not approved, endorsed, sponsored by, or affiliated with Wizards of the
-Coast. Magic: The Gathering, all card names and images, and related properties
-are trademarks of and © Wizards of the Coast LLC.
+Card data and imagery come from [Scryfall](https://scryfall.com). Magic: The
+Gathering, card names, and card art are the intellectual property of Wizards of
+the Coast; this project claims no ownership of them.
+
+**About printing proxies:** this tool can print card images for **personal,
+non-commercial use** — playtesting and casual games, ideally with cards you own.
+Please don't sell printed cards, misrepresent them as genuine, or use them in
+sanctioned tournaments or any venue that prohibits proxies. Wizards' Fan Content
+Policy does **not** authorize creating proxy cards, so personal proxies are
+strictly between you and the law in your area — use this feature responsibly and
+at your own risk.
+
+MTG Deck Builder is unofficial Fan Content permitted under the
+[Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). Not
+approved/endorsed by Wizards. Portions of the materials used are property of
+Wizards of the Coast. ©Wizards of the Coast LLC.
 
 ## License
 
