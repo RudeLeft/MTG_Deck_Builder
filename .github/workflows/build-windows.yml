@@ -19,6 +19,10 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # Needed only by the tag-triggered "Publish the GitHub Release" step below;
+    # the default token is read-only.
+    permissions:
+      contents: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -81,3 +85,71 @@ jobs:
             !dist/MTGDeckBuilder/data/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Build the source release zip
+        shell: pwsh
+        env:
+          SOURCE_ZIP: release_dist/MTG_Deck_Builder-${{ github.ref_name }}-source.zip
+        run: |
+          # Every release gate already ran in the steps above, so build the
+          # source zip by reusing package_release's membership rules and zipping
+          # directly instead of calling package_release.py (which would re-run
+          # the whole gate suite a second time).
+          @'
+          import os, zipfile
+          from pathlib import Path
+          import package_release as p
+          out = Path(os.environ["SOURCE_ZIP"]).resolve()
+          out.parent.mkdir(parents=True, exist_ok=True)
+          members = p.source_members(out)
+          p.validate_members(members)
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for rel in members:
+                  z.write(p.ROOT / rel, (Path(p.ARCHIVE_ROOT) / rel).as_posix())
+          p.validate_archive(out, expected_members=members)
+          print(f"SOURCE ZIP OK: {out} ({len(members)} files)")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package the portable app as a versioned zip
+        shell: pwsh
+        run: |
+          $zip = "release_dist/MTG_Deck_Builder-${{ github.ref_name }}-windows.zip"
+          Compress-Archive -Path "dist/MTGDeckBuilder" -DestinationPath $zip -CompressionLevel Optimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload the release zips as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MTGDeckBuilder-release-zips
+          path: release_dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the GitHub Release
+        # Only a version tag (v*) cuts a release; manual runs just leave the
+        # zips as workflow artifacts above.
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = @"
+          Portable desktop deck builder for Magic: The Gathering.
+
+          Downloads
+          - Windows app (no Python needed): MTG_Deck_Builder-$tag-windows.zip
+            Unzip, open the MTGDeckBuilder folder, run MTGDeckBuilder.exe. Keep the
+            folder together; it is fully portable and stores its data beside the app.
+          - Source (Python 3.11+): MTG_Deck_Builder-$tag-source.zip
+            Run: pip install .   then   python -m mtgdb
+
+          On first launch the app downloads current card data from Scryfall.
+          "@
+          gh release create "$tag" `
+            "release_dist/MTG_Deck_Builder-$tag-windows.zip" `
+            "release_dist/MTG_Deck_Builder-$tag-source.zip" `
+            --title "MTG Deck Builder $tag" `
+            --notes "$notes"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
