@@ -1886,6 +1886,10 @@ every feature together and is exempt.
   succeeds, then run the packaged smoke test after PyInstaller; a smoke failure
   fails the build and blocks cloud upload.
   The geometry gate does not certify Windows OS or per-monitor DPI behavior.
+  It is a local-build gate: the headless cloud runner (`GITHUB_ACTIONS`) skips
+  it because its DPI/font environment is not representative, while every local
+  build path (`build_windows.bat`, `package_release.py`) still runs it at all
+  three scales.
   _Verification:_ **WINDOWS**.
 - **BLD-007 — MUST:** Ship the packaged build as the program only. The
   packaged smoke test MUST remove `dist/MTGDeckBuilder/data` after it runs and
