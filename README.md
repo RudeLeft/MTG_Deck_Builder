@@ -31,7 +31,8 @@ On first launch it downloads current card data from [Scryfall](https://scryfall.
   format-legality checks.
 - **Comparison view** — line up multiple printings side by side at full art to
   pick your favorite.
-- **Proxy printing** to PDF with correct card geometry and cut guides.
+- **Proxy printing** to PDF — pulls Scryfall's high-resolution card PNGs so
+  printed cards stay crisp, laid out at the correct size with cut guides.
 - **Portable & private** — everything lives in one folder; nothing leaves your
   machine except card-data downloads from Scryfall.
 
@@ -50,6 +51,12 @@ Building a deck, with live mana curve, opening-hand draw odds, a sample hand, an
 format-legality checks:
 
 ![Deck building with mana curve, draw odds, and legality checks](assets/screenshots/deck-building.webp)
+
+Proxy sheets exported to PDF — the app pulls Scryfall's high-resolution card
+PNGs so the printed cards stay crisp, laid out at the correct size with cut
+guides for trimming:
+
+![A proxy sheet PDF: a grid of full-art cards with cut guides](assets/screenshots/proxy-print.webp)
 
 ## Build from source
 
