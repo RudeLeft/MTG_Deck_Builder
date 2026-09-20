@@ -1990,9 +1990,10 @@ every feature together and is exempt.
   archive and exits nonzero on any failed mandatory gate before the target is
   replaced. _Verification:_ **AUTO**.
 - **REL-002 — MUST:** Include source (`mtgdb/`), build config, assets, tests,
-  `pyproject.toml`, `.gitignore`, `.gitattributes`, `AGENTS.md`, and `README.md`
-  in a source release, with `AGENTS.md` and `README.md` the only documentation
-  members. _Verification:_ **AUTO**.
+  `pyproject.toml`, `.gitignore`, `.gitattributes`, `LICENSE`, `AGENTS.md`, and
+  `README.md` in a source release, with `AGENTS.md` and `README.md` the only
+  documentation members (`LICENSE` is the license grant, not documentation).
+  _Verification:_ **AUTO**.
 - **REL-003 — MUST NOT:** Include `requirements.txt`, a documentation file other
   than `AGENTS.md` and `README.md`, `__pycache__`, `.pyc`, `.pytest_cache`,
   `build`, `dist`, `build-venv`, local `data`, logs, databases, cached images,

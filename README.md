@@ -61,5 +61,6 @@ are trademarks of and © Wizards of the Coast LLC.
 
 ## License
 
-This project does not yet declare an open-source license, so it is
-"all rights reserved" by default. A license may be added in a future release.
+Released under the [MIT License](LICENSE) — do whatever you like with the code,
+just keep the copyright notice. The license covers this project's own source
+only, not Magic: The Gathering card data or imagery (see above).
