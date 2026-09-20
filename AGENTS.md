@@ -472,9 +472,10 @@ every feature together and is exempt.
 
 ## Single-document policy
 
-- **DOC-001 — MUST:** Keep `AGENTS.md` as the one and only project
-  documentation file in the source tree and every source-release archive.
-  _Verification:_ **AUTO**.
+- **DOC-001 — MUST:** Keep `AGENTS.md` as the one and only project contract
+  documentation file, and a single top-level `README.md` as the one and only
+  user-facing document, in the source tree and every source-release archive.
+  No other documentation file is permitted. _Verification:_ **AUTO**.
 - **DOC-002 — MUST:** Limit this file to current rules, architecture, ownership,
   navigation, invariants, and verification. _Verification:_ **REVIEW**.
 - **DOC-003 — MUST NOT:** Turn this file into a changelog, work log, audit,
@@ -482,12 +483,15 @@ every feature together and is exempt.
   establishes this: the guardrail suite can confirm the prohibition is written
   down, which is not the same as confirming the document obeys it, so the
   reviewer states the result. _Verification:_ **REVIEW**.
-- **DOC-004 — MUST NOT:** Create README, CHANGELOG, ROADMAP, NOTES, TODO,
-  CONTRIBUTING, nested agent instructions, or any other documentation file.
-  _Verification:_ **AUTO**.
+- **DOC-004 — MUST NOT:** Create CHANGELOG, ROADMAP, NOTES, TODO, CONTRIBUTING,
+  nested agent instructions, or any documentation file other than `AGENTS.md`
+  and the single top-level `README.md`. The `README.md` is user-facing only
+  (what the app is, how to get and run it, build-from-source, data/legal); it is
+  not a changelog or work log. _Verification:_ **AUTO**.
 - **DOC-005 — MUST NOT:** Add project documentation with `.md`, `.markdown`,
   `.rst`, `.adoc`, `.txt`, `.pdf`, `.doc`, `.docx`, `.odt`, or `.rtf`
-  extensions. `AGENTS.md` is the sole exception. _Verification:_ **AUTO**.
+  extensions. `AGENTS.md` and a single top-level `README.md` are the only
+  exceptions. _Verification:_ **AUTO**.
 - **DOC-006 — MAY:** Keep comments and docstrings inside source, and let the
   running app read/write user-selected deck `.txt` files and generated PDFs.
   _Verification:_ **AUTO**.
@@ -1986,13 +1990,13 @@ every feature together and is exempt.
   archive and exits nonzero on any failed mandatory gate before the target is
   replaced. _Verification:_ **AUTO**.
 - **REL-002 — MUST:** Include source (`mtgdb/`), build config, assets, tests,
-  `pyproject.toml`, `.gitignore`, `.gitattributes`, and `AGENTS.md` in a source
-  release, with `AGENTS.md` the only documentation member.
-  _Verification:_ **AUTO**.
-- **REL-003 — MUST NOT:** Include `requirements.txt`, another documentation file,
-  `__pycache__`, `.pyc`, `.pytest_cache`, `build`, `dist`, `build-venv`, local
-  `data`, logs, databases, cached images, generated PDFs, or another ZIP.
-  _Verification:_ **AUTO**.
+  `pyproject.toml`, `.gitignore`, `.gitattributes`, `AGENTS.md`, and `README.md`
+  in a source release, with `AGENTS.md` and `README.md` the only documentation
+  members. _Verification:_ **AUTO**.
+- **REL-003 — MUST NOT:** Include `requirements.txt`, a documentation file other
+  than `AGENTS.md` and `README.md`, `__pycache__`, `.pyc`, `.pytest_cache`,
+  `build`, `dist`, `build-venv`, local `data`, logs, databases, cached images,
+  generated PDFs, or another ZIP. _Verification:_ **AUTO**.
 - **REL-007 — MUST:** Enforce a membership ceiling as well as a floor.
   `REQUIRED_RELEASE_MEMBERS` proves a release is complete; it does not prove it
   is clean. `package_release.py` MUST additionally reject any root-level file

@@ -19,6 +19,10 @@ DOCUMENT_SUFFIXES = {
     ".asciidoc", ".doc", ".docx", ".odt", ".pdf", ".rtf",
 }
 ALLOWED_DOCUMENT = Path("AGENTS.md")
+# AGENTS.md is the contract document; README.md is the single user-facing doc for
+# the public repository (DOC-001).  These are the only documentation members a
+# release may carry.
+ALLOWED_DOCUMENTS = {ALLOWED_DOCUMENT, Path("README.md")}
 EXCLUDED_DIRECTORY_NAMES = {
     ".git", ".pytest_cache", "__pycache__", "build", "build-venv",
     "data", "dist",
@@ -98,6 +102,7 @@ REQUIRED_RELEASE_MEMBERS = {
     Path("mtgdb/ui/workspace.py"),
     Path("mtgdb/workspace/__init__.py"),
     Path("mtgdb/workspace/repository.py"),
+    Path("README.md"),
     Path("package_release.py"),
     Path("pyproject.toml"),
     Path("tests/test_background_jobs_architecture.py"),
@@ -124,6 +129,7 @@ ALLOWED_ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
     Path("AGENTS.md"),
+    Path("README.md"),
     Path("MTGDeckBuilder.spec"),
     Path("build_windows.bat"),
     Path("package_release.py"),
@@ -177,7 +183,7 @@ def unauthorized_documents(paths):
     for path in paths:
         if path.suffix.casefold() not in DOCUMENT_SUFFIXES:
             continue
-        if path.as_posix() != ALLOWED_DOCUMENT.as_posix():
+        if path not in ALLOWED_DOCUMENTS:
             failures.append(path)
     return failures
 

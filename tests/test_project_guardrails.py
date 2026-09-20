@@ -555,7 +555,7 @@ def main():
 
     checks = {
         "AGENTS.md exists": agent_path.is_file(),
-        "AGENTS.md is the only project documentation": not unauthorized,
+        "only AGENTS.md and README are project documentation": not unauthorized,
         "every bullet is an identified normative rule": (
             bool(rule_blocks) and all(rule_matches)),
         "rule identifiers are unique": len(rule_ids) == len(set(rule_ids)),
@@ -569,8 +569,10 @@ def main():
         "rules avoid lowercase normative language": not lowercase_normative_rules,
         "single-document authority is explicit": (
             re.search(
-                r"one and only project\s+documentation file", agent_text)
-            is not None),
+                r"one and only project contract\s+documentation file", agent_text)
+            is not None
+            and re.search(
+                r"one and only\s+user-facing document", agent_text) is not None),
         "changelog use is explicitly prohibited": (
             "MUST NOT:** Turn this file into a changelog" in agent_text),
         "live Search applicability rules cover every dynamic range and mana distinction": (
