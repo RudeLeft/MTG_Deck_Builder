@@ -644,6 +644,15 @@ class _ResultsGalleryWindow:
                 slot["position"] = position
                 slot["pil"] = self._source_for_card(card)
                 self._image_requests.pop(slot_index, None)
+                # This slot just took a different card. If we have no cached
+                # source for it, blank the label rather than leave the previous
+                # card's art showing until the drag settles.
+                if slot["pil"] is None:
+                    self._photos.pop(slot_index, None)
+                    try:
+                        slot["image"].configure(image="", text="")
+                    except tk.TclError:
+                        pass
             x, y = self._slot_geometry(position, geom)
             try:
                 slot["cell"].place(
@@ -1224,13 +1233,19 @@ class _ResultsGalleryWindow:
         if not card:
             return False
         self._image_retries[slot] = True
-        def _again(slot=slot, label=label, card=card, generation=generation):
+        identity = self._card_identity(card)
+        def _again(slot=slot, label=label, card=card, generation=generation,
+                   identity=identity):
             if generation != self._image_generation:
                 return
             try:
-                if self._slots[slot].get("position") is None:
-                    return
+                current = self._slots[slot].get("card")
             except (IndexError, TypeError):
+                return
+            # A scroll can rebind this slot to a different card without bumping
+            # the generation, so re-check identity: never repaint the old card's
+            # art over whatever the slot now shows.
+            if current is None or self._card_identity(current) != identity:
                 return
             self._queue_gallery_image(slot, card, label, generation=generation)
         try:
