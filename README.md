@@ -35,6 +35,22 @@ On first launch it downloads current card data from [Scryfall](https://scryfall.
 - **Portable & private** — everything lives in one folder; nothing leaves your
   machine except card-data downloads from Scryfall.
 
+## Screenshots
+
+Search and browse the full card pool, with a live gallery preview and a deck
+panel showing composition, mana curve, and draw odds:
+
+![The main window: search filters, results table, card preview, and deck panel](assets/screenshots/main-window.webp)
+
+The full-art results gallery, with an adjustable card size:
+
+![Results gallery of full-art cards](assets/screenshots/results-gallery.webp)
+
+Building a deck, with live mana curve, opening-hand draw odds, a sample hand, and
+format-legality checks:
+
+![Deck building with mana curve, draw odds, and legality checks](assets/screenshots/deck-building.webp)
+
 ## Build from source
 
 Requires **Python 3.11+**.
