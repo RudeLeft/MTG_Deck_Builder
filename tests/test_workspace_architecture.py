@@ -130,6 +130,53 @@ class _PendingSelectionOwner:
         self.shown = card
 
 
+def _sash_restore_survives_late_layout():
+    """The restored Mainboard/Sideboard sash must survive a late startup layout.
+
+    Regression: startup resizes the boards pane ~2s in (the comparison bar
+    settling), which dragged the sash short after it first looked stable, so the
+    saved split reset on every reopen. The restore must keep correcting drift
+    until the settle window passes, not exit at the first apparent hold.
+    """
+    from mtgdb.ui.workspace import WorkspaceMixin
+
+    target = 672
+
+    class _Pane:
+        def __init__(self):
+            self.pos = 300  # startup default, far from the saved split
+
+        def sashpos(self, _index, value=None):
+            if value is None:
+                return self.pos
+            self.pos = int(value)
+            return self.pos
+
+    class _App(WorkspaceMixin):
+        def __init__(self, pane):
+            self._boards_panes = pane
+            self._restored_workspace_geometry = {"boards": [target]}
+            self._queue = []
+
+        def after(self, _ms, callback):
+            self._queue.append(callback)
+            return "after-id"
+
+    pane = _Pane()
+    app = _App(pane)
+    # A one-time layout event drags the sash after it first looks settled but
+    # before the minimum settle window elapses; an early-exiting restore would
+    # already have stopped and never correct it.
+    late_drift_tick = WorkspaceMixin._SASH_RESTORE_MIN_ATTEMPTS // 2
+    app._restore_workspace_geometry()
+    guard = WorkspaceMixin._SASH_RESTORE_MAX_ATTEMPTS + 5
+    for tick in range(1, guard + 1):
+        if tick == late_drift_tick:
+            pane.pos = 623  # the pane shrinks and drags the sash short
+        if app._queue:
+            app._queue.pop(0)()
+    return pane.pos == target and not app._queue
+
 
 def main():
     first = Deck("First", "modern")
@@ -330,6 +377,8 @@ def main():
                 in sources["mtgdb/ui/workspace.py"]
             and '"_main_panes"' not in sources["mtgdb/ui/workspace.py"]
             and '"_middle_panes"' not in sources["mtgdb/ui/workspace.py"]),
+        "restored board sash survives a late startup layout": (
+            _sash_restore_survives_late_layout()),
         "search feature owns its workspace capture and restore contract": (
             "def _capture_search_workspace_state(" in sources["mtgdb/ui/search.py"]
             and "def _restore_search_workspace_state(" in sources["mtgdb/ui/search.py"]
