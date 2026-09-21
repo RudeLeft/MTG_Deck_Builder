@@ -26,6 +26,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        with:
+          # Full history + tags so the release step can list commits since the
+          # previous version tag in the notes.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -135,10 +139,25 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
+          # Build "What's changed" from commit subjects since the previous
+          # version tag, so each release lists what actually changed.
+          $prev = git tag --list "v*" --sort=-v:refname |
+            Where-Object { $_ -ne $tag } | Select-Object -First 1
+          if ($prev) {
+            $changes = git log "${prev}..${tag}" --no-merges --pretty=format:"- %s" |
+              Where-Object { $_ -and ($_ -notmatch 'Bump version') }
+          } else {
+            $changes = @("- Initial release.")
+          }
+          if (-not $changes) { $changes = @("- Maintenance and internal improvements.") }
+          $changesText = ($changes -join "`n")
           $notes = @"
-          Portable desktop deck builder for Magic: The Gathering.
+          ## What's changed
 
-          Downloads
+          $changesText
+
+          ## Download and run
+
           - Windows app (no Python needed): MTG_Deck_Builder-$tag-windows.zip
             Unzip, open the MTGDeckBuilder folder, run MTGDeckBuilder.exe. Keep the
             folder together; it is fully portable and stores its data beside the app.
