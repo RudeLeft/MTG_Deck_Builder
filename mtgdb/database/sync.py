@@ -636,6 +636,11 @@ class DatabaseSyncService:
             metadata = {
                 "last_sync_kind": kind,
                 "last_successful_sync_epoch": f"{self.clock():.6f}",
+                # load_cards ran classify_universes_beyond inline as part of this
+                # load, so record the applied classification rule now. Without it
+                # the next launch sees classification_refresh due (due_reason) and
+                # re-syncs once for nothing before the marker finally lands.
+                UNIVERSES_BEYOND_META_KEY: UNIVERSES_BEYOND_RULE,
             }
             if updated_at:
                 metadata["last_sync_updated_at"] = updated_at

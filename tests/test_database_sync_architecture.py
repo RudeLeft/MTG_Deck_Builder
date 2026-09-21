@@ -218,6 +218,11 @@ def main():
         stages = []
         total = service.sync(
             progress_cb=lambda stage, payload: stages.append((stage, payload)))
+        # One full sync must fully satisfy due_reason. Regression guard: the
+        # download path once skipped the Universes Beyond marker, so the next
+        # launch saw classification_refresh and re-synced a second time before
+        # settling.
+        due_after_first_sync = service.due_reason()
         first_downloads = http.downloads
         temporary_removed = not (
             Path(temporary) / "scryfall_default_cards.download").exists()
@@ -446,6 +451,8 @@ def main():
         "same upstream revision avoids a second bulk download": (
             current_total == 1000 and current_avoided_download
             and any(stage == "current" for stage, _ in current_stages)),
+        "one full sync fully satisfies the due policy": (
+            due_after_first_sync is None),
         "successful refresh resets the automatic due policy": (
             due_after_success is None),
         "missing trusted catalog triggers metadata refresh": catalog_refresh_due,
