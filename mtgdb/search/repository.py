@@ -28,6 +28,10 @@ class SearchRepository:
     def open_reader(self):
         return self._db.open_reader()
 
+    def reader_session(self):
+        """Run this thread's catalog reads on an off-lock WAL reader."""
+        return self._db.reader_session()
+
     def search(self, criteria: SearchCriteria, connection):
         return self._db.search(
             connection=connection, columns=SEARCH_RESULT_COLUMNS,

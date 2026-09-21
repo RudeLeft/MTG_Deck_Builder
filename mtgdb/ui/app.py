@@ -517,6 +517,9 @@ class DeckBuilderApp(
     # ======================================================================
     def _start_post_paint_initialization(self):
         self._refresh_search_catalogs()
+        # Pre-load the other content/platform scopes in the background so the
+        # first switch to Tokens/Emblems/Art (or paper-only) is instant.
+        self._warm_common_search_catalogs()
         self._restore_workspace_session_async()
         # Build the bitset facet index in the background now, so the first live
         # filter pick is instant instead of paying the one-time build cost.

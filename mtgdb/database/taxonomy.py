@@ -75,25 +75,21 @@ class CardTaxonomyMixin:
             placeholders = ",".join("?" * len(allowed))
             clauses.append(f"set_type IN ({placeholders})")
             params.extend(allowed)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT set_code, set_name, MAX(released_at) AS r FROM cards "
-                f"WHERE {' AND '.join(clauses)} "
-                "GROUP BY set_code ORDER BY r DESC, set_name",
-                params,
-            ).fetchall()
+        rows = self._read(
+            "SELECT set_code, set_name, MAX(released_at) AS r FROM cards "
+            f"WHERE {' AND '.join(clauses)} "
+            "GROUP BY set_code ORDER BY r DESC, set_name",
+            params)
         return [(row["set_code"], row["set_name"] or row["set_code"]) for row in rows]
 
     def set_types(self, content_types=None, paper_only=False, games=None):
         """Observed Scryfall ``set_type`` values with local set counts."""
         scope, params = self._scope(content_types, paper_only, games=games)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT set_type, COUNT(DISTINCT set_code) AS n FROM cards "
-                "WHERE set_type IS NOT NULL AND set_type <> '' "
-                f"AND {scope} GROUP BY set_type ORDER BY n DESC, set_type",
-                params,
-            ).fetchall()
+        rows = self._read(
+            "SELECT set_type, COUNT(DISTINCT set_code) AS n FROM cards "
+            "WHERE set_type IS NOT NULL AND set_type <> '' "
+            f"AND {scope} GROUP BY set_type ORDER BY n DESC, set_type",
+            params)
         return [(row["set_type"], row["n"]) for row in rows]
 
     @staticmethod
@@ -113,21 +109,19 @@ class CardTaxonomyMixin:
         heard of, which stays selectable rather than disappearing.
         """
         scope, params = self._scope(content_types, paper_only, games=games)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT layout, COUNT(*) AS total FROM cards "
-                f"WHERE layout IS NOT NULL AND layout <> '' AND {scope} "
-                "GROUP BY layout ORDER BY total DESC, layout", params).fetchall()
+        rows = self._read(
+            "SELECT layout, COUNT(*) AS total FROM cards "
+            f"WHERE layout IS NOT NULL AND layout <> '' AND {scope} "
+            "GROUP BY layout ORDER BY total DESC, layout", params)
         return [(row["layout"], row["total"]) for row in rows]
 
     def release_years(self, content_types=None, paper_only=False, games=None):
         """Observed release years in the current Search scope, newest first."""
         scope, params = self._scope(content_types, paper_only, games=games)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT DISTINCT substr(released_at, 1, 4) AS year FROM cards "
-                "WHERE released_at IS NOT NULL AND length(released_at) >= 4 "
-                f"AND {scope} ORDER BY year DESC", params).fetchall()
+        rows = self._read(
+            "SELECT DISTINCT substr(released_at, 1, 4) AS year FROM cards "
+            "WHERE released_at IS NOT NULL AND length(released_at) >= 4 "
+            f"AND {scope} ORDER BY year DESC", params)
         return [
             str(row["year"]) for row in rows
             if str(row["year"] or "").isdigit()
@@ -181,11 +175,10 @@ class CardTaxonomyMixin:
 
     def rarities(self, content_types=None, paper_only=False):
         scope, params = self._scope(content_types, paper_only)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT DISTINCT rarity FROM cards "
-                "WHERE rarity IS NOT NULL AND rarity <> '' "
-                f"AND {scope}", params).fetchall()
+        rows = self._read(
+            "SELECT DISTINCT rarity FROM cards "
+            "WHERE rarity IS NOT NULL AND rarity <> '' "
+            f"AND {scope}", params)
         return self._preferred_values((row["rarity"] for row in rows), RARITIES)
 
     def formats_by_status(self, content_types=None, paper_only=False,
@@ -204,10 +197,9 @@ class CardTaxonomyMixin:
         # The whole card table shares only a few hundred distinct legality
         # profiles, so collapsing to DISTINCT legalities JSON and parsing those in
         # Python is ~8x faster than json_each expanding every card's legalities.
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT DISTINCT legalities FROM cards "
-                f"WHERE legalities IS NOT NULL AND {scope}", scope_params).fetchall()
+        rows = self._read(
+            "SELECT DISTINCT legalities FROM cards "
+            f"WHERE legalities IS NOT NULL AND {scope}", scope_params)
         for (raw,) in rows:
             try:
                 legalities = json.loads(raw or "{}")
@@ -235,10 +227,9 @@ class CardTaxonomyMixin:
         # Parse the few hundred DISTINCT legality profiles in Python instead of
         # json_each over every card (see formats_by_status).
         observed = set()
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT DISTINCT legalities FROM cards "
-                f"WHERE legalities IS NOT NULL AND {scope}", scope_params).fetchall()
+        rows = self._read(
+            "SELECT DISTINCT legalities FROM cards "
+            f"WHERE legalities IS NOT NULL AND {scope}", scope_params)
         for (raw,) in rows:
             try:
                 legalities = json.loads(raw or "{}")
@@ -254,11 +245,10 @@ class CardTaxonomyMixin:
 
     def _type_lines(self, content_types=None, paper_only=False):
         scope, params = self._scope(content_types, paper_only)
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT DISTINCT type_line FROM cards "
-                "WHERE type_line IS NOT NULL AND type_line <> '' "
-                f"AND {scope}", params).fetchall()
+        rows = self._read(
+            "SELECT DISTINCT type_line FROM cards "
+            "WHERE type_line IS NOT NULL AND type_line <> '' "
+            f"AND {scope}", params)
         return [row["type_line"] for row in rows]
 
     def card_types(self, content_types=None, paper_only=False):

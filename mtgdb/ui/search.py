@@ -2790,6 +2790,33 @@ class SearchFeatureMixin:
         self._search_catalog_poll_after = self.after(
             18, self._poll_search_catalogs)
 
+    def _warm_common_search_catalogs(self):
+        """Pre-load likely next scopes so switching content/platform feels instant.
+
+        The default scope is already being requested; this fills the cache in the
+        background for the other content classes at the current platform (and the
+        paper-only Cards variant), each of which would otherwise show a fresh
+        "loading" pass the first time it is opened.
+        """
+        controller = getattr(self, "search_catalog_controller", None)
+        if controller is None:
+            return
+        printing = getattr(self, "_search_printings", None)
+        paper_only = bool(printing.paper_only.get()) if printing else True
+        games = tuple(printing.selected_games()) if printing else ()
+        set_types = tuple(printing.selected_set_types()) if printing else ()
+        scopes = [(("card",), paper_only, games),
+                  (("token",), paper_only, games),
+                  (("emblem",), paper_only, games),
+                  (("art",), paper_only, games)]
+        if not paper_only:
+            scopes.append((("card",), True, ("paper",)))
+        for content, only, platforms in scopes:
+            try:
+                controller.warm(content, only, set_types, platforms)
+            except Exception:
+                log.debug("Catalog warm skipped", exc_info=True)
+
     def _poll_search_catalogs(self):
         self._search_catalog_poll_after = None
         event = self.search_catalog_controller.poll_latest()

@@ -61,8 +61,9 @@ class SearchCatalogController:
         self._closed = False
         self._base_cache = OrderedDict()
         self._set_cache = OrderedDict()
+        self._warm_queue = []
         self._stats = {
-            "requests": 0, "cache_hits": 0, "loads": 0,
+            "requests": 0, "cache_hits": 0, "loads": 0, "warmed": 0,
             "last_seconds": 0.0,
         }
         self._thread = spawn_daemon(self._run, "search-taxonomy")
@@ -101,10 +102,28 @@ class SearchCatalogController:
             self._condition.notify()
             return SearchCatalogEvent(generation, key, "started", None, 0.0)
 
+    def warm(self, content_types, paper_only, selected_set_types=(), games=()):
+        """Pre-load a scope's catalog into cache in the background.
+
+        Warming never emits a UI event or advances the request generation, so a
+        real request always takes priority and a stale warm (e.g. a sync landed
+        mid-load) is discarded by the generation check.  Used at startup to make
+        the common scope switches feel instant.
+        """
+        key = self._key(content_types, paper_only, selected_set_types, games)
+        with self._condition:
+            if self._closed or self._cached_snapshot_locked(key) is not None:
+                return
+            if key in self._warm_queue:
+                return
+            self._warm_queue.append(key)
+            self._condition.notify()
+
     def invalidate(self):
         with self._condition:
             self._generation += 1
             self._pending = None
+            self._warm_queue.clear()
             self._base_cache.clear()
             self._set_cache.clear()
         self._clear_events()
@@ -201,23 +220,37 @@ class SearchCatalogController:
     def _run(self):
         while True:
             with self._condition:
-                while self._pending is None and not self._closed:
+                while (self._pending is None and not self._warm_queue
+                       and not self._closed):
                     self._condition.wait()
-                if self._closed and self._pending is None:
+                if (self._closed and self._pending is None
+                        and not self._warm_queue):
                     return
-                generation, key = self._pending
-                self._pending = None
+                # A real (UI) request always takes priority over warming.
+                if self._pending is not None:
+                    generation, key = self._pending
+                    self._pending = None
+                    warm_only = False
+                else:
+                    key = self._warm_queue.pop(0)
+                    generation = self._generation
+                    warm_only = True
                 content, paper_only, platforms, selected = key
                 base_key = (content, paper_only, platforms)
                 base = self._base_cache.get(base_key)
                 sets = self._set_cache.get(key)
+            if warm_only and base is not None and sets is not None:
+                continue  # already cached; nothing to warm
             started = time.perf_counter()
             try:
-                if base is None:
-                    base = self._load_base(content, paper_only, platforms)
-                if sets is None:
-                    sets = self._load_sets(
-                        content, paper_only, selected, platforms)
+                # Heavy card-table scans run on an independent WAL reader so this
+                # background load does not queue in front of interactive reads.
+                with self.repository.reader_session():
+                    if base is None:
+                        base = self._load_base(content, paper_only, platforms)
+                    if sets is None:
+                        sets = self._load_sets(
+                            content, paper_only, selected, platforms)
                 snapshot = self._snapshot(key, base, sets)
                 kind = "done"
                 payload = snapshot
@@ -230,7 +263,8 @@ class SearchCatalogController:
                 # A database refresh or newer scope can invalidate a request
                 # while repository scans are running. Stale work may finish,
                 # but it must never repopulate caches that a newer generation
-                # could then mistake for current-database taxonomy.
+                # could then mistake for current-database taxonomy.  Warming uses
+                # the same guard: its captured generation moves on invalidate.
                 if kind == "done" and generation == self._generation:
                     self._base_cache[base_key] = base
                     self._base_cache.move_to_end(base_key)
@@ -240,10 +274,11 @@ class SearchCatalogController:
                     self._set_cache.move_to_end(key)
                     while len(self._set_cache) > self.SET_CACHE_LIMIT:
                         self._set_cache.popitem(last=False)
-                    self._stats["loads"] += 1
+                    self._stats["warmed" if warm_only else "loads"] += 1
                     self._stats["last_seconds"] = elapsed
-            self.events.put(SearchCatalogEvent(
-                generation, key, kind, payload, elapsed))
+            if not warm_only:
+                self.events.put(SearchCatalogEvent(
+                    generation, key, kind, payload, elapsed))
 
     def poll_latest(self):
         latest = None

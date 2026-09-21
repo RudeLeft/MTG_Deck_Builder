@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import contextmanager
 
 from mtgdb.database.bulk_import import ScryfallBulkImporter
 from mtgdb.database.queries import CardQueryMixin
@@ -33,6 +34,7 @@ class CardDB(CardQueryMixin, CardSearchQueryMixin, CardTaxonomyMixin):
         self.path = path
         self.conn = open_primary_connection(path, _SQL_FUNCTIONS)
         self._lock = threading.RLock()
+        self._reader_local = threading.local()
         self._bulk_importer = ScryfallBulkImporter(path)
         with self._lock:
             initialize_schema(self.conn)
@@ -44,6 +46,37 @@ class CardDB(CardQueryMixin, CardSearchQueryMixin, CardTaxonomyMixin):
     def open_reader(self):
         """Return an independent connection for background read/search work."""
         return open_reader_connection(self.path, _SQL_FUNCTIONS)
+
+    @contextmanager
+    def reader_session(self):
+        """Route this thread's ``_read`` calls to an independent WAL reader.
+
+        Heavy background scans (trusted-catalog loading) run off the primary
+        lock so they do not queue in front of interactive reads.  Nesting is a
+        no-op; the outermost session owns the connection.  Reads outside a
+        session keep using the locked primary connection unchanged.
+        """
+        if getattr(self._reader_local, "conn", None) is not None:
+            yield
+            return
+        reader = self.open_reader()
+        self._reader_local.conn = reader
+        try:
+            yield
+        finally:
+            self._reader_local.conn = None
+            try:
+                reader.close()
+            except Exception:
+                pass
+
+    def _read(self, sql, params=()):
+        """Fetch rows on this thread's reader session if active, else primary."""
+        reader = getattr(self._reader_local, "conn", None)
+        if reader is not None:
+            return reader.execute(sql, params).fetchall()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchall()
 
     def count(self):
         with self._lock:

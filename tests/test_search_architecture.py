@@ -286,6 +286,51 @@ def _method_body(source, name):
     return remainder if end == -1 else remainder[:end]
 
 
+def _catalog_reader_and_warm_check():
+    """Off-lock catalog reads must match the primary, and warming must fill the
+    cache in the background without a UI event.
+
+    The trusted-catalog build was moved onto an independent WAL reader (so it no
+    longer blocks interactive reads) and given a warm queue (so common scope
+    switches are instant). Prove both: identical results inside/outside a reader
+    session, and that a warmed scope becomes a cache hit.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        db = CardDB(os.path.join(tmp, "cards.db"))
+        db.load_cards([
+            _card("1", "Alpha"),
+            dict(_card("2", "Beta"), set="two", set_type="masters", rarity="rare"),
+            dict(_card("3", "Tok"), layout="token",
+                 type_line="Token Creature — Elf"),
+        ])
+        ct = ("card",)
+        methods = (
+            lambda: db.set_types(ct, False), lambda: db.rarities(ct, False),
+            lambda: db.layouts(ct, False), lambda: db.formats_by_status(ct, False),
+            lambda: db._type_lines(ct, False))
+        outside = [fn() for fn in methods]
+        with db.reader_session():
+            inside = [fn() for fn in methods]
+        parity = inside == outside
+
+        controller = SearchCatalogController(SearchRepository(db))
+        try:
+            controller.request(("token",), False, (), ("paper",))
+            controller.warm(("card",), False, (), ("paper",))
+            warmed = False
+            for _ in range(250):
+                time.sleep(0.02)
+                if controller.cache_info().get("warmed", 0) >= 1:
+                    warmed = True
+                    break
+            cached = controller.request(
+                ("card",), False, (), ("paper",)).kind == "cached"
+        finally:
+            controller.invalidate()
+            db.close()
+        return parity and warmed and cached
+
+
 def main():
     criteria = SearchCriteria.from_mapping({
         "name": "Bird", "colors": ["W"], "card_types": ["Creature"],
@@ -1025,6 +1070,8 @@ def main():
     styles_source = (ROOT / "mtgdb/ui/styles.py").read_text(encoding="utf-8")
     tokens_source = (ROOT / "mtgdb/ui/tokens.py").read_text(encoding="utf-8")
     checks = {
+        "catalog loads off-lock give identical results and warming caches": (
+            _catalog_reader_and_warm_check()),
         "inline working status is standardized through PulseStatus": (
             # One reusable threshold + minimum-dwell + gold-pulse controller, used
             # for both live-context "Updating…" and the RESULTS header states, so
