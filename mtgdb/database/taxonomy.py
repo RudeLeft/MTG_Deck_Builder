@@ -19,7 +19,7 @@ from mtgdb.database.schema import (
 )
 from mtgdb.database.semantics import (
     _card_content_classification, _card_has_type, _semantic_type_face_parts,
-    _type_key, _type_line_faces,
+    _type_key, _type_line_faces, content_scope_layout_sql,
 )
 
 
@@ -42,18 +42,14 @@ class CardTaxonomyMixin:
                 f"({field('layout')} IS NULL OR {field('layout')} NOT IN ({art_ph}))")
             params.extend(ART_LAYOUTS)
         else:
-            chosen = {str(value).casefold() for value in content_types if str(value)}
-            unknown = chosen - set(CONTENT_TYPES)
-            if unknown:
-                raise ValueError(
-                    "Unknown card-content type(s): " + ", ".join(sorted(unknown)))
-            if not chosen:
+            # Content kind depends only on layout, so filter with a pure-SQL
+            # layout predicate instead of the per-row CARD_CONTENT_KIND function.
+            layout_sql, layout_params = content_scope_layout_sql(
+                content_types, field("layout"))
+            if layout_sql is None:
                 return "0", []
-            placeholders = ",".join("?" * len(chosen))
-            clauses.append(
-                f"CARD_CONTENT_KIND({field('layout')}, {field('type_line')}) "
-                f"IN ({placeholders})")
-            params.extend(sorted(chosen))
+            clauses.append(layout_sql)
+            params.extend(layout_params)
         platforms = [
             value for value in ("paper", "mtgo", "arena")
             if value in {str(item).casefold() for item in (games or ())}]
@@ -205,24 +201,29 @@ class CardTaxonomyMixin:
         scope, scope_params = self._scope(
             content_types, paper_only, prefix="cards.", games=games)
         grouped = {"playable": set(), "banned": set(), "restricted": set()}
-        try:
-            with self._lock:
-                rows = self.conn.execute(
-                    "SELECT DISTINCT legal.key AS format, legal.value AS status "
-                    "FROM cards, json_each(COALESCE(cards.legalities, '{}')) AS legal "
-                    "WHERE legal.key IS NOT NULL AND legal.key <> '' "
-                    f"AND {scope}", scope_params).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-        for row in rows:
-            name = str(row["format"] or "")
-            status = str(row["status"] or "").casefold()
-            if not name:
+        # The whole card table shares only a few hundred distinct legality
+        # profiles, so collapsing to DISTINCT legalities JSON and parsing those in
+        # Python is ~8x faster than json_each expanding every card's legalities.
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT DISTINCT legalities FROM cards "
+                f"WHERE legalities IS NOT NULL AND {scope}", scope_params).fetchall()
+        for (raw,) in rows:
+            try:
+                legalities = json.loads(raw or "{}")
+            except (ValueError, TypeError):
                 continue
-            if status in PLAYABLE_LEGALITY_STATUSES:
-                grouped["playable"].add(name)
-            if status in grouped:
-                grouped[status].add(name)
+            if not isinstance(legalities, dict):
+                continue
+            for name, status in legalities.items():
+                name = str(name or "")
+                status = str(status or "").casefold()
+                if not name:
+                    continue
+                if status in PLAYABLE_LEGALITY_STATUSES:
+                    grouped["playable"].add(name)
+                if status in grouped:
+                    grouped[status].add(name)
         return {
             state: tuple(sorted(values, key=str.casefold))
             for state, values in grouped.items()
@@ -231,37 +232,24 @@ class CardTaxonomyMixin:
     def formats(self, content_types=None, paper_only=False):
         """Formats with at least one playable scoped card (legal or restricted)."""
         scope, scope_params = self._scope(content_types, paper_only, prefix="cards.")
-        statuses = sorted(PLAYABLE_LEGALITY_STATUSES)
-        status_placeholders = ",".join("?" * len(statuses))
-        try:
-            with self._lock:
-                rows = self.conn.execute(
-                    "SELECT DISTINCT legal.key AS format "
-                    "FROM cards, json_each(COALESCE(cards.legalities, '{}')) AS legal "
-                    "WHERE legal.key IS NOT NULL AND legal.key <> '' "
-                    f"AND legal.value IN ({status_placeholders}) AND {scope}",
-                    [*statuses, *scope_params]).fetchall()
-            observed = [row["format"] for row in rows]
-        except sqlite3.OperationalError:
-            observed = []
-            fallback_scope, fallback_params = self._scope(
-                content_types, paper_only)
-            with self._lock:
-                rows = self.conn.execute(
-                    "SELECT legalities FROM cards "
-                    f"WHERE legalities IS NOT NULL AND {fallback_scope}",
-                    fallback_params).fetchall()
-            for row in rows:
-                try:
-                    value = json.loads(row["legalities"] or "{}")
-                    if isinstance(value, dict):
-                        observed.extend(
-                            key for key, status in value.items()
-                            if str(status).casefold() in PLAYABLE_LEGALITY_STATUSES)
-                except (ValueError, TypeError):
-                    pass
+        # Parse the few hundred DISTINCT legality profiles in Python instead of
+        # json_each over every card (see formats_by_status).
+        observed = set()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT DISTINCT legalities FROM cards "
+                f"WHERE legalities IS NOT NULL AND {scope}", scope_params).fetchall()
+        for (raw,) in rows:
+            try:
+                legalities = json.loads(raw or "{}")
+            except (ValueError, TypeError):
+                continue
+            if isinstance(legalities, dict):
+                observed.update(
+                    str(key) for key, status in legalities.items()
+                    if key and str(status).casefold() in PLAYABLE_LEGALITY_STATUSES)
         return sorted(
-            {str(value) for value in observed if value not in (None, "")},
+            {value for value in observed if value not in (None, "")},
             key=str.casefold)
 
     def _type_lines(self, content_types=None, paper_only=False):

@@ -235,6 +235,46 @@ def _oversized_object_check():
     return parsed, rejected
 
 
+def _content_scope_sql_parity_check():
+    """The pure-SQL content-scope predicate must match CARD_CONTENT_KIND exactly.
+
+    Catalog scope filtering was switched from the per-row CARD_CONTENT_KIND
+    Python function to a constants-derived SQL layout predicate for speed. Any
+    drift would silently change which cards each Search content scope includes,
+    so prove they select identical rows for every layout and content subset.
+    """
+    import itertools
+    from mtgdb.database.constants import CONTENT_TYPES, KNOWN_SCRYFALL_LAYOUTS
+    from mtgdb.database.semantics import (
+        _card_content_kind, content_scope_layout_sql)
+
+    layouts = sorted(KNOWN_SCRYFALL_LAYOUTS) + [
+        "some_future_layout", "prepare_next", "", None]
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE cards (n INTEGER, layout TEXT)")
+    conn.executemany(
+        "INSERT INTO cards (n, layout) VALUES (?, ?)", list(enumerate(layouts)))
+    conn.commit()
+
+    ok = True
+    for size in range(1, len(CONTENT_TYPES) + 1):
+        for subset in itertools.combinations(CONTENT_TYPES, size):
+            sql, params = content_scope_layout_sql(subset, "layout")
+            selected = {row[0] for row in conn.execute(
+                f"SELECT n FROM cards WHERE {sql}", params)}
+            expected = {n for n, lay in enumerate(layouts)
+                        if _card_content_kind(lay, "") in subset}
+            ok = ok and selected == expected
+    conn.close()
+
+    rejected = False
+    try:
+        content_scope_layout_sql(("not_a_content_type",), "layout")
+    except ValueError:
+        rejected = True
+    return ok and rejected
+
+
 def main():
     sources = {
         name: (ROOT / name).read_text(encoding="utf-8")
@@ -360,6 +400,8 @@ def main():
     inserts_demoted = _booster_insert_check()
 
     checks = {
+        "pure-SQL content scope matches CARD_CONTENT_KIND for every layout":
+            _content_scope_sql_parity_check(),
         "a booster insert never outranks an ordinary printing":
             inserts_demoted,
         "crossover sets are classified by marker, stamp, and set":

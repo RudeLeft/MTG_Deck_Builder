@@ -3,7 +3,8 @@
 from functools import lru_cache
 import re
 
-from mtgdb.database.constants import ART_LAYOUTS, KNOWN_SCRYFALL_LAYOUTS
+from mtgdb.database.constants import (
+    ART_LAYOUTS, CONTENT_TYPES, KNOWN_SCRYFALL_LAYOUTS, NON_CARD_LAYOUTS)
 
 
 def _face0(card):
@@ -213,6 +214,51 @@ def _card_content_kind(layout, type_line):
     """
     classification = _card_content_classification(layout, type_line)
     return "card" if classification == "unknown" else classification
+
+
+# Content kind is a function of the layout column alone (see
+# ``_card_content_classification``), so a scope filter can be a pure-SQL layout
+# predicate instead of the per-row ``CARD_CONTENT_KIND`` Python function -- the
+# same result thousands of times faster over the whole card table.  This mapping
+# mirrors the classifier's non-card branches; everything else (NULL, known, and
+# unknown layouts) is a ``card``.  ``test_search_architecture`` differentially
+# proves the two agree for every layout.
+_CONTENT_KIND_LAYOUT_MEMBERS = {
+    "art": tuple(ART_LAYOUTS),
+    "emblem": ("emblem",),
+    "token": ("token", "double_faced_token"),
+}
+
+
+def content_scope_layout_sql(content_types, column):
+    """Return ``(sql, params)`` equivalent to ``CARD_CONTENT_KIND(...) IN (...)``.
+
+    ``column`` is the (optionally table-qualified) layout column expression.
+    Returns ``(None, [])`` when the scope selects nothing.  Raises ``ValueError``
+    on an unrecognized content type, matching the previous inline behavior.
+    """
+    chosen = {str(value).casefold() for value in content_types if str(value)}
+    unknown = chosen - set(CONTENT_TYPES)
+    if unknown:
+        raise ValueError(
+            "Unknown card-content type(s): " + ", ".join(sorted(unknown)))
+    if not chosen:
+        return None, []
+    parts = []
+    params = []
+    for kind in sorted(chosen):
+        if kind == "card":
+            placeholders = ",".join("?" * len(NON_CARD_LAYOUTS))
+            parts.append(f"({column} IS NULL OR {column} NOT IN ({placeholders}))")
+            params.extend(NON_CARD_LAYOUTS)
+        else:
+            members = _CONTENT_KIND_LAYOUT_MEMBERS[kind]
+            placeholders = ",".join("?" * len(members))
+            parts.append(f"{column} IN ({placeholders})")
+            params.extend(members)
+    if len(parts) == 1:
+        return parts[0], params
+    return "(" + " OR ".join(parts) + ")", params
 
 
 
