@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
 import queue
@@ -245,7 +246,11 @@ class SearchCatalogController:
             try:
                 # Heavy card-table scans run on an independent WAL reader so this
                 # background load does not queue in front of interactive reads.
-                with self.repository.reader_session():
+                # The reader session is an optimization: a repository without one
+                # still loads correctly on the primary connection.
+                reader_session = getattr(self.repository, "reader_session", None)
+                with (reader_session() if callable(reader_session)
+                      else nullcontext()):
                     if base is None:
                         base = self._load_base(content, paper_only, platforms)
                     if sets is None:
