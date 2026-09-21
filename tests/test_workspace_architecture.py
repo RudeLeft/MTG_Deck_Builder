@@ -178,6 +178,61 @@ def _sash_restore_survives_late_layout():
     return pane.pos == target and not app._queue
 
 
+def _restore_batch_hydrates_off_the_primary_lock():
+    """Session restore must hydrate every deck in one batch reader pass.
+
+    Regression: restore hydrated each card through the primary-lock lookup on a
+    background thread, so startup catalog scans (which hold that lock) starved
+    it and a restored deck took ~17s to appear. It must use the batch reader
+    hydrator instead and never fall back to the per-card lookup on success.
+    """
+    from mtgdb.workspace.repository import WorkspaceLoadWorker, WorkspaceRepository
+
+    deck_one = Deck("One", "modern")
+    deck_one.add({"id": "x1", "name": "A"}, "main", 2)
+    deck_one.add({"id": "x2", "name": "B"}, "side", 1)
+    deck_two = Deck("Two", "modern")
+    deck_two.add({"id": "x3", "name": "C"}, "main", 4)
+    manager = DeckSessionManager(
+        [DeckSession(deck=deck_one), DeckSession(deck=deck_two)], active_index=0)
+
+    with tempfile.TemporaryDirectory() as temporary:
+        repository = WorkspaceRepository(temporary)
+        repository.save(repository.build_payload(
+            manager, 0, search={}, geometry={}))
+
+        per_card_calls = []
+        bulk_calls = []
+
+        def per_card(card_id):
+            per_card_calls.append(card_id)
+            return None
+
+        def bulk(card_ids):
+            ids = list(card_ids)
+            bulk_calls.append(ids)
+            return {cid: {"id": cid, "name": "hydrated-" + cid} for cid in ids}
+
+        worker = WorkspaceLoadWorker(repository, per_card, bulk_lookup=bulk)
+        worker._generation = 1
+        worker._running = True
+        worker._run(1)
+        _done, result, error = worker.poll(1)
+
+    if error is not None or result is None:
+        return False
+    hydrated_names = {
+        entry["card"].get("name")
+        for session in result.sessions
+        for entry in WorkspaceRepository.deck_to_data(session.deck)["entries"]
+    }
+    return (
+        len(bulk_calls) == 1
+        and set(bulk_calls[0]) == {"x1", "x2", "x3"}
+        and not per_card_calls
+        and hydrated_names == {"hydrated-x1", "hydrated-x2", "hydrated-x3"})
+
+
 def main():
     first = Deck("First", "modern")
     first.add(_card(), "main", 3)
@@ -379,6 +434,10 @@ def main():
             and '"_middle_panes"' not in sources["mtgdb/ui/workspace.py"]),
         "restored board sash survives a late startup layout": (
             _sash_restore_survives_late_layout()),
+        "restore batch-hydrates decks off the primary lock": (
+            _restore_batch_hydrates_off_the_primary_lock()
+            and "bulk_lookup=self.db.hydrate_cards"
+                in sources["mtgdb/ui/workspace.py"]),
         "search feature owns its workspace capture and restore contract": (
             "def _capture_search_workspace_state(" in sources["mtgdb/ui/search.py"]
             and "def _restore_search_workspace_state(" in sources["mtgdb/ui/search.py"]

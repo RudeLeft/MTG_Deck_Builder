@@ -20,7 +20,8 @@ class WorkspaceMixin:
         self.workspace_repository = WorkspaceRepository(data_dir)
         self.workspace_save_worker = WorkspaceSaveWorker(self.workspace_repository)
         self.workspace_load_worker = WorkspaceLoadWorker(
-            self.workspace_repository, self.db.get_card)
+            self.workspace_repository, self.db.get_card,
+            bulk_lookup=self.db.hydrate_cards)
         self._workspace_autosave_after = None
         self._workspace_load_after = None
         self._workspace_capture_last_ms = 0.0

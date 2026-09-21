@@ -95,6 +95,33 @@ class CardQueryMixin:
             found.update((str(row["id"]), dict(row)) for row in rows)
         return [found.get(card_id) for card_id in ordered]
 
+    def hydrate_cards(self, card_ids):
+        """Batch-hydrate exact printings on an independent reader connection.
+
+        Session restore runs on a background thread at startup, exactly when the
+        primary connection's trusted-catalog scans hold the lock for long
+        stretches. Routing this through a separate WAL reader lets the deck read
+        concurrently instead of starving behind that lock, so a restored deck no
+        longer waits for the filters to finish loading. Returns ``{id: card}``.
+        """
+        ordered = [str(card_id) for card_id in card_ids if card_id]
+        if not ordered:
+            return {}
+        unique = list(dict.fromkeys(ordered))
+        reader = self.open_reader()
+        try:
+            found = {}
+            for start in range(0, len(unique), 800):
+                chunk = unique[start:start + 800]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = reader.execute(
+                    f"SELECT * FROM cards WHERE id IN ({placeholders})", chunk
+                ).fetchall()
+                found.update((str(row["id"]), dict(row)) for row in rows)
+            return found
+        finally:
+            reader.close()
+
     def get_by_name(self, name, allowed_set_types=None, allowed_set_codes=None,
                     allowed_collector_numbers=None, *, paper_only=True, lang=None):
         """

@@ -466,9 +466,13 @@ class WorkspaceSaveWorker:
 class WorkspaceLoadWorker:
     """One-shot Tk-free loader/parser/exact-printing hydrator."""
 
-    def __init__(self, repository, card_lookup):
+    def __init__(self, repository, card_lookup, bulk_lookup=None):
         self.repository = repository
         self.card_lookup = card_lookup
+        # Optional {id: card} batch hydrator. It reads on an independent
+        # connection, so restore does not queue behind the primary lock while
+        # startup catalog scans hold it.
+        self.bulk_lookup = bulk_lookup
         self._lock = threading.Lock()
         self._generation = 0
         self._result = None
@@ -498,11 +502,30 @@ class WorkspaceLoadWorker:
         try:
             payload = self.repository.load()
             if payload is not None:
+                lookup = self.card_lookup
+                if self.bulk_lookup is not None:
+                    # Hydrate every deck's cards in one concurrent reader pass
+                    # rather than a per-card primary-lock lookup that the startup
+                    # catalog scans would starve.
+                    card_ids = [
+                        entry["card"].get("id")
+                        for item in payload.get("decks", [])
+                        if isinstance(item, dict)
+                        for entry in (item.get("deck") or {}).get("entries", [])
+                        if isinstance(entry, dict)
+                        and isinstance(entry.get("card"), dict)
+                    ]
+                    try:
+                        hydrated = self.bulk_lookup(card_ids)
+                        lookup = hydrated.get
+                    except Exception:
+                        log.exception(
+                            "Batch deck hydration failed; using per-card lookup")
                 sessions = tuple(
                     session
                     for item in payload.get("decks", [])
                     for session in [self.repository.session_from_data(
-                        item, self.card_lookup)]
+                        item, lookup)]
                     if session is not None
                 )
                 result = WorkspaceLoadResult(payload=payload, sessions=sessions)
