@@ -311,6 +311,10 @@ def main(argv=None):
         "subtype_categories": dict(subtype_categories),
         "keyword_categories": dict(keyword_categories), "checks": checks,
         "inventory_seconds": round(inventory["seconds"], 2),
+        # markdown() renders the Upstream compatibility section from this; without
+        # it the report always showed "unavailable"/"none" even when a check for
+        # an unknown layout or legality status failed.
+        "compatibility": compatibility,
     }
     report = markdown(result)
     if args.report:
