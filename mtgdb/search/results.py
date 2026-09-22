@@ -322,6 +322,20 @@ class SearchResultStore:
     def from_rows(cls, rows):
         return cls(rows)
 
+    @classmethod
+    def from_projection(cls, columns, tuples):
+        """Build directly from ordered cursor tuples for the result projection.
+
+        Skips the throwaway dict-per-row that ``from_rows`` would parse: the
+        query projects ``columns`` in order, so each ``SearchResultRow`` field
+        is read by position.  ``from_mapping`` treats the resulting rows as an
+        identity, so the store is byte-identical to the dict path.
+        """
+        positions = [columns.index(field) for field in SEARCH_RESULT_FIELDS]
+        return cls(
+            SearchResultRow(*(row[position] for position in positions))
+            for row in tuples)
+
     @property
     def rows(self):
         return self._rows

@@ -604,10 +604,27 @@ class CardSearchQueryMixin:
         sql, params = builder.build(set_codes=set_codes, columns=columns)
         if connection is None:
             with self._lock:
-                rows = self.conn.execute(sql, params).fetchall()
-        else:
-            rows = connection.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+                return self._fetch_dicts(self.conn, sql, params)
+        return self._fetch_dicts(connection, sql, params)
+
+    def search_projection(self, *, connection=None, columns, **criteria):
+        """Ordered search returning ``(column_names, row_tuples)`` without dicts.
+
+        The interactive Results path builds its ``SearchResultRow`` objects
+        straight from these tuples, so materializing a throwaway dict per row
+        (over ~100k rows) between SQLite and the row objects is pure overhead.
+        Column order matches ``columns`` exactly (``build`` projects them as
+        given), so callers map fields by position.
+        """
+        builder = _configured_search_builder(**criteria)
+        if builder is None:
+            return (), []
+        sql, params = builder.build(
+            set_codes=criteria.get("set_codes"), columns=columns)
+        if connection is None:
+            with self._lock:
+                return self._fetch_tuples(self.conn, sql, params)
+        return self._fetch_tuples(connection, sql, params)
 
     def search_unordered(self, *, connection=None, columns=None, **criteria):
         """Return a narrow Search projection without result-ordering overhead."""
@@ -638,6 +655,24 @@ class CardSearchQueryMixin:
             cursor.execute(sql, params)
             keys = [description[0] for description in cursor.description]
             return [dict(zip(keys, row)) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    @staticmethod
+    def _fetch_tuples(connection, sql, params):
+        """Run a projection and return ``(column_names, plain_tuples)``.
+
+        Like ``_fetch_dicts`` but without building a dict per row -- the caller
+        maps columns by position.  Uses a private cursor with its row_factory
+        cleared so the connection's Row factory other callers rely on is left
+        untouched.
+        """
+        cursor = connection.cursor()
+        try:
+            cursor.row_factory = None
+            cursor.execute(sql, params)
+            keys = tuple(description[0] for description in cursor.description)
+            return keys, cursor.fetchall()
         finally:
             cursor.close()
 

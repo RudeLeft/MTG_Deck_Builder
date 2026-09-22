@@ -280,11 +280,13 @@ class _BlockingRepository:
     def open_reader(self):
         return _Reader()
 
-    def search(self, criteria, _reader):
+    def search_result_store(self, criteria, _reader):
         if criteria.name == "old":
             self.old_started.set()
             self.release_old.wait(2.0)
-        return [{"id": criteria.name, "name": criteria.name}]
+        from mtgdb.search.results import SearchResultStore
+        return SearchResultStore.from_rows(
+            [{"id": criteria.name, "name": criteria.name}])
 
 
 def _wait_event(controller, timeout=2.0):

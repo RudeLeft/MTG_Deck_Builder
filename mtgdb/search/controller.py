@@ -7,7 +7,6 @@ import threading
 import time
 
 from mtgdb.search.models import SearchCriteria, SearchEvent, SearchStart
-from mtgdb.search.results import SearchResultStore
 
 
 class SearchController:
@@ -52,8 +51,7 @@ class SearchController:
             started = time.monotonic()
             try:
                 reader = self.repository.open_reader()
-                rows = self.repository.search(criteria, reader)
-                results = SearchResultStore.from_rows(rows)
+                results = self.repository.search_result_store(criteria, reader)
                 event = SearchEvent(
                     "done", generation, signature, results,
                     time.monotonic() - started)

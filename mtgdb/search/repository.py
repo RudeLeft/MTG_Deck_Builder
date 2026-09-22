@@ -37,6 +37,19 @@ class SearchRepository:
             connection=connection, columns=SEARCH_RESULT_COLUMNS,
             **criteria.query_arguments())
 
+    def search_result_store(self, criteria: SearchCriteria, connection):
+        """Run the ordered results query straight into a SearchResultStore.
+
+        Builds the row objects directly from cursor tuples, skipping the
+        throwaway dict-per-row the generic ``search`` returns -- material over
+        the ~100k-row broad result set the Results table loads.
+        """
+        from mtgdb.search.results import SearchResultStore
+        columns, rows = self._db.search_projection(
+            connection=connection, columns=SEARCH_RESULT_COLUMNS,
+            **criteria.query_arguments())
+        return SearchResultStore.from_projection(columns, rows)
+
     def context_rows(self, criteria: SearchCriteria, connection, columns=None):
         """Unordered narrow projection for Tk-free contextual analysis."""
         if columns is None:
