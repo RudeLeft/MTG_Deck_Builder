@@ -15,25 +15,179 @@ from mtgdb.ui.tokens import (
 
 
 class _BoardsPaned(tk.PanedWindow):
-    """Classic PanedWindow with a ttk-compatible ``sashpos`` for the boards sash.
+    """Classic PanedWindow for the Mainboard/Sideboard split with a dot grip.
 
-    ``ttk.PanedWindow`` has no non-opaque resize, so dragging the Mainboard/
-    Sideboard divider re-lays-out and repaints the deck Treeviews on every motion
-    event -- visible clipping, and a horizontal scrollbar that recomputes on each
-    pixel of the drag. The classic widget with ``opaqueresize=False`` moves only a
-    ghost sash line while dragging and re-lays-out once on release, so the drag is
-    smooth and the trees repaint a single time. The sash position is exposed as
-    ``sashpos(index[, pos])`` -- a vertical sash's Y coordinate, matching the ttk
-    API -- so the retained-geometry capture/restore/clamp keep working unchanged.
+    ``ttk.PanedWindow`` has no non-opaque resize, so dragging its sash re-lays-out
+    and repaints the deck Treeviews on every motion event (visible clipping, a
+    horizontal scrollbar that recomputes each pixel). This classic widget commits
+    the resize once on release instead, so the drag is smooth.
+
+    The classic sash cannot draw a grip pattern, so a full-width canvas is placed
+    over the sash strip: it renders a centered dot-matrix handle (gold on hover)
+    and carries the drag itself -- a thin ghost line follows the pointer and the
+    split is committed once on release. ``sashpos(index[, pos])`` (a vertical
+    sash's Y coordinate) matches the ttk API, so retained-geometry
+    capture/restore/clamp keep working unchanged.
     """
 
+    _PANE_MIN = 160
+
+    def __init__(self, master, *, rest_bg, hover_bg, dot_rest, dot_hot, **kwargs):
+        super().__init__(master, background=rest_bg, **kwargs)
+        self._rest_bg = rest_bg
+        self._hover_bg = hover_bg
+        self._dot_rest = dot_rest
+        self._dot_hot = dot_hot
+        self._sash_hot = False
+        self._place_pending = None
+        self._press_root = 0
+        self._press_pos = 0
+        self._grip = tk.Canvas(
+            self, height=int(self.cget("sashwidth")), highlightthickness=0,
+            borderwidth=0, background=rest_bg, cursor="sb_v_double_arrow")
+        self._ghost = None
+        for sequence, handler in (
+                ("<Enter>", self._grip_enter),
+                ("<Leave>", self._grip_leave),
+                ("<ButtonPress-1>", self._grip_press),
+                ("<B1-Motion>", self._grip_move),
+                ("<ButtonRelease-1>", self._grip_release),
+                ("<Configure>", lambda _event: self._draw_grip())):
+            self._grip.bind(sequence, handler, add="+")
+        self.bind("<Configure>", lambda _event: self._schedule_place_grip(), add="+")
+
+    # -- ttk-compatible geometry -----------------------------------------
     def sashpos(self, index, newpos=None):
         if newpos is None:
             return int(self.sash_coord(index)[1])
         # The X argument only positions along a horizontal (vertical-orient) sash,
         # so any valid value works; the Y argument is the retained split position.
         self.sash_place(index, 1, int(newpos))
+        self._place_grip()
         return int(newpos)
+
+    # -- grip placement and rendering ------------------------------------
+    def _schedule_place_grip(self):
+        # Coalesce reposition requests during a window resize into one idle pass.
+        if self._place_pending is not None:
+            return
+        try:
+            self._place_pending = self.after_idle(self._run_place_grip)
+        except tk.TclError:
+            self._place_pending = None
+
+    def _run_place_grip(self):
+        self._place_pending = None
+        self._place_grip()
+
+    def _place_grip(self):
+        try:
+            top = int(self.sash_coord(0)[1])
+        except (tk.TclError, IndexError):
+            return
+        try:
+            self._grip.place(x=0, relwidth=1, y=top, height=int(self.cget("sashwidth")))
+            self._grip.lift()
+        except tk.TclError:
+            return
+        self._draw_grip()
+
+    def _draw_grip(self):
+        canvas = self._grip
+        try:
+            canvas.delete("all")
+            width = int(canvas.winfo_width())
+            height = int(self.cget("sashwidth"))
+        except tk.TclError:
+            return
+        columns, rows, dot, gap = 7, 2, 2, 3
+        block_w = columns * dot + (columns - 1) * gap
+        block_h = rows * dot + (rows - 1) * gap
+        x0 = (width - block_w) // 2
+        y0 = (height - block_h) // 2
+        color = self._dot_hot if self._sash_hot else self._dot_rest
+        for row in range(rows):
+            for column in range(columns):
+                x = x0 + column * (dot + gap)
+                y = y0 + row * (dot + gap)
+                canvas.create_oval(x, y, x + dot, y + dot, fill=color, outline="")
+
+    # -- hover ------------------------------------------------------------
+    def _grip_enter(self, _event=None):
+        self._sash_hot = True
+        try:
+            self._grip.configure(background=self._hover_bg)
+        except tk.TclError:
+            return
+        self._draw_grip()
+
+    def _grip_leave(self, _event=None):
+        self._sash_hot = False
+        try:
+            self._grip.configure(background=self._rest_bg)
+        except tk.TclError:
+            return
+        self._draw_grip()
+
+    # -- non-opaque drag carried by the grip ------------------------------
+    def _clamp(self, value):
+        try:
+            height = int(self.winfo_height())
+        except tk.TclError:
+            return int(value)
+        return max(self._PANE_MIN, min(int(value), height - self._PANE_MIN))
+
+    def _owner_call(self, name):
+        method = getattr(self.winfo_toplevel(), name, None)
+        if callable(method):
+            try:
+                method()
+            except tk.TclError:
+                pass
+
+    def _grip_press(self, event):
+        top = self.winfo_toplevel()
+        try:
+            top._boards_sash_grabbed = True
+        except (AttributeError, tk.TclError):
+            pass
+        try:
+            self._press_pos = self.sashpos(0)
+        except (tk.TclError, IndexError):
+            return
+        self._press_root = event.y_root
+        self._owner_call("_begin_layout_motion")
+        self._show_ghost(self._press_pos)
+
+    def _grip_move(self, event):
+        self._show_ghost(self._clamp(self._press_pos + event.y_root - self._press_root))
+        self._owner_call("_touch_layout_motion")
+
+    def _grip_release(self, event):
+        target = self._clamp(self._press_pos + event.y_root - self._press_root)
+        self._hide_ghost()
+        try:
+            self.sash_place(0, 1, int(target))
+        except tk.TclError:
+            pass
+        self._place_grip()
+        self._owner_call("_end_layout_motion")
+
+    def _show_ghost(self, y):
+        if self._ghost is None:
+            self._ghost = tk.Frame(self, background=self._hover_bg)
+        try:
+            self._ghost.place(x=0, relwidth=1, y=int(y), height=2)
+            self._ghost.lift()
+        except tk.TclError:
+            pass
+
+    def _hide_ghost(self):
+        if self._ghost is not None:
+            try:
+                self._ghost.place_forget()
+            except tk.TclError:
+                pass
 
 
 def deck_action_layout_mode(available_width, requested_widths, previous=None,
@@ -106,10 +260,14 @@ class DeckEditorMixin:
         # instead of clipping/recomputing their scrollbars on every motion event.
         # Native per-pane minima stop the sash at a usable size without the
         # after-idle clamp fighting the drag at the edges.
+        # A visible, grabbable divider: a lighter bar than the near-black
+        # background carrying a centered dot-matrix grip that turns gold on hover,
+        # so it reads as draggable rather than an empty gap.
         boards = _BoardsPaned(
             parent, orient="vertical", opaqueresize=False,
-            background=PALETTE["bg"], sashwidth=6, sashrelief="flat",
-            borderwidth=0, showhandle=False)
+            rest_bg=PALETTE["surface3"], hover_bg=PALETTE["accent"],
+            dot_rest=PALETTE["muted"], dot_hot=PALETTE["bg"],
+            sashwidth=10, borderwidth=0)
         boards.pack(fill="both", expand=True, pady=(2, 0))
 
         main_frame = ttk.Frame(boards)
