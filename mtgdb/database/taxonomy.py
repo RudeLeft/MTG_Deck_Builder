@@ -222,26 +222,13 @@ class CardTaxonomyMixin:
         }
 
     def formats(self, content_types=None, paper_only=False):
-        """Formats with at least one playable scoped card (legal or restricted)."""
-        scope, scope_params = self._scope(content_types, paper_only, prefix="cards.")
-        # Parse the few hundred DISTINCT legality profiles in Python instead of
-        # json_each over every card (see formats_by_status).
-        observed = set()
-        rows = self._read(
-            "SELECT DISTINCT legalities FROM cards "
-            f"WHERE legalities IS NOT NULL AND {scope}", scope_params)
-        for (raw,) in rows:
-            try:
-                legalities = json.loads(raw or "{}")
-            except (ValueError, TypeError):
-                continue
-            if isinstance(legalities, dict):
-                observed.update(
-                    str(key) for key, status in legalities.items()
-                    if key and str(status).casefold() in PLAYABLE_LEGALITY_STATUSES)
-        return sorted(
-            {value for value in observed if value not in (None, "")},
-            key=str.casefold)
+        """Formats with at least one playable scoped card (legal or restricted).
+
+        This is exactly the ``playable`` bucket of :meth:`formats_by_status`, so
+        it delegates rather than running (and parsing) the same DISTINCT-legality
+        scan a second time.
+        """
+        return list(self.formats_by_status(content_types, paper_only)["playable"])
 
     def _type_lines(self, content_types=None, paper_only=False):
         scope, params = self._scope(content_types, paper_only)
