@@ -61,10 +61,16 @@ class CardDB(CardQueryMixin, CardSearchQueryMixin, CardTaxonomyMixin):
             return
         reader = self.open_reader()
         self._reader_local.conn = reader
+        # A per-session scratch cache for repeated identical scans within one
+        # catalog load (e.g. the DISTINCT type_line corpus that card_types,
+        # supertypes, and subtypes each need).  Scoped to the session and dropped
+        # at its end, so it can never outlive the reader's WAL snapshot.
+        self._reader_local.scan_cache = {}
         try:
             yield
         finally:
             self._reader_local.conn = None
+            self._reader_local.scan_cache = None
             try:
                 reader.close()
             except Exception:

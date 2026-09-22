@@ -231,12 +231,29 @@ class CardTaxonomyMixin:
         return list(self.formats_by_status(content_types, paper_only)["playable"])
 
     def _type_lines(self, content_types=None, paper_only=False):
+        # card_types, supertypes, and subtypes each derive from the same scoped
+        # DISTINCT type_line corpus.  Within one reader session (a catalog load)
+        # the snapshot is fixed, so share a single scan instead of running it once
+        # per consumer.  Outside a session the cache is absent and nothing changes.
+        local = getattr(self, "_reader_local", None)
+        cache = getattr(local, "scan_cache", None) if local is not None else None
+        key = None
+        if cache is not None:
+            key = ("type_lines",
+                   tuple(content_types) if content_types is not None else None,
+                   bool(paper_only))
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
         scope, params = self._scope(content_types, paper_only)
         rows = self._read(
             "SELECT DISTINCT type_line FROM cards "
             "WHERE type_line IS NOT NULL AND type_line <> '' "
             f"AND {scope}", params)
-        return [row["type_line"] for row in rows]
+        result = [row["type_line"] for row in rows]
+        if cache is not None:
+            cache[key] = result
+        return result
 
     def card_types(self, content_types=None, paper_only=False):
         """Authoritative Scryfall card types that occur on scoped local rows.
