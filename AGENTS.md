@@ -75,7 +75,7 @@ mtgdb/
   search/                # interactive search domain (Tk-free)
     models.py            #   SearchCriteria, worker events, result contracts
     repository.py        #   search DB gateway, narrow projection, suggestions, catalogs
-    controller.py        #   query worker lifecycle, generations/invalidation, terminal-event queue, cache
+    controller.py        #   query worker lifecycle, generations/invalidation, progressive first-screen + terminal event queue, cache
     results.py           #   compact SearchResultStore, pure table semantics, async view/vocabulary preparation
     catalogs.py          #   bounded platform-scoped taxonomy snapshots + latest-wins async discovery
     context.py           #   latest-wins live draft predictive facets/ranges and zero-result diagnostics
@@ -197,7 +197,7 @@ only in the module that owns X.
 | `mtgdb/core/format_names.py` | The single mapping from Scryfall format key to readable format name, shared by the Format picker, the card preview, and the deck legality report |
 | `mtgdb/search/models.py` | Immutable search criteria, signatures, worker events, result contracts |
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
-| `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, terminal-event queue, bounded cache |
+| `mtgdb/search/controller.py` | Tk-free search worker lifecycle, generation invalidation, stale-event rejection, progressive first-screen (partial) then terminal event queue, bounded cache |
 | `mtgdb/search/results.py` | Compact immutable Search result rows/store, exact-printing hydration cache, pure table value/filter/sort semantics, complete logical view indexes, generation-protected Results and vocabulary preparation |
 | `mtgdb/search/catalogs.py` | Bounded Content/Platform/Paper/Set-Type trusted-taxonomy snapshot caches and latest-wins background catalog discovery |
 | `mtgdb/search/context.py` | Tk-free latest-wins live draft Search analysis: predictive self-excluding facet counts, numeric ranges, existing-property counts, cancellation/cache, and zero-result relaxation suggestions |

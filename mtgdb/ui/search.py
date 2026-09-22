@@ -3547,6 +3547,20 @@ class SearchFeatureMixin:
                     25, self._poll_search_events)
             return
 
+        if event.kind == "partial":
+            # Paint the first screen immediately, but only when the initial view
+            # is the default name order -- with a sort column or table filter the
+            # true first screen is a different subset than a name-ordered LIMIT.
+            # The full store follows and finalizes the count/context.
+            if not self._sort_col and not self._table_filters.get("results"):
+                self._set_result_store(event.payload, event.signature)
+                self._render_results()
+                self._results_status.start("RESULTS | Searching…")
+            if self.search_controller.running:
+                self._search_poll_after = self.after(
+                    25, self._poll_search_events)
+            return
+
         try:
             self._search_btn.state(["!disabled"])
         except tk.TclError:

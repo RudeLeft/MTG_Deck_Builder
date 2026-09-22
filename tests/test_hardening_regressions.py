@@ -280,7 +280,7 @@ class _BlockingRepository:
     def open_reader(self):
         return _Reader()
 
-    def search_result_store(self, criteria, _reader):
+    def search_result_store(self, criteria, _reader, limit=None):
         if criteria.name == "old":
             self.old_started.set()
             self.release_old.wait(2.0)

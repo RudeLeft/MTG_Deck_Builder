@@ -12,6 +12,14 @@ from mtgdb.search.models import SearchCriteria, SearchEvent, SearchStart
 class SearchController:
     """Execute one search at a time and deliver terminal events through a queue."""
 
+    # A broad search materializes ~100k row objects (~0.7 s). Deliver the first
+    # screenful first, in the default name order, so results paint immediately;
+    # the full store follows for sort/scroll/selection. The UI only renders the
+    # partial when no sort column or table filter is active (otherwise the true
+    # first screen is a different subset), but the controller always offers it --
+    # a capped fetch is a few milliseconds.
+    FIRST_SCREEN = 100
+
     def __init__(self, repository):
         self.repository = repository
         self.events = queue.Queue()
@@ -51,20 +59,31 @@ class SearchController:
             started = time.monotonic()
             try:
                 reader = self.repository.open_reader()
-                results = self.repository.search_result_store(criteria, reader)
-                event = SearchEvent(
-                    "done", generation, signature, results,
-                    time.monotonic() - started)
+                # Fast first screen (default name order). If it did not fill,
+                # it already IS the whole result, so skip the second query.
+                first = self.repository.search_result_store(
+                    criteria, reader, limit=self.FIRST_SCREEN)
+                if first.logical_count >= self.FIRST_SCREEN:
+                    self.events.put(SearchEvent(
+                        "partial", generation, signature, first,
+                        time.monotonic() - started))
+                    full = self.repository.search_result_store(criteria, reader)
+                    self.events.put(SearchEvent(
+                        "done", generation, signature, full,
+                        time.monotonic() - started))
+                else:
+                    self.events.put(SearchEvent(
+                        "done", generation, signature, first,
+                        time.monotonic() - started))
             except Exception as exc:
-                event = SearchEvent(
-                    "error", generation, signature, str(exc), 0.0)
+                self.events.put(SearchEvent(
+                    "error", generation, signature, str(exc), 0.0))
             finally:
                 if reader is not None:
                     try:
                         reader.close()
                     except Exception:
                         pass
-            self.events.put(event)
 
         threading.Thread(target=worker, daemon=True).start()
         return SearchStart("started", generation, signature)
@@ -83,6 +102,10 @@ class SearchController:
     def accept(self, event: SearchEvent):
         if event.generation != self.generation:
             return False
+        # A partial (first-screen) event is not terminal: the full store is
+        # still coming, so keep running and do not cache the partial store.
+        if event.kind == "partial":
+            return True
         self.running = False
         if event.kind == "done":
             results = event.payload

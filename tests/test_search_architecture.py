@@ -331,6 +331,61 @@ def _catalog_reader_and_warm_check():
         return parity and warmed and cached
 
 
+def _progressive_delivery_check():
+    """Broad searches deliver a first screen before the full store.
+
+    Regression guard for SearchController two-phase delivery: a result larger
+    than FIRST_SCREEN emits a partial (first-screen) event then a terminal
+    'done' carrying the full store, and the partial rows are the full store's
+    first FIRST_SCREEN in the same order (no reshuffle when the full set lands).
+    A result that fits in one screen emits only 'done'.
+    """
+    import queue as _queue
+    from mtgdb.search.controller import SearchController
+    from mtgdb.search.results import SearchResultStore
+
+    n = SearchController.FIRST_SCREEN
+
+    class _Repo:
+        def __init__(self, total):
+            self._rows = [{"id": str(i), "name": "%06d" % i} for i in range(total)]
+
+        def open_reader(self):
+            return object()
+
+        def search_result_store(self, _criteria, _reader, limit=None):
+            rows = self._rows if limit is None else self._rows[:limit]
+            return SearchResultStore.from_rows(rows)
+
+    def drain(controller):
+        events = []
+        while True:
+            try:
+                event = controller.events.get(timeout=2.0)
+            except _queue.Empty:
+                break
+            events.append(event)
+            if event.kind in ("done", "error"):
+                break
+        return events
+
+    big = SearchController(_Repo(n * 3))
+    big.start(SearchCriteria(content_types=("card",)))
+    big_events = drain(big)
+    partial = next((e for e in big_events if e.kind == "partial"), None)
+    done = next((e for e in big_events if e.kind == "done"), None)
+    big_ok = (
+        [e.kind for e in big_events] == ["partial", "done"]
+        and partial.payload.logical_count == n
+        and done.payload.logical_count == n * 3
+        and partial.payload.rows == done.payload.rows[:n])
+
+    small = SearchController(_Repo(n // 2))
+    small.start(SearchCriteria(content_types=("card",)))
+    small_ok = [e.kind for e in drain(small)] == ["done"]
+    return big_ok and small_ok
+
+
 def main():
     criteria = SearchCriteria.from_mapping({
         "name": "Bird", "colors": ["W"], "card_types": ["Creature"],
@@ -1651,6 +1706,8 @@ def main():
         "controller delivers and caches a Tk-free result": (
             started.kind == "started" and accepted
             and cached.kind == "unchanged"),
+        "controller streams a first screen before the full result store": (
+            _progressive_delivery_check()),
         "context worker prepares data-derived facets off the Search path": (
             context_worker_prepares_facets),
         "Any facet compatibility does not let a selected OR peer revive zero options": (

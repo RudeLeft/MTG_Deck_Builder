@@ -489,7 +489,7 @@ class SearchQueryBuilder:
         where, params = self.where_sql()
         return f"SELECT COUNT(*) AS match_count FROM cards{where}", params
 
-    def build(self, *, set_codes, columns, ordered=True):
+    def build(self, *, set_codes, columns, ordered=True, limit=None):
         where, params = self.where_sql()
         one_selected_set = (
             set_codes is not None and self.chosen_sets is not None
@@ -506,7 +506,8 @@ class SearchQueryBuilder:
                 raise ValueError("Invalid card-search projection")
             projection = ", ".join(chosen_columns)
         order_sql = f" ORDER BY {order}" if ordered else ""
-        sql = f"SELECT {projection} FROM cards{where}{order_sql}"
+        limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
+        sql = f"SELECT {projection} FROM cards{where}{order_sql}{limit_sql}"
         return sql, params
 
 
@@ -607,20 +608,21 @@ class CardSearchQueryMixin:
                 return self._fetch_dicts(self.conn, sql, params)
         return self._fetch_dicts(connection, sql, params)
 
-    def search_projection(self, *, connection=None, columns, **criteria):
+    def search_projection(self, *, connection=None, columns, limit=None, **criteria):
         """Ordered search returning ``(column_names, row_tuples)`` without dicts.
 
         The interactive Results path builds its ``SearchResultRow`` objects
         straight from these tuples, so materializing a throwaway dict per row
         (over ~100k rows) between SQLite and the row objects is pure overhead.
         Column order matches ``columns`` exactly (``build`` projects them as
-        given), so callers map fields by position.
+        given), so callers map fields by position.  ``limit`` caps the row count
+        for a fast first-screen fetch in the default (name) order.
         """
         builder = _configured_search_builder(**criteria)
         if builder is None:
             return (), []
         sql, params = builder.build(
-            set_codes=criteria.get("set_codes"), columns=columns)
+            set_codes=criteria.get("set_codes"), columns=columns, limit=limit)
         if connection is None:
             with self._lock:
                 return self._fetch_tuples(self.conn, sql, params)

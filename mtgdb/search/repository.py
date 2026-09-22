@@ -37,16 +37,17 @@ class SearchRepository:
             connection=connection, columns=SEARCH_RESULT_COLUMNS,
             **criteria.query_arguments())
 
-    def search_result_store(self, criteria: SearchCriteria, connection):
+    def search_result_store(self, criteria: SearchCriteria, connection, limit=None):
         """Run the ordered results query straight into a SearchResultStore.
 
         Builds the row objects directly from cursor tuples, skipping the
         throwaway dict-per-row the generic ``search`` returns -- material over
-        the ~100k-row broad result set the Results table loads.
+        the ~100k-row broad result set the Results table loads.  ``limit`` caps
+        the fetch for a fast first-screen store in the default (name) order.
         """
         from mtgdb.search.results import SearchResultStore
         columns, rows = self._db.search_projection(
-            connection=connection, columns=SEARCH_RESULT_COLUMNS,
+            connection=connection, columns=SEARCH_RESULT_COLUMNS, limit=limit,
             **criteria.query_arguments())
         return SearchResultStore.from_projection(columns, rows)
 
