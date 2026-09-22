@@ -345,6 +345,13 @@ def main():
         "3 Banned Card\n"
         "2 Totally Absent Card\n",
         resolver)
+    # Other builders put a card count in the header parens ("// Lands (37)"); a
+    # purely numeric value is not a format and must not overwrite deck.fmt (which
+    # would leave a bare "37" on the format button). A real format still applies.
+    count_header, _count_missing = deck_from_text(
+        "// Lands (37)\n4 Hybrid Spell [TST:10]\n", resolver, fmt="commander")
+    real_header, _real_missing = deck_from_text(
+        "// Duels (pauper)\n4 Hybrid Spell [TST:10]\n", resolver, fmt="commander")
 
     # card_faces arrives as JSON text from the database; iterating the raw
     # column walks characters and silently drops every face's rules text.
@@ -608,6 +615,9 @@ def main():
                  for entry in imported.entries()]
             == [(entry["card"]["id"], entry["qty"], entry["board"])
                 for entry in method_imported.entries()]),
+        "numeric TXT header value is a card count, not the deck format": (
+            count_header.name == "Lands" and count_header.fmt == "commander"
+            and real_header.name == "Duels" and real_header.fmt == "pauper"),
         "section and authoritative set-tag behavior is preserved": (
             sectioned.total("main") == 1 and sectioned.total("side") == 2
             and section_missing == ["Missing Card [TST:999]"]

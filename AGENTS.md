@@ -939,7 +939,10 @@ every feature together and is exempt.
   ordinary four-copy/singleton ceiling without hardcoded card names.
   _Verification:_ **AUTO**.
 - **DECK-007 — MUST:** Treat `[SET]`/`[SET:COLLECTOR]` TXT tags as authoritative,
-  preserve saved name/format, and retain Mainboard/Sideboard/ignored sections.
+  preserve saved name/format, and retain Mainboard/Sideboard/ignored sections. A
+  `// Name (value)` header only sets the deck format when `value` contains a
+  letter; a purely numeric parenthesized value is a card count some other builders
+  emit (`// Lands (37)`), not a format, and MUST NOT overwrite the deck format.
   _Verification:_ **AUTO**.
 - **DECK-008 — MUST:** Preserve quantity-weighted statistics, hybrid pip
   counting, produced-mana source counting, eight curve buckets, and draw

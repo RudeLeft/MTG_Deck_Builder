@@ -139,7 +139,13 @@ def deck_from_text(text, resolver, name="Imported Deck", fmt="commander",
                 saved_name, saved_format = metadata.groups()
                 deck.name = saved_name.strip() or deck.name
                 saved_format = saved_format.strip().lower()
-                if saved_format:
+                # A format name always contains letters (commander, modern,
+                # historicbrawl). Other builders instead put a card count in the
+                # header parens -- "// Lands (37)" -- so a purely numeric value is
+                # that count, not a format, and must not overwrite the deck's
+                # format (which would leave a bare "37" on the format button).
+                if saved_format and any(character.isalpha()
+                                        for character in saved_format):
                     deck.fmt = saved_format
             continue
         if line.startswith("#"):
