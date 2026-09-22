@@ -145,10 +145,6 @@ def _sash_restore_survives_late_layout():
     class _Pane:
         def __init__(self):
             self.pos = 300  # startup default, far from the saved split
-            self.height = 1151  # boards pane height before the late shrink
-
-        def winfo_height(self):
-            return self.height
 
         def sashpos(self, _index, value=None):
             if value is None:
@@ -160,6 +156,7 @@ def _sash_restore_survives_late_layout():
         def __init__(self, pane):
             self._boards_panes = pane
             self._restored_workspace_geometry = {"boards": [target]}
+            self._boards_sash_grabbed = False  # no user drag in this scenario
             self._queue = []
 
         def after(self, _ms, callback):
@@ -170,16 +167,13 @@ def _sash_restore_survives_late_layout():
     app = _App(pane)
     # A one-time layout event drags the sash after it first looks settled but
     # before the minimum settle window elapses; an early-exiting restore would
-    # already have stopped and never correct it. A real layout pass moves the
-    # sash by resizing the pane, so the shrink changes the pane height too --
-    # that is what tells the restore it was layout, not the user.
+    # already have stopped and never correct it.
     late_drift_tick = WorkspaceMixin._SASH_RESTORE_MIN_ATTEMPTS // 2
     app._restore_workspace_geometry()
     guard = WorkspaceMixin._SASH_RESTORE_MAX_ATTEMPTS + 5
     for tick in range(1, guard + 1):
         if tick == late_drift_tick:
             pane.pos = 623  # the pane shrinks and drags the sash short
-            pane.height = 1085  # ...and the pane height shrinks with it
         if app._queue:
             app._queue.pop(0)()
     return pane.pos == target and not app._queue
@@ -190,9 +184,8 @@ def _sash_restore_yields_to_user_drag():
 
     Regression: the re-apply window kept snapping the sash back to the saved
     split for several seconds, so a deliberate drag in that window was reverted.
-    A user drag moves the sash WITHOUT resizing the pane, so a drift with an
-    unchanged pane height must be honoured -- the restore stops instead of
-    reverting it.
+    A real drag sets ``_boards_sash_grabbed`` (window.py, on <B1-Motion>), and
+    the restore must honour that flag -- stop restoring instead of reverting.
     """
     from mtgdb.ui.workspace import WorkspaceMixin
 
@@ -202,10 +195,6 @@ def _sash_restore_yields_to_user_drag():
     class _Pane:
         def __init__(self):
             self.pos = 300
-            self.height = 1151  # stays fixed: a drag does not resize the pane
-
-        def winfo_height(self):
-            return self.height
 
         def sashpos(self, _index, value=None):
             if value is None:
@@ -217,6 +206,7 @@ def _sash_restore_yields_to_user_drag():
         def __init__(self, pane):
             self._boards_panes = pane
             self._restored_workspace_geometry = {"boards": [target]}
+            self._boards_sash_grabbed = False
             self._queue = []
 
         def after(self, _ms, callback):
@@ -227,11 +217,12 @@ def _sash_restore_yields_to_user_drag():
     app = _App(pane)
     app._restore_workspace_geometry()
     guard = WorkspaceMixin._SASH_RESTORE_MAX_ATTEMPTS + 5
-    # Well before the settle window ends, the user drags the sash. The pane
-    # height does not change, so the restore must recognise the drag and stop.
+    # Well before the settle window ends, the user grabs and drags the sash (the
+    # drag binding raises the flag); the restore must recognise it and stop.
     drag_tick = 5
     for tick in range(1, guard + 1):
         if tick == drag_tick:
+            app._boards_sash_grabbed = True
             pane.pos = dragged
         if app._queue:
             app._queue.pop(0)()

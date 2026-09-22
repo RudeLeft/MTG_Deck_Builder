@@ -178,19 +178,23 @@ class WorkspaceMixin:
     # any drift) until BOTH a minimum settle window has passed and the sash has
     # held, capped so a pathological layout cannot loop forever.
     #
-    # But that same re-apply window must not fight the user: if they drag a sash
-    # during those seconds, we would snap it back. A layout pass only moves a sash
-    # by resizing the pane, so a drift with an UNCHANGED pane height is the user's
-    # own drag -- yield to it and stop restoring, rather than reverting them.
+    # But that same re-apply window must not fight the user: if they drag the sash
+    # during those seconds, we would snap it back. ``_boards_sash_grabbed`` is set
+    # only by a real drag on the boards sash (never by startup window sizing), so
+    # the moment it is set we stop restoring and leave the sash where they put it.
     _SASH_RESTORE_TOLERANCE = 4
     _SASH_RESTORE_RETRY_MS = 25
     _SASH_RESTORE_MIN_ATTEMPTS = 160
     _SASH_RESTORE_MAX_ATTEMPTS = 320
     _SASH_RESTORE_CONFIRM = 3
 
-    def _restore_workspace_geometry(self, _attempt=0, _holds=0, _prev_heights=None):
+    def _restore_workspace_geometry(self, _attempt=0, _holds=0):
         state = getattr(self, "_restored_workspace_geometry", None)
         if not isinstance(state, dict):
+            return
+        # A deliberate sash drag takes precedence over the saved split: once the
+        # user has grabbed the sash, stop restoring instead of reverting them.
+        if getattr(self, "_boards_sash_grabbed", False):
             return
         # Older workspaces may contain ``main``/``middle`` sash positions; those
         # keys are intentionally ignored now that the main shell is fixed-layout.
@@ -203,17 +207,7 @@ class WorkspaceMixin:
         if not panes:
             return
         drifted = False
-        user_moved = False
-        heights = []
-        for index, (widget, positions) in enumerate(panes):
-            try:
-                height = int(widget.winfo_height())
-            except tk.TclError:
-                height = -1
-            heights.append(height)
-            prev = (_prev_heights[index]
-                    if _prev_heights is not None and index < len(_prev_heights)
-                    else None)
+        for widget, positions in panes:
             for i, pos in enumerate(positions):
                 target = max(40, int(pos))
                 try:
@@ -221,17 +215,9 @@ class WorkspaceMixin:
                     # so a short value here means the pane was still growing.
                     if abs(int(widget.sashpos(i)) - target) > self._SASH_RESTORE_TOLERANCE:
                         drifted = True
-                        # A drift with no pane-height change since our last tick is
-                        # the user dragging the sash, not a startup layout pass:
-                        # leave it where they put it.
-                        if prev is not None and height == prev:
-                            user_moved = True
-                        else:
-                            widget.sashpos(i, target)
+                        widget.sashpos(i, target)
                 except (tk.TclError, TypeError, ValueError):
                     pass
-        if user_moved:
-            return
         holds = 0 if drifted else _holds + 1
         settled = (holds >= self._SASH_RESTORE_CONFIRM
                    and _attempt >= self._SASH_RESTORE_MIN_ATTEMPTS)
@@ -239,7 +225,6 @@ class WorkspaceMixin:
             try:
                 self.after(
                     self._SASH_RESTORE_RETRY_MS,
-                    lambda: self._restore_workspace_geometry(
-                        _attempt + 1, holds, tuple(heights)))
+                    lambda: self._restore_workspace_geometry(_attempt + 1, holds))
             except tk.TclError:
                 pass

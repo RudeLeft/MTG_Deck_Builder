@@ -459,6 +459,11 @@ class WindowServicesMixin:
         self._layout_motion_stats = {
             "begins": 0, "settles": 0, "configure_events": 0,
         }
+        # Set only when the user actually drags the retained boards sash. Unlike
+        # ``_window_in_motion`` (which every window <Configure> raises, including
+        # startup sizing), this is a clean "the user grabbed the sash" signal, so
+        # the startup sash restore can yield to a deliberate drag.
+        self._boards_sash_grabbed = False
 
     def _register_layout_settle_callback(self, callback):
         callbacks = getattr(self, "_layout_settle_callbacks", None)
@@ -539,6 +544,10 @@ class WindowServicesMixin:
 
         def drag(_event):
             self._touch_layout_motion()
+            # A real drag movement (not just a press, which can land on pane
+            # content) means the user is placing the sash themselves; the startup
+            # restore must stop fighting them.
+            self._boards_sash_grabbed = True
             # The ttk class binding moves the sash after this instance binding.
             # Clamp on idle so no pane can spend a visible frame below its
             # action-safe minimum while the pointer is still down.
