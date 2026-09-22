@@ -51,6 +51,54 @@ class _Resolver:
         }
 
 
+def _token_tag_resolution():
+    """DUI-015: an explicit tag may resolve a token; an untagged name may not.
+
+    Decks this app exports carry their own tokens as tagged entries, so a
+    round-trip must not silently drop them -- but a bare untagged name must stay
+    Cards-only and never resolve to a token/emblem/art printing.
+    """
+    import atexit
+    import os
+    import shutil
+    import tempfile
+
+    from mtgdb.database.db import CardDB
+
+    workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = CardDB(os.path.join(workspace, "cards.db"))
+    db.load_cards([{
+        "id": "tok1", "oracle_id": "gob", "name": "Goblin",
+        "type_line": "Token Creature — Goblin", "layout": "token",
+        "set": "tst", "set_name": "Token Set", "set_type": "token",
+        "collector_number": "1", "lang": "en", "released_at": "2012-01-01",
+        "games": ["paper"], "colors": ["R"], "power": "1", "toughness": "1",
+    }])
+
+    tagged = db.get_by_name(
+        "Goblin", allowed_set_codes={"tst"}, allowed_collector_numbers={"1"},
+        paper_only=False, lang=None, allow_non_card=True)
+    untagged = db.get_by_name("Goblin", paper_only=False, lang=None)
+
+    tagged_deck, tagged_missing = deck_from_text(
+        "1 Goblin [TST:1]\n", db, name="t", fmt="commander")
+    untagged_deck, untagged_missing = deck_from_text(
+        "1 Goblin\n", db, name="t", fmt="commander")
+    db.close()
+
+    return {
+        "an explicit tag resolves a token printing (tokens survive a round-trip)": (
+            tagged is not None and str(tagged.get("layout")) == "token"
+            and str(tagged.get("collector_number")) == "1"
+            and not tagged_missing and tagged_deck.total("main") == 1),
+        "an untagged name stays Cards-only (never resolves to a token)": (
+            untagged is None
+            and untagged_missing == ["Goblin"]
+            and untagged_deck.total("main") == 0),
+    }
+
+
 def main():
     source = (ROOT / "mtgdb/ui/deck_files.py").read_text(encoding="utf-8")
     app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
@@ -123,6 +171,7 @@ def main():
             and tagged_options.get("lang") is None),
         "unrestricted import still resolves both rows": (
             not missing and imported.total("main") == 2),
+        **_token_tag_resolution(),
     }
 
     ok = True

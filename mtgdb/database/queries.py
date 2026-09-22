@@ -123,7 +123,8 @@ class CardQueryMixin:
             reader.close()
 
     def get_by_name(self, name, allowed_set_types=None, allowed_set_codes=None,
-                    allowed_collector_numbers=None, *, paper_only=True, lang=None):
+                    allowed_collector_numbers=None, *, paper_only=True, lang=None,
+                    allow_non_card=False):
         """
         Resolve an imported decklist name to the best conventional printing
         available in the local database within the requested printings scope.
@@ -149,10 +150,18 @@ class CardQueryMixin:
         even when two physical cards share a name and set (notably B.F.M.).
         ``paper_only`` and ``lang`` apply to untagged-card resolution; callers
         may disable them for an explicit authoritative [SET] tag.
+        ``allow_non_card`` keeps token/emblem/art-series printings eligible: an
+        untagged name must never resolve to a token, but an explicit [SET] or
+        [SET:COLLECTOR] tag can legitimately point at one (decks exported by this
+        app carry their tokens as tagged entries), so the tagged path opts in.
         """
-        placeholders = ",".join("?" * len(NON_CARD_LAYOUTS))
-        importable = f"(layout IS NULL OR layout NOT IN ({placeholders}))"
-        import_params = list(NON_CARD_LAYOUTS)
+        if allow_non_card:
+            importable = "1=1"
+            import_params = []
+        else:
+            placeholders = ",".join("?" * len(NON_CARD_LAYOUTS))
+            importable = f"(layout IS NULL OR layout NOT IN ({placeholders}))"
+            import_params = list(NON_CARD_LAYOUTS)
         if paper_only:
             importable += " AND paper = 1"
         if lang:

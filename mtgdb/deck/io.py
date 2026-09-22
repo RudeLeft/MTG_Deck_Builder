@@ -188,7 +188,11 @@ def deck_from_text(text, resolver, name="Imported Deck", fmt="commander",
                     {explicit_collector}
                     if explicit_collector is not None else None),
                 paper_only=False,
-                lang=None)
+                lang=None,
+                # An explicit [SET]/[SET:COLLECTOR] tag is authoritative and may
+                # legitimately name a token/emblem/art printing (this app exports
+                # deck tokens as tagged entries), so keep those layouts eligible.
+                allow_non_card=True)
                     if resolver else None)
         else:
             card_name = card_spec

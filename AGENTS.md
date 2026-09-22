@@ -1043,8 +1043,12 @@ every feature together and is exempt.
   MUST NOT open or consume a Printings/filter picker. Resolver ranking MAY choose the
   best conventional printing from the unrestricted candidate set, while explicit
   `[SET]` and `[SET:COLLECTOR]` tags remain authoritative exact-printing requests.
-  Import MUST remain Cards-only through the resolver's normal non-card-layout guard.
-  _Verification:_ **AUTO**.
+  Untagged name resolution MUST remain Cards-only through the resolver's normal
+  non-card-layout guard, so a bare name never resolves to a token/emblem/art-series
+  printing. An explicit `[SET]`/`[SET:COLLECTOR]` tag MAY resolve a non-card
+  (token/emblem/art-series) printing when the tagged row exists: decks this app
+  exports carry their own tokens as tagged entries, so a deck round-trip MUST NOT
+  silently drop them. _Verification:_ **AUTO**.
 
 - **DUI-016 — MUST:** Do not render a duplicate `N main · N side` count above the
   deck boards. The section headings MUST display `MAINBOARD | N CARDS` and
