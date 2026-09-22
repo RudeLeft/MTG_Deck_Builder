@@ -14,6 +14,28 @@ from mtgdb.ui.tokens import (
 )
 
 
+class _BoardsPaned(tk.PanedWindow):
+    """Classic PanedWindow with a ttk-compatible ``sashpos`` for the boards sash.
+
+    ``ttk.PanedWindow`` has no non-opaque resize, so dragging the Mainboard/
+    Sideboard divider re-lays-out and repaints the deck Treeviews on every motion
+    event -- visible clipping, and a horizontal scrollbar that recomputes on each
+    pixel of the drag. The classic widget with ``opaqueresize=False`` moves only a
+    ghost sash line while dragging and re-lays-out once on release, so the drag is
+    smooth and the trees repaint a single time. The sash position is exposed as
+    ``sashpos(index[, pos])`` -- a vertical sash's Y coordinate, matching the ttk
+    API -- so the retained-geometry capture/restore/clamp keep working unchanged.
+    """
+
+    def sashpos(self, index, newpos=None):
+        if newpos is None:
+            return int(self.sash_coord(index)[1])
+        # The X argument only positions along a horizontal (vertical-orient) sash,
+        # so any valid value works; the Y argument is the retained split position.
+        self.sash_place(index, 1, int(newpos))
+        return int(newpos)
+
+
 def deck_action_layout_mode(available_width, requested_widths, previous=None,
                             *, gap=4, hysteresis=18):
     """Choose a non-clipping layout from actual requested widget widths."""
@@ -79,14 +101,21 @@ class DeckEditorMixin:
         self._build_comparison_bar(parent)
 
         # Mainboard and sideboard are separated by a draggable vertical sash so
-        # the user can choose how much room each list receives.
-        boards = ttk.PanedWindow(parent, orient="vertical")
+        # the user can choose how much room each list receives. Non-opaque resize
+        # keeps the drag smooth: the deck Treeviews re-lay-out once on release
+        # instead of clipping/recomputing their scrollbars on every motion event.
+        # Native per-pane minima stop the sash at a usable size without the
+        # after-idle clamp fighting the drag at the edges.
+        boards = _BoardsPaned(
+            parent, orient="vertical", opaqueresize=False,
+            background=PALETTE["bg"], sashwidth=6, sashrelief="flat",
+            borderwidth=0, showhandle=False)
         boards.pack(fill="both", expand=True, pady=(2, 0))
 
         main_frame = ttk.Frame(boards)
         side_frame = ttk.Frame(boards)
-        boards.add(main_frame, weight=3)
-        boards.add(side_frame, weight=1)
+        boards.add(main_frame, minsize=160, stretch="always")
+        boards.add(side_frame, minsize=160, stretch="always")
         self._boards_panes = boards
         self._register_paned_motion(boards)
 

@@ -551,6 +551,17 @@ def main():
             and 'SIDEBOARD | ' in editor_source
             and all(marker in editor_source for marker in (
                 'orient="vertical"', 'role="tab_add"', 'role="tab_overflow"'))),
+        # WIN-010 (no clipping/oscillation while dragging the divider) has no
+        # deterministic runtime check; lock in the mechanism that delivers it.
+        # The classic PanedWindow with opaqueresize=False re-lays-out the deck
+        # Treeviews once on release instead of clipping them every motion event,
+        # and native per-pane minima stop the sash without an after-idle clamp.
+        "boards divider drags smoothly via a non-opaque paned window": (
+            "class _BoardsPaned(tk.PanedWindow)" in editor_source
+            and "boards = _BoardsPaned(" in editor_source
+            and "opaqueresize=False" in editor_source
+            and "minsize=160, stretch=" in editor_source
+            and "ttk.PanedWindow(" not in editor_source),
         "deck actions use DPI-safe requested widths without clipping": (
             deck_action_layout_mode(wide_needed, dpi_widths) == "wide"
             and deck_action_layout_mode(wide_needed - 1, dpi_widths, "wide") == "two"
