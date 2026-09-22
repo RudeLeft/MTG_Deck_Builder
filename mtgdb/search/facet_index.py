@@ -261,6 +261,7 @@ class FacetIndex:
             buf[i >> 3] |= 1 << (i & 7)
 
         for i, row in enumerate(rows):
+            cmc_value = None
             for field in _NUMERIC_FIELDS:
                 value = _finite(row.get(field))
                 if value is not None:
@@ -269,13 +270,14 @@ class FacetIndex:
                 if field == "cmc":
                     # cmc is a REAL column; SQL filters it directly, so float()
                     # matches CAST here.
+                    cmc_value = value
                     if value is not None:
                         numeric_filter[field].set(value, i)
                 else:
                     raw = row.get(field)
                     if _glob_numeric(raw):
                         numeric_filter[field].set(_cast_real(raw), i)
-            if _finite(row.get("cmc")) is not None and _has_meaningful_mana_cost(row):
+            if cmc_value is not None and _has_meaningful_mana_cost(row):
                 mark(meaningful, i)
             represented = set()
             for symbol in _mana_cost_symbol_colors(str(row.get("mana_cost") or "")):

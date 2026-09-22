@@ -772,8 +772,17 @@ class SearchContextController:
             columns = ", ".join(FacetIndex.INDEX_COLUMNS)
             build_reader = self.repository.open_reader()
             try:
-                rows = [dict(row) for row in
-                        build_reader.execute(f"SELECT {columns} FROM cards")]
+                # Build plain-dict rows from tuples: ``dict(sqlite3.Row)`` walks the
+                # mapping protocol per column and is ~3x slower over this ~118k-row
+                # projection.  A private cursor with its row_factory cleared yields
+                # tuples without disturbing the reader's Row factory.  Identical
+                # dicts to the former ``dict(row)`` path (see search_queries
+                # ._fetch_dicts, which does the same for the worker scans).
+                cursor = build_reader.cursor()
+                cursor.row_factory = None
+                cursor.execute(f"SELECT {columns} FROM cards")
+                keys = [description[0] for description in cursor.description]
+                rows = [dict(zip(keys, values)) for values in cursor.fetchall()]
             finally:
                 try:
                     build_reader.close()
