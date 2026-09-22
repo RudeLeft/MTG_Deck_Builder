@@ -7,15 +7,17 @@ filters' bitsets, and per-value contextual counts are popcounts of that
 intersection AND the candidate value -- microseconds instead of a per-bucket
 SQLite rescan.
 
-The bitsets mirror ``SearchQueryBuilder`` exactly; the only filters a bitset
-cannot reproduce -- free-text name/rules/type-line search, and a mana-symbol
-*minimum* count (its hybrid-counts-once rule is per-query) -- make
-:meth:`filter_bitset` return ``None`` so the caller falls back to the canonical
-SQLite worker.  Everything else, including format legality, numeric ranges
-(mana value, power, toughness, loyalty, defense), and default mana-symbol color
-presence, is represented, so the common deck-building filters recompute in
-~1 ms instead of a multi-second SQLite rescan.  Coverage is verified
-byte-identical against ``count_search`` before use.
+The bitsets mirror ``SearchQueryBuilder`` exactly.  Free-text name/rules search
+is represented by scanning the stored name / normalized-oracle corpora once per
+query into a bitset (see ``_free_text_bitset``); the only filter a bitset cannot
+reproduce is a mana-symbol *minimum* count (its hybrid-counts-once rule is
+per-query), which makes :meth:`filter_bitset` return ``None`` so the caller
+falls back to the canonical SQLite worker.  Everything else -- format legality,
+numeric ranges (mana value, power, toughness, loyalty, defense), default
+mana-symbol color presence, and free text -- is represented, so the common
+deck-building filters recompute in tens of milliseconds instead of a
+multi-second SQLite rescan.  Coverage is verified byte-identical against
+``count_search`` before use.
 """
 
 from __future__ import annotations
@@ -25,7 +27,8 @@ import re
 from mtgdb.database.constants import (
     ART_LAYOUTS, COLORS, PLAYABLE_LEGALITY_STATUSES)
 from mtgdb.database.semantics import (
-    _card_content_kind, _mana_cost_symbol_colors, _type_line_search_parts,
+    _card_content_kind, _mana_cost_symbol_colors, _normalize_rules_text,
+    _type_line_search_parts,
 )
 from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
@@ -40,6 +43,12 @@ _NUMERIC_FIELDS = ("cmc", "power", "toughness", "loyalty", "defense")
 _ART_LAYOUT_KEYS = frozenset(str(v).casefold() for v in ART_LAYOUTS)
 _PRODUCED_MEMBERS = (*COLORS, "C")
 _GAME_PLATFORMS = ("paper", "mtgo", "arena")
+
+# SQLite's built-in LIKE / COLLATE NOCASE fold only ASCII A-Z, so the ``name``
+# match must fold the same way (oracle_text_search is already casefolded at
+# import, so plain substring matching mirrors its LIKE exactly).
+_ASCII_LOWER = str.maketrans({c: c + 32 for c in range(0x41, 0x5B)})
+_TEXT_QUOTES = {'"', "“", "”"}
 
 
 def _type_key(value):
@@ -116,12 +125,18 @@ class FacetIndex:
         "reserved", "game_changer", "universes_beyond", "card_faces",
         "power", "toughness", "cmc", "loyalty", "defense", "legalities",
         "set_code", "set_type", "games", "lang", "paper",
+        "name", "oracle_text_search",
     )
 
     def __init__(self, rows):
         rows = list(rows)
         self.n = len(rows)
         self.universe = (1 << self.n) - 1
+        # Small bounded cache of computed free-text bitsets, keyed by the
+        # name/rules criteria: while a text chip is active every other filter
+        # pick re-enters the fast path, and the text scan is by far its most
+        # expensive fragment, so reusing it across picks keeps picks instant.
+        self._text_cache = {}
         self._build(rows)
         self._build_extra(rows)
 
@@ -153,6 +168,10 @@ class FacetIndex:
         self._type_left_words = [()] * n     # tuple of word-tuples per face
         self._subtype_texts = [()] * n       # normalized subtype strings
         self._released = [""] * n
+        # Free-text search corpora scanned per query.  Names are ASCII-folded to
+        # mirror LIKE/COLLATE NOCASE; oracle_text_search is already normalized.
+        self._name_lower = [""] * n
+        self._oracle_search = [""] * n
 
         def mark(buf, i):
             buf[i >> 3] |= 1 << (i & 7)
@@ -166,6 +185,8 @@ class FacetIndex:
                 store.set(member, i)
 
         for i, row in enumerate(rows):
+            self._name_lower[i] = str(row.get("name") or "").translate(_ASCII_LOWER)
+            self._oracle_search[i] = str(row.get("oracle_text_search") or "")
             layout_value = row.get("layout")
             layout_key = str(layout_value or "").casefold().strip()
             content.set(_card_content_kind(layout_value, row.get("type_line")), i)
@@ -316,15 +337,13 @@ class FacetIndex:
     def representable(self, q):
         """True when every active filter has a bitset predicate.
 
-        Free-text name/rules/type-line search has no bitset predicate, so it
-        still falls back to the SQLite worker.  A mana-symbol *minimum* count
-        (with the hybrid-counts-once rule) is per-query and also falls back.
-        Everything else -- including format legality, numeric ranges, and
-        mana-symbol color presence (the default, no-minimum pip filter) -- is
-        represented (see ``_fragments``).
+        Free-text name/rules search is represented by scanning the stored name /
+        oracle corpora once per query into a bitset (see ``_free_text_bitset``),
+        so it no longer forces the SQLite fallback.  Only a mana-symbol *minimum*
+        count (its hybrid-counts-once rule is per-query) still falls back;
+        everything else -- format legality, numeric ranges, mana-symbol color
+        presence (the default, no-minimum pip filter) -- is represented.
         """
-        if q.name or q.names or q.text:
-            return False
         if q.pip_min is not None:
             return False
         return True
@@ -343,6 +362,7 @@ class FacetIndex:
             return None
         set_type_bs, set_code_bs, lang_bs = printing
         return {
+            "free_text": self._free_text_bitset(q),
             "content": self._scope_bitset(q.content_types),
             "card_types": self._terms(q.card_types, q.card_type_mode, self._type_bitset),
             "supertypes": self._terms(q.supertypes, q.supertype_mode, self._type_bitset),
@@ -377,6 +397,103 @@ class FacetIndex:
             "defense": self._numeric_range_bitset(
                 "defense", q.defense_min, q.defense_max),
         }
+
+    def _free_text_bitset(self, q):
+        """Bitset for the name/names/rules-text criteria (universe if none).
+
+        Mirrors ``SearchQueryBuilder.add_name_and_rules`` exactly: exact
+        ``names`` (case-insensitive equality) take precedence over a ``name``
+        substring, ANDed with the rules-text clause.  Cached per criteria so
+        successive picks with the same text reuse the scan.
+        """
+        if not q.name and not q.names and not q.text:
+            return self.universe
+        key = (str(q.name or ""), tuple(q.names or ()),
+               tuple(q.text or ()), str(q.text_mode or ""))
+        cached = self._text_cache.get(key)
+        if cached is not None:
+            return cached
+        value = (self._name_terms_bitset(q.name, q.names)
+                 & self._text_bitset(q.text, q.text_mode))
+        self._text_cache[key] = value
+        if len(self._text_cache) > 16:
+            self._text_cache.pop(next(iter(self._text_cache)))
+        return value
+
+    def _name_terms_bitset(self, name, names):
+        """Mirror the name clause: exact ``names`` else a ``name`` substring."""
+        exact = []
+        seen = set()
+        for value in names or ():
+            value = str(value or "").strip()
+            fold = value.casefold()
+            if value and fold not in seen:
+                seen.add(fold)
+                exact.append(value.translate(_ASCII_LOWER))
+        if exact:
+            wanted = set(exact)
+            result = 0
+            for i, lowered in enumerate(self._name_lower):
+                if lowered in wanted:
+                    result |= 1 << i
+            return result
+        if name:
+            needle = str(name).translate(_ASCII_LOWER)
+            result = 0
+            for i, lowered in enumerate(self._name_lower):
+                if needle in lowered:
+                    result |= 1 << i
+            return result
+        return self.universe
+
+    def _text_bitset(self, text, text_mode):
+        """Mirror the rules-text clause over the normalized oracle corpus.
+
+        Each chip is a quoted contiguous phrase or an AND of normalized words;
+        chips combine by OR for any/none and AND for all, with none negating.
+        """
+        raw_terms = ([text] if isinstance(text, str)
+                     else [str(term).strip() for term in (text or [])
+                           if str(term).strip()])
+        groups = []
+        for raw in raw_terms:
+            raw = str(raw or "").strip()
+            if not raw:
+                continue
+            quoted = (len(raw) >= 2 and raw[0] in _TEXT_QUOTES
+                      and raw[-1] in _TEXT_QUOTES)
+            if quoted:
+                phrase = _normalize_rules_text(raw[1:-1])
+                if not phrase:
+                    continue
+                bitset = 0
+                for i, corpus in enumerate(self._oracle_search):
+                    if phrase in corpus:
+                        bitset |= 1 << i
+                groups.append(bitset)
+                continue
+            words = [word for word in _normalize_rules_text(raw).split() if word]
+            if not words:
+                continue
+            bitset = 0
+            for i, corpus in enumerate(self._oracle_search):
+                if all(word in corpus for word in words):
+                    bitset |= 1 << i
+            groups.append(bitset)
+        if not groups:
+            return self.universe
+        mode = str(text_mode).casefold()
+        if mode in ("any", "none"):
+            result = 0
+            for group in groups:
+                result |= group
+        else:
+            result = self.universe
+            for group in groups:
+                result &= group
+        if mode == "none":
+            result = self.universe & ~result
+        return result
 
     def _format_filter(self, fmt, status):
         """Mirror SearchQueryBuilder.add_rarity_and_format's legality clause."""

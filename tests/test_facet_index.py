@@ -140,6 +140,26 @@ def main():
             pips=("W", "U"), pip_mode="all"),
         "pips_none_g": SearchCriteria(content_types=("card",),
             pips=("G",), pip_mode="none"),
+        # Free-text name/rules search is now bitset-representable (scanned per
+        # query), so every text draft must match count_search and the worker
+        # exactly rather than falling back.
+        "name_substring": SearchCriteria(content_types=("card",), name="bolt"),
+        "names_exact": SearchCriteria(content_types=("card",),
+            names=("Lightning Bolt", "Counterspell")),
+        "rules_word_all": SearchCriteria(content_types=("card",), text=("draw",)),
+        "rules_multiword_all": SearchCriteria(content_types=("card",),
+            text=("draw a card",)),
+        "rules_two_any": SearchCriteria(content_types=("card",),
+            text=("draw", "destroy"), text_mode="any"),
+        "rules_two_none": SearchCriteria(content_types=("card",),
+            text=("token", "creature"), text_mode="none"),
+        "rules_quoted_phrase": SearchCriteria(content_types=("card",),
+            text=('"draw a card"',)),
+        "text_plus_color_cmc": SearchCriteria(content_types=("card",),
+            text=("creature",), colors=("G",), color_mode="any",
+            cmc_min=2.0, cmc_max=5.0),
+        "name_plus_format": SearchCriteria(content_types=("card",),
+            name="a", fmt="modern"),
     }
 
     checks = {}
@@ -198,17 +218,19 @@ def main():
     checks["subtype match is whitespace-bounded (Urza != Urza's Saga)"] = (
         urza_partial == 0 and saga_full == 1 and saga_word == 1)
 
-    # 5. Free text and an explicit mana-symbol minimum still decline so the
-    #    caller keeps the SQLite worker; format, numeric ranges, and default
-    #    mana-symbol presence no longer fall back.
-    checks["text/pip-minimum criteria fall back (None)"] = all(
+    # 5. Only an explicit mana-symbol minimum still declines (its hybrid
+    #    counts-once rule is per-query) so the caller keeps the SQLite worker;
+    #    free text, format, numeric ranges, and default mana-symbol presence are
+    #    all represented.
+    checks["pip-minimum criteria fall back (None)"] = all(
         index.filter_bitset(c) is None and index.context_counts(c, vocab) is None
         for c in (
-            SearchCriteria(content_types=("card",), text=("bear",)),
-            SearchCriteria(content_types=("card",), pips=("G",), pip_min=2)))
-    checks["format, numeric, and pip presence are represented (no fallback)"] = all(
+            SearchCriteria(content_types=("card",), pips=("G",), pip_min=2),))
+    checks["text, format, numeric, and pip presence are represented (no fallback)"] = all(
         index.filter_bitset(c) is not None and index.context_counts(c, vocab) is not None
         for c in (
+            SearchCriteria(content_types=("card",), text=("bear",)),
+            SearchCriteria(content_types=("card",), name="bolt"),
             SearchCriteria(content_types=("card",), fmt="modern"),
             SearchCriteria(content_types=("card",), cmc_min=1.0),
             SearchCriteria(content_types=("card",), power_min=1.0, power_max=3.0),
