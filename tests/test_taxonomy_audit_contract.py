@@ -66,6 +66,10 @@ def main():
             and "tests/taxonomy_audit.py --current" in workflow),
         "CI retains Markdown audit evidence": (
             "taxonomy-audit.md" in workflow and "upload-artifact@v4" in workflow),
+        "CI alerts on drift by opening a tracking issue when the audit fails": (
+            "issues: write" in workflow
+            and "steps.audit.conclusion == 'failure'" in workflow
+            and "gh issue create" in workflow),
     }
     ok = True
     for label, passed in checks.items():

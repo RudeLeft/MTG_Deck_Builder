@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  # Needed by the drift-alert step below, which opens a tracking issue when the
+  # audit fails so a new Scryfall layout/legality status cannot rot unnoticed.
+  issues: write
 
 jobs:
   taxonomy-audit:
@@ -25,6 +28,7 @@ jobs:
         run: python -m pip install -e .
 
       - name: Audit current Scryfall Default Cards snapshot
+        id: audit
         run: python tests/taxonomy_audit.py --current --report taxonomy-audit.md
 
       - name: Upload audit evidence
@@ -34,3 +38,29 @@ jobs:
           name: scryfall-taxonomy-audit
           path: taxonomy-audit.md
           if-no-files-found: warn
+
+      - name: Open a drift issue when the audit fails
+        # The audit exits non-zero only when current Scryfall data contains a
+        # layout or legality status this build cannot classify -- real drift that
+        # needs a code change. Turn that into an actionable, deduplicated issue
+        # instead of a buried failed-run email.
+        if: failure() && steps.audit.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Scryfall taxonomy drift needs attention"
+          body_file=taxonomy-audit.md
+          if [ ! -f "$body_file" ]; then
+            printf 'The taxonomy audit failed before producing a report; see the run logs.\n' > "$body_file"
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf '\n\n---\nAudit run: %s\n' "$run_url" >> "$body_file"
+          existing=$(gh issue list --state open --search "$title in:title" \
+            --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$body_file" \
+              || echo "::warning::Drift detected but could not comment on issue #$existing."
+          else
+            gh issue create --title "$title" --body-file "$body_file" \
+              || echo "::warning::Drift detected but could not open a tracking issue."
+          fi
