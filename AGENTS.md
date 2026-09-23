@@ -221,7 +221,7 @@ only in the module that owns X.
 | `mtgdb/comparison/models.py` | Tk-free comparison collection: ordered exact-printing membership, add/remove/clear, limits, mutation results |
 | `mtgdb/images/service.py` | Tk-free interactive image download, validation, atomic cache, stale-partial cleanup, rotation/resize, bounded priority workers, in-flight dedup, latest-wins channel supersession, independent byte-budgeted decoded/processed LRUs |
 | `mtgdb/printing/renderer.py` | Card/page geometry, image placement, cut borders, page counting, atomic PDF rendering |
-| `mtgdb/printing/service.py` | Deck snapshots, PNG validation/cache, download orchestration, typed print events, single-worker lifecycle, cancellation |
+| `mtgdb/printing/service.py` | Deck snapshots (mainboard then sideboard), double-faced-card face expansion (both sides printed as separate proxies), PNG validation/cache, download orchestration, typed print events, single-worker lifecycle, cancellation |
 | `mtgdb/workspace/repository.py` | Versioned workspace schema, exact-printing projection, async load/hydration worker, payload signatures, atomic primary JSON, best-effort bounded recovery, corruption fallback, latest-wins background durability worker |
 | `mtgdb/preferences/repository.py` | Tk-free atomic persistence of UI preferences preserving unrelated keys |
 | `mtgdb/ui/tokens.py` | Palette, typography, spacing, control metrics, comparison metrics, icon sizes |

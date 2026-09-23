@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+import json
 import logging
 import os
 
@@ -82,6 +83,53 @@ def expanded_cards(deck):
     return cards
 
 
+def face_image_urls(card):
+    """Ordered high-resolution PNG URLs to print for one card.
+
+    A double-faced card (transform / modal DFC / battle / reversible /
+    double-faced token) carries a separate ``image_uris`` PNG on each face, so
+    both sides are printed. Single-image cards -- including split, adventure and
+    flip, whose faces share one image -- print their one ``image_png``.
+    """
+    faces = card.get("card_faces")
+    if isinstance(faces, str):
+        try:
+            faces = json.loads(faces or "[]")
+        except (TypeError, ValueError):
+            faces = []
+    face_urls = []
+    if isinstance(faces, list):
+        for face in faces:
+            if not isinstance(face, dict):
+                continue
+            image_uris = face.get("image_uris")
+            png = image_uris.get("png") if isinstance(image_uris, dict) else None
+            if png:
+                face_urls.append(png)
+    if len(face_urls) >= 2:
+        return face_urls
+    single = card.get("image_png")
+    return [single] if single else []
+
+
+def expand_faces(cards):
+    """Flatten card copies into per-face print units ``(card, face_index, url)``.
+
+    Each face becomes its own proxy so both sides of a double-faced card print.
+    A card with no printable image still yields one unit so the download step can
+    raise a clear per-card error instead of silently dropping it.
+    """
+    units = []
+    for card in cards:
+        urls = face_image_urls(card)
+        if not urls:
+            units.append((card, 0, card.get("image_png")))
+            continue
+        for face_index, url in enumerate(urls):
+            units.append((card, face_index, url))
+    return units
+
+
 def _safe_id(card):
     value = card.get("id") or card.get("oracle_id") or card.get("name") or "card"
     return "".join(
@@ -89,13 +137,15 @@ def _safe_id(card):
         for character in value)
 
 
-def _card_key(card):
-    return card.get("id") or card.get("name")
-
-
 def cached_png_path(card, cache_dir):
     legacy = os.path.join(cache_dir, f"{_safe_id(card)}.png")
     return cache_names.cache_path(card, cache_dir, ".png", legacy)
+
+
+def _face_cache_path(front_path, face_index):
+    """Distinct cache path for a non-front face beside the front image."""
+    stem, ext = os.path.splitext(front_path)
+    return f"{stem}.face{int(face_index)}{ext}"
 
 
 def _check_cancel(cancel_event):
@@ -115,11 +165,15 @@ def _valid_png(path):
         return False
 
 
-def ensure_png(card, cache_dir, http=net, cancel_event=None):
-    """Return a validated high-resolution PNG, replacing corrupt cache data."""
+def _download_png(url, path, name, http=net, cancel_event=None):
+    """Return a validated high-resolution PNG at ``path``, replacing corrupt data.
+
+    Downloads ``url`` (one card face or single image) to ``path`` and validates
+    it. A path already holding a valid PNG is reused so repeated copies -- and
+    both faces of a double-faced card -- download at most once each.
+    """
     _check_cancel(cancel_event)
-    os.makedirs(cache_dir, exist_ok=True)
-    path = cached_png_path(card, cache_dir)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
     if os.path.exists(path):
         if _valid_png(path):
@@ -129,11 +183,9 @@ def ensure_png(card, cache_dir, http=net, cancel_event=None):
         except OSError:
             pass
 
-    url = card.get("image_png")
     if not url:
         raise ValueError(
-            "No high-resolution PNG is available for "
-            f"{card.get('name', 'this card')}")
+            f"No high-resolution PNG is available for {name}")
 
     temporary_path = path + ".download"
     try:
@@ -141,9 +193,7 @@ def ensure_png(card, cache_dir, http=net, cancel_event=None):
         http.download(url, temporary_path)
         _check_cancel(cancel_event)
         if not _valid_png(temporary_path):
-            raise ValueError(
-                f"Downloaded image for {card.get('name', 'this card')} "
-                "is invalid")
+            raise ValueError(f"Downloaded image for {name} is invalid")
         os.replace(temporary_path, path)
     finally:
         try:
@@ -154,6 +204,14 @@ def ensure_png(card, cache_dir, http=net, cancel_event=None):
     return path
 
 
+def ensure_png(card, cache_dir, http=net, cancel_event=None):
+    """Return a validated high-resolution PNG for a card's single/front image."""
+    os.makedirs(cache_dir, exist_ok=True)
+    return _download_png(
+        card.get("image_png"), cached_png_path(card, cache_dir),
+        card.get("name", "this card"), http=http, cancel_event=cancel_event)
+
+
 class PrintTemplateService:
     """Prepare exact-printing PNGs and render one complete proxy PDF."""
 
@@ -161,36 +219,41 @@ class PrintTemplateService:
         self.http = http
 
     def create(self, job, progress_cb=None, cancel_event=None):
-        cards = tuple(job.cards)
-        if not cards:
+        # Expand every copy into its printable faces (both sides of a
+        # double-faced card), then map each face to a distinct cache path: the
+        # front reuses the card's cache entry, back faces get a per-face path
+        # beside it, so each unique image downloads at most once.
+        units = expand_faces(job.cards)
+        if not units:
             raise ValueError("The deck is empty.")
 
-        unique = {}
-        for card in cards:
-            unique[_card_key(card)] = card
+        placements = []
+        downloads = {}
+        for card, face_index, url in units:
+            front_path = cached_png_path(card, job.cache_dir)
+            path = (front_path if face_index == 0
+                    else _face_cache_path(front_path, face_index))
+            placements.append((card, path))
+            if path not in downloads:
+                downloads[path] = (url, card.get("name") or "Card")
 
-        local_paths = {}
-        unique_cards = tuple(unique.values())
-        for index, card in enumerate(unique_cards, 1):
+        items = list(downloads.items())
+        for index, (path, (url, name)) in enumerate(items, 1):
             _check_cancel(cancel_event)
-            detail = card.get("name") or "Card"
             if progress_cb:
-                progress_cb(
-                    "download", index - 1, len(unique_cards), detail)
-            local_paths[_card_key(card)] = ensure_png(
-                card, job.cache_dir, http=self.http,
-                cancel_event=cancel_event)
+                progress_cb("download", index - 1, len(items), name)
+            _download_png(
+                url, path, name, http=self.http, cancel_event=cancel_event)
             if progress_cb:
-                progress_cb("download", index, len(unique_cards), detail)
+                progress_cb("download", index, len(items), name)
 
-        placements = tuple(
-            (card, local_paths[_card_key(card)]) for card in cards)
+        placements = tuple(placements)
         render_print_template(
             placements, job.output_path, deck_name=job.deck_name,
             progress_cb=progress_cb,
             cancel_cb=lambda: _check_cancel(cancel_event))
         result = PrintResult(
-            job.output_path, len(cards), page_count(len(cards)))
+            job.output_path, len(placements), page_count(len(placements)))
         if progress_cb:
             progress_cb(
                 "done", result.total_cards, result.total_cards,

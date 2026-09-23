@@ -17,7 +17,7 @@ from mtgdb.deck.model import Deck
 from mtgdb.printing.renderer import CARDS_PER_PAGE, page_count
 from mtgdb.printing.service import (
     PrintCancelled, PrintController, PrintJob, PrintResult,
-    PrintTemplateService, cached_png_path,
+    PrintTemplateService, cached_png_path, expand_faces, face_image_urls,
 )
 import mtgdb.printing.service as print_template
 
@@ -118,7 +118,45 @@ def main():
         compatibility_result = print_template.create_print_template(
             compatibility_deck, compatibility_output, cache_dir)
 
+        # A double-faced card carries a PNG on each face and must print both
+        # sides; a single-image multi-face card (adventure/split) prints once.
+        dfc_card = {
+            "id": "dfc-1", "oracle_id": "oracle-dfc", "name": "Two Sides",
+            "set_code": "tst", "collector_number": "5",
+            "image_png": "https://image/front",
+            "card_faces": [
+                {"image_uris": {"png": "https://image/front"}},
+                {"image_uris": {"png": "https://image/back"}},
+            ],
+        }
+        adventure_card = {
+            "id": "adv-1", "name": "Adventurer", "set_code": "tst",
+            "collector_number": "6", "image_png": "https://image/adv",
+            "card_faces": [{"name": "Adventurer"}, {"name": "Quest"}],
+        }
+        dfc_deck = Deck("DFC Deck")
+        dfc_deck.add(dfc_card, "main", 2)
+        dfc_deck.add(adventure_card, "side", 1)
+        dfc_output = temporary / "dfc.pdf"
+        dfc_http = FakeHttp()
+        dfc_result = PrintTemplateService(http=dfc_http).create(
+            PrintJob.from_deck(dfc_deck, dfc_output, cache_dir))
+
         functional = {
+            "double-faced card prints both faces; single-image multiface prints once": (
+                face_image_urls(dfc_card)
+                == ["https://image/front", "https://image/back"]
+                and face_image_urls(adventure_card) == ["https://image/adv"]
+                # 2 DFC copies x 2 faces + 1 adventure = 5 proxies
+                and dfc_result.total_cards == 5
+                and "https://image/back" in dfc_http.downloads
+                # front, back, and adventure image each fetched once
+                and sorted(dfc_http.downloads) == [
+                    "https://image/adv", "https://image/back",
+                    "https://image/front"]
+                and dfc_output.read_bytes().startswith(b"%PDF-")
+                # single-image copies still expand to exactly one proxy each
+                and len(expand_faces(job.cards)) == 10),
             "job snapshot preserves exact printing quantities": (
                 len(job.cards) == 10
                 and snapshot_ids.count("printing-a") == 8
