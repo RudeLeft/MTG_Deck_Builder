@@ -27,6 +27,21 @@ DEFAULT_RECOVERY_INTERVAL_SECONDS = 30
 DEFAULT_RECOVERY_KEEP = 8
 
 
+def _restored_deck_format(value):
+    """Return a trusted deck format from a saved value, self-healing bad data.
+
+    A real format always contains a letter (commander, modern, historicbrawl).
+    The former numeric-TXT-header bug could persist a bare card count ("37") as a
+    deck format; a value with no letter is not a format, so restore falls back to
+    the default instead of resurrecting that number on the format button. The deck
+    then re-saves with the corrected value.
+    """
+    text = str(value or "").strip()
+    if text and any(character.isalpha() for character in text):
+        return text
+    return "commander"
+
+
 @dataclass(frozen=True)
 class WorkspaceSaveResult:
     wrote_session: bool
@@ -111,7 +126,7 @@ class WorkspaceRepository:
             return Deck()
         deck = Deck(
             name=str(data.get("name") or "Untitled Deck"),
-            fmt=str(data.get("format") or "commander"),
+            fmt=_restored_deck_format(data.get("format")),
         )
         for item in data.get("entries", []):
             if not isinstance(item, dict):

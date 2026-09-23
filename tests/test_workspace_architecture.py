@@ -434,7 +434,19 @@ def main():
         path.name: path.read_text(encoding="utf-8")
         for path in ROOT.glob("*.py")
     }
+    restored_numeric_fmt = WorkspaceRepository.deck_from_data(
+        {"name": "Lands", "format": "37", "entries": []})
+    restored_real_fmt = WorkspaceRepository.deck_from_data(
+        {"name": "Deck", "format": "historicbrawl", "entries": []})
+    restored_blank_fmt = WorkspaceRepository.deck_from_data(
+        {"name": "Deck", "format": "", "entries": []})
+
     checks = {
+        "restore self-heals a numeric deck format and keeps real ones": (
+            restored_numeric_fmt.fmt == "commander"
+            and restored_numeric_fmt.name == "Lands"
+            and restored_real_fmt.fmt == "historicbrawl"
+            and restored_blank_fmt.fmt == "commander"),
         "closing another deck keeps the active deck's sort and filters":
             live_state_survives_other_close,
         "each deck still carries its own sorts and filters": per_deck_view_state,
