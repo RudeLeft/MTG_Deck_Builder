@@ -8,7 +8,7 @@ import os
 from mtgdb.database.schema import _INDEX_DEFINITIONS, open_writer_connection
 from mtgdb.database.semantics import (
     _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
-    _raw_type_line, color_mask, derive_trait_flags,
+    _raw_type_line, _type_line_search_parts, color_mask, derive_trait_flags,
 )
 
 
@@ -160,6 +160,50 @@ def _extract_row(card):
         colors_mask, identity_mask, produced_mask, trait_flags,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
     )
+
+
+def _contiguous_ngrams(tokens):
+    """Every contiguous run of ``tokens`` joined by a space (widths 1..len)."""
+    tokens = tuple(tokens)
+    total = len(tokens)
+    grams = set()
+    for width in range(1, total + 1):
+        for start in range(0, total - width + 1):
+            grams.add(" ".join(tokens[start:start + width]))
+    return grams
+
+
+def _membership_terms(card):
+    """Return (type, subtype, keyword) membership rows for one card.
+
+    Type/subtype rows are every contiguous n-gram of the card's normalized left
+    type-line words (types and supertypes) and subtype words, so an equality
+    lookup reproduces the contiguous-run semantics of ``CARD_HAS_TYPE`` and
+    ``CARD_HAS_SUBTYPE``.  Keyword rows are the casefolded keyword values, which
+    the current filter matches with ``COLLATE NOCASE`` equality.
+    """
+    card_id = card["id"]
+    left_sequences, subtype_texts = _type_line_search_parts(
+        _complete_type_line(card))
+    type_terms = set()
+    for sequence in left_sequences:
+        type_terms |= _contiguous_ngrams(sequence)
+    subtype_terms = set()
+    for text in subtype_texts:
+        subtype_terms |= _contiguous_ngrams(text.split())
+    keyword_terms = {
+        str(value).strip().casefold()
+        for value in (card.get("keywords") or []) if str(value).strip()}
+    return (
+        [(card_id, term) for term in type_terms],
+        [(card_id, term) for term in subtype_terms],
+        [(card_id, term) for term in keyword_terms],
+    )
+
+
+_INSERT_TYPE = "INSERT OR IGNORE INTO card_types (card_id, term) VALUES (?, ?)"
+_INSERT_SUBTYPE = "INSERT OR IGNORE INTO card_subtypes (card_id, term) VALUES (?, ?)"
+_INSERT_KEYWORD = "INSERT OR IGNORE INTO card_keywords (card_id, term) VALUES (?, ?)"
 
 
 # Bumped whenever the classification below changes, so a database built by an
@@ -398,8 +442,31 @@ class ScryfallBulkImporter:
 
                 if replace:
                     cur.execute("DELETE FROM cards")
+                    cur.execute("DELETE FROM card_types")
+                    cur.execute("DELETE FROM card_subtypes")
+                    cur.execute("DELETE FROM card_keywords")
 
                 batch, processed = [], 0
+                type_rows, subtype_rows, keyword_rows = [], [], []
+
+                def flush():
+                    nonlocal processed
+                    if batch:
+                        cur.executemany(_INSERT, batch)
+                        processed += len(batch)
+                        batch.clear()
+                    if type_rows:
+                        cur.executemany(_INSERT_TYPE, type_rows)
+                        type_rows.clear()
+                    if subtype_rows:
+                        cur.executemany(_INSERT_SUBTYPE, subtype_rows)
+                        subtype_rows.clear()
+                    if keyword_rows:
+                        cur.executemany(_INSERT_KEYWORD, keyword_rows)
+                        keyword_rows.clear()
+                    if progress_cb:
+                        progress_cb(processed)
+
                 for record_number, card in enumerate(objects, 1):
                     if not isinstance(card, dict):
                         raise ValueError(
@@ -408,17 +475,13 @@ class ScryfallBulkImporter:
                         raise ValueError(
                             f"Bulk record {record_number} is missing card id or name")
                     batch.append(_extract_row(card))
+                    types, subtypes, keywords = _membership_terms(card)
+                    type_rows.extend(types)
+                    subtype_rows.extend(subtypes)
+                    keyword_rows.extend(keywords)
                     if len(batch) >= 500:
-                        cur.executemany(_INSERT, batch)
-                        processed += len(batch)
-                        batch.clear()
-                        if progress_cb:
-                            progress_cb(processed)
-                if batch:
-                    cur.executemany(_INSERT, batch)
-                    processed += len(batch)
-                    if progress_cb:
-                        progress_cb(processed)
+                        flush()
+                flush()
 
                 actual_count = cur.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
                 threshold = max(1, int(minimum_count or 1))

@@ -9,7 +9,7 @@ import sqlite3
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -113,10 +113,42 @@ CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity);
 CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity);
 CREATE INDEX IF NOT EXISTS idx_cards_content_kind ON cards(content_kind);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+
+-- Normalized type/subtype/keyword membership, one row per (card, term).  The
+-- term is every contiguous n-gram of a card's left type-line words (types and
+-- supertypes) or subtype words, and each casefolded keyword, so a query matches
+-- the exact CARD_HAS_TYPE / CARD_HAS_SUBTYPE / keyword semantics with an indexed
+-- equality lookup instead of a per-row SQL function.
+CREATE TABLE IF NOT EXISTS card_types (
+    card_id TEXT NOT NULL,
+    term    TEXT NOT NULL,
+    PRIMARY KEY (card_id, term)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS card_subtypes (
+    card_id TEXT NOT NULL,
+    term    TEXT NOT NULL,
+    PRIMARY KEY (card_id, term)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS card_keywords (
+    card_id TEXT NOT NULL,
+    term    TEXT NOT NULL,
+    PRIMARY KEY (card_id, term)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_card_types_term ON card_types(term);
+CREATE INDEX IF NOT EXISTS idx_card_subtypes_term ON card_subtypes(term);
+CREATE INDEX IF NOT EXISTS idx_card_keywords_term ON card_keywords(term);
 """
 
+# Membership tables cleared and repopulated with the cards table on every import.
+MEMBERSHIP_TABLES = ("card_types", "card_subtypes", "card_keywords")
+
+# Only the ``cards`` table's own columns: the schema now defines other tables
+# (meta, the membership tables) whose columns must not leak into the card
+# projection contract, so scan just the cards CREATE TABLE block.
+_CARDS_TABLE_SQL = _SCHEMA.split(
+    "CREATE TABLE IF NOT EXISTS cards (", 1)[1].split(");", 1)[0]
 _CARD_COLUMN_NAMES = frozenset(
-    re.findall(r"^\s{4}([a-z][a-z0-9_]*)\s+", _SCHEMA, flags=re.MULTILINE))
+    re.findall(r"^\s{4}([a-z][a-z0-9_]*)\s+", _CARDS_TABLE_SQL, flags=re.MULTILINE))
 
 
 _INDEX_DEFINITIONS = [
@@ -139,6 +171,12 @@ _INDEX_DEFINITIONS = [
      "CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity)"),
     ("idx_cards_content_kind",
      "CREATE INDEX IF NOT EXISTS idx_cards_content_kind ON cards(content_kind)"),
+    ("idx_card_types_term",
+     "CREATE INDEX IF NOT EXISTS idx_card_types_term ON card_types(term)"),
+    ("idx_card_subtypes_term",
+     "CREATE INDEX IF NOT EXISTS idx_card_subtypes_term ON card_subtypes(term)"),
+    ("idx_card_keywords_term",
+     "CREATE INDEX IF NOT EXISTS idx_card_keywords_term ON card_keywords(term)"),
 ]
 
 PRIMARY_PRAGMAS = (
@@ -286,6 +324,10 @@ def initialize_schema(connection):
     statements = ["BEGIN IMMEDIATE;"]
     if version != _SCHEMA_VERSION:
         statements.append("DROP TABLE IF EXISTS cards;")
+        # Membership tables are derived from cards; drop them on any version
+        # change so a rebuilt snapshot never inherits stale (card, term) rows.
+        for table in MEMBERSHIP_TABLES:
+            statements.append(f"DROP TABLE IF EXISTS {table};")
     statements.append(_SCHEMA)
     statements.append(
         "INSERT OR REPLACE INTO meta (key, value) VALUES "

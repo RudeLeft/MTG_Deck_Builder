@@ -21,7 +21,7 @@ import search_diff_harness as H
 from mtgdb.database.semantics import (
     COLOR_BITS, TRAIT_COLOR_INDICATOR, TRAIT_HAS_X_COST, TRAIT_HYBRID_MANA,
     TRAIT_MULTI_FACED, TRAIT_PHYREXIAN_MANA, TRAIT_TOP_HEAVY,
-    TRAIT_VARIABLE_STATS)
+    TRAIT_VARIABLE_STATS, _type_key)
 from mtgdb.search.facet_index import _trait_filter_keys
 
 
@@ -104,6 +104,56 @@ def main():
                 flags_ok = False
             flags_seen += 1 if stored else 0
 
+        # M1c: type/subtype/keyword membership tables reproduce the per-row
+        # CARD_HAS_TYPE / CARD_HAS_SUBTYPE functions and the keyword filter,
+        # checked as a full cross-product of every card against every vocab term.
+        def in_table(table, card_id, term):
+            return reader.execute(
+                "SELECT 1 FROM %s WHERE card_id=? AND term=?" % table,
+                (card_id, term)).fetchone() is not None
+
+        card_rows = reader.execute(
+            "SELECT id, type_line, keywords FROM cards").fetchall()
+        type_vocab = list(harness.vocab["card_types"]) + list(
+            harness.vocab["supertypes"])
+        subtype_vocab = list(harness.vocab["subtypes"])
+        keyword_vocab = list(harness.vocab["keywords"])
+        types_ok = subtypes_ok = keywords_ok = True
+        type_rows = reader.execute("SELECT COUNT(*) FROM card_types").fetchone()[0]
+        subtype_rows = reader.execute(
+            "SELECT COUNT(*) FROM card_subtypes").fetchone()[0]
+        keyword_rows = reader.execute(
+            "SELECT COUNT(*) FROM card_keywords").fetchone()[0]
+        for card_id, type_line, keywords_json in card_rows:
+            for value in type_vocab:
+                term = " ".join(_type_key(value).split())
+                want = reader.execute(
+                    "SELECT CARD_HAS_TYPE(?, ?)", (type_line, value)
+                ).fetchone()[0] == 1
+                if in_table("card_types", card_id, term) != want:
+                    types_ok = False
+            for value in subtype_vocab:
+                term = " ".join(_type_key(value).split())
+                want = reader.execute(
+                    "SELECT CARD_HAS_SUBTYPE(?, ?)", (type_line, value)
+                ).fetchone()[0] == 1
+                if in_table("card_subtypes", card_id, term) != want:
+                    subtypes_ok = False
+            for value in keyword_vocab:
+                term = str(value).strip().casefold()
+                want = reader.execute(
+                    "SELECT EXISTS(SELECT 1 FROM json_each(COALESCE(?, '[]')) v "
+                    "WHERE v.value = ? COLLATE NOCASE)", (keywords_json, value)
+                ).fetchone()[0] == 1
+                if in_table("card_keywords", card_id, term) != want:
+                    keywords_ok = False
+
+        membership_indexes = {
+            row[0] for row in reader.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name IN "
+                "('idx_card_types_term','idx_card_subtypes_term',"
+                "'idx_card_keywords_term')")}
+
         checks = {
             "corpus built with rows": total > 0,
             "content_kind is populated for every row": populated == total,
@@ -116,6 +166,15 @@ def main():
                 colors_seen > 0 and identity_seen > 0 and produced_seen > 0),
             "trait_flags match the filter classifier for every row": flags_ok,
             "trait_flags are actually populated (not all zero)": flags_seen > 0,
+            "card_types membership matches CARD_HAS_TYPE for every card/term":
+                types_ok,
+            "card_subtypes membership matches CARD_HAS_SUBTYPE for every card/term":
+                subtypes_ok,
+            "card_keywords membership matches the keyword filter for every card/term":
+                keywords_ok,
+            "membership tables are populated": (
+                type_rows > 0 and subtype_rows > 0 and keyword_rows > 0),
+            "membership term indexes exist": len(membership_indexes) == 3,
         }
 
         ok = True

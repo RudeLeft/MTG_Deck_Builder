@@ -218,9 +218,9 @@ only in the module that owns X.
 | `mtgdb/database/authorities.py` | Declarative registry of upstream Scryfall catalogs the application understands, their semantic roles, subtype applicability, and compatibility metadata keys; never value whitelists |
 | `mtgdb/database/constants.py` | Shared database/search semantics: colors, trusted content classes, known/playable legality statuses, known layout classes, and preferred rarity display order |
 | `mtgdb/database/db.py` | Stable `CardDB` façade, metadata/catalog composition, lifecycle delegation, public API |
-| `mtgdb/database/schema.py` | Schema version, columns, indexes, connection policy, corrupt-database quarantine and rebuild, query-function registration, migration |
+| `mtgdb/database/schema.py` | Schema version, columns, indexes, precomputed search columns/masks, type/subtype/keyword membership tables, connection policy, corrupt-database quarantine and rebuild, query-function registration, migration |
 | `mtgdb/database/semantics.py` | Rules normalization, type-line repair, phrase-safe type/subtype matching, stable Cards/Tokens/Emblems/Art Series classification plus internal unknown-layout classification, SQLite semantic functions |
-| `mtgdb/database/bulk_import.py` | Row projection, strict streaming JSON/JSONL/gzip parsing, transactional bulk replacement, distinct-row threshold protection, index rebuild |
+| `mtgdb/database/bulk_import.py` | Row projection (including precomputed search columns and type/subtype/keyword membership rows), strict streaming JSON/JSONL/gzip parsing, transactional bulk replacement, distinct-row threshold protection, index rebuild |
 | `mtgdb/database/queries.py` | Exact-printing lookup, import-resolver ranking, and name suggestions |
 | `mtgdb/database/search_queries.py` | `SearchQueryBuilder`, canonical parameterized search SQL, projection validation, stable `CardDB.search()` implementation |
 | `mtgdb/database/taxonomy.py` | Trusted observed Search vocabulary plus internal upstream compatibility fingerprints/reports: sets, set types, formats, rarities, catalog-backed Card Types/Subtypes/Mechanics, and Wizards-rules-backed Supertypes, scoped by Content and Paper-only |
@@ -832,7 +832,7 @@ every feature together and is exempt.
 - **DBI-008 — MUST NOT:** Put schema, connection construction, bulk extraction,
   canonical search construction, or taxonomy discovery directly in the façade.
   _Verification:_ **AUTO**.
-- **DBI-009 — MUST:** Preserve schema version 15, the card-column contract,
+- **DBI-009 — MUST:** Preserve schema version 16, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
   functions. Every connection opened in `database/schema.py` MUST set an
   explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;
