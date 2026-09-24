@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import package_release as P
+from mtgdb.core.version import app_version
 
 
 RULE_START = re.compile(
@@ -116,7 +117,8 @@ def _internal_import_allowed(module, imported):
     if module == "mtgdb/__main__.py":
         return imported == "mtgdb.main"
     if module == "mtgdb/main.py":
-        return imported in {"mtgdb.database.db", "mtgdb.ui.app"}
+        return imported in {
+            "mtgdb.database.db", "mtgdb.ui.app", "mtgdb.core.version"}
     if module.startswith("mtgdb/core/"):
         return False
     if module.startswith("mtgdb/search/"):
@@ -323,6 +325,7 @@ def main():
 
     build_script = (ROOT / "build_windows.bat").read_text(encoding="utf-8")
     spec_source = (ROOT / "MTGDeckBuilder.spec").read_text(encoding="utf-8")
+    main_source = (ROOT / "mtgdb" / "main.py").read_text(encoding="utf-8")
     smoke_source = (
         ROOT / "windows_tests" / "smoke_packaged_windows.py").read_text(
             encoding="utf-8")
@@ -1235,6 +1238,11 @@ def main():
             and 'StringStruct("ProductVersion", _version)' in spec_source
             and "upx=True" not in spec_source
             and spec_source.count("upx=False") == 2),
+        "runtime version resolves, is logged, and matches the manifest": (
+            app_version() == pyproject["project"]["version"]
+            and 'log.info("version: %s", app_version())' in main_source
+            and "%(module)" in main_source
+            and "copy_metadata('mtg-deck-builder')" in spec_source),
         "REL-007 release membership has a ceiling, not only a floor": (
             bool(P.ALLOWED_ROOT_FILES)
             and bool(P.ALLOWED_TOP_LEVEL_DIRECTORIES)

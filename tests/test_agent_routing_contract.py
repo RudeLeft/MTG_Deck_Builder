@@ -22,6 +22,7 @@ SOURCE_MARKERS = {
     "mtgdb/core/background_jobs.py": ("class GenerationalWorker", "def check_cancel("),
     "mtgdb/core/atomic_files.py": (
         "def sweep_abandoned_writes(", "def temp_prefix("),
+    "mtgdb/core/version.py": ("def app_version(", "_DISTRIBUTION"),
     "mtgdb/search/models.py": ("class SearchCriteria", "def query_arguments("),
     "mtgdb/search/repository.py": ("SEARCH_RESULT_COLUMNS", "class SearchRepository"),
     "mtgdb/search/controller.py": ("class SearchController", "def invalidate("),

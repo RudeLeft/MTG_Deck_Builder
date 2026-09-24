@@ -11,6 +11,14 @@ from mtgdb.deck.io import deck_from_text
 from mtgdb.ui.deck_files import DeckFileWorkflowMixin
 
 
+class _FakeDeck:
+    """Minimal deck stub: the open/paste workflow logs name and board totals."""
+    name = "Fake Deck"
+
+    def total(self, _board):
+        return 0
+
+
 class _ImmediateFuture:
     def __init__(self, value):
         self._value = value
@@ -109,7 +117,7 @@ def _paste_deck_check():
             captured["raw"] = raw
             captured["resolver"] = resolver
             captured["kwargs"] = kwargs
-            return object(), []
+            return _FakeDeck(), []
 
         deck_files.deck_from_text = fake_parse
         deck_files.submit_deck_file_job = (
@@ -152,7 +160,7 @@ def main():
             captured["raw"] = raw
             captured["resolver"] = resolver
             captured["kwargs"] = kwargs
-            return object(), []
+            return _FakeDeck(), []
 
         deck_files.deck_from_text = fake_parse
         deck_files.submit_deck_file_job = (

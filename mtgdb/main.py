@@ -29,6 +29,7 @@ import logging.handlers
 import sys
 from pathlib import Path
 
+from mtgdb.core.version import app_version
 from mtgdb.database.db import CardDB
 from mtgdb.ui.app import DeckBuilderApp
 
@@ -147,8 +148,11 @@ def setup_logging(data_dir):
     logger = logging.getLogger(LOG_NAME)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
-    fmt = logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s",
-                            datefmt="%Y-%m-%d %H:%M:%S")
+    # Include the source module so every line says where it came from, which is
+    # what makes the log useful for tracing a report back to code.
+    fmt = logging.Formatter(
+        "%(asctime)s  %(levelname)-7s %(module)-14s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S")
 
     # Keep the log bounded: ~1 MB per file, 2 old copies retained.
     fh = logging.handlers.RotatingFileHandler(
@@ -175,6 +179,7 @@ def main():
     log_path = setup_logging(data_dir)
     log = logging.getLogger(LOG_NAME)
     log.info("=== MTG Deck Builder starting ===")
+    log.info("version: %s", app_version())
     log.info("data folder: %s", data_dir)
     log.info("python: %s  frozen: %s", sys.version.split()[0],
              getattr(sys, "frozen", False))

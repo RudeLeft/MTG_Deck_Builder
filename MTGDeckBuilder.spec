@@ -29,6 +29,8 @@
 import tomllib
 from pathlib import Path as _Path
 
+from PyInstaller.utils.hooks import copy_metadata
+
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo,
     VarStruct, VSVersionInfo,
@@ -63,7 +65,10 @@ a = Analysis(
     ['mtgdb/main.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')],
+    # Bundle the distribution metadata so mtgdb.core.version.app_version() can
+    # read the version at runtime in the frozen build (used for the startup log
+    # and the update check).
+    datas=[('assets', 'assets')] + copy_metadata('mtg-deck-builder'),
     hiddenimports=['reportlab.pdfgen.canvas', 'reportlab.lib.pagesizes', 'reportlab.lib.utils'],
     hookspath=[],
     hooksconfig={},

@@ -71,6 +71,7 @@ mtgdb/
     net.py               #   Scryfall HTTP transport (headers, throttling, retries, length-checked downloads)
     background_jobs.py   #   JobCancelled, check_cancel, spawn_daemon, GenerationalWorker
     atomic_files.py      #   atomic-write temp naming + abandoned-temp sweep
+    version.py           #   single runtime source for the app version (metadata/pyproject)
     format_names.py      #   readable names for Scryfall format keys
   search/                # interactive search domain (Tk-free)
     models.py            #   SearchCriteria, worker events, result contracts
@@ -194,6 +195,7 @@ only in the module that owns X.
 | `mtgdb/core/net.py` | Scryfall HTTP behavior, headers, throttling, transient retries, declared-length verification, partial cleanup |
 | `mtgdb/core/background_jobs.py` | Shared cancellation exception, cooperative cancel check, daemon-thread factory, and generation-tagged single-worker controller for printing and syncing |
 | `mtgdb/core/atomic_files.py` | Shared temporary-file naming for atomic writes and the sweep that removes temporaries a killed process left behind |
+| `mtgdb/core/version.py` | Single runtime source for the application version (installed/frozen distribution metadata, falling back to `pyproject.toml`) |
 | `mtgdb/core/format_names.py` | The single mapping from Scryfall format key to readable format name, shared by the Format picker, the card preview, and the deck legality report |
 | `mtgdb/search/models.py` | Immutable search criteria, signatures, worker events, result contracts |
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
@@ -270,6 +272,7 @@ have at least two routing examples.
 | `mtgdb/core/background_jobs.py` | change cooperative cancellation behavior<br>change shared daemon/generation worker lifecycle used by sync or printing | `mtgdb/database/sync.py`; `mtgdb/printing/service.py` | Do not add feature-specific progress or payload semantics. |
 | `mtgdb/core/format_names.py` | change how a Scryfall format key is displayed<br>add a readable name for a format key | `mtgdb/ui/components.py`; `mtgdb/deck/legality.py`; `mtgdb/ui/search.py`; `mtgdb/ui/card_detail.py` | Presentation only: this mapping never authorizes Format vocabulary, and an unmapped key MUST still display and stay selectable. |
 | `mtgdb/core/atomic_files.py` | change atomic-write temporary naming<br>change which abandoned temporaries a writer sweeps | `mtgdb/workspace/repository.py`; `mtgdb/preferences/repository.py`; `mtgdb/deck/io.py` | Naming and cleanup only: the writers keep their own payload semantics, and a sweep never removes a file this application did not name. |
+| `mtgdb/core/version.py` | change how the runtime application version is resolved<br>change the distribution-metadata vs `pyproject.toml` fallback order | `mtgdb/main.py`; `mtgdb/ui/app.py` | Read-only version resolution; no Tk, SQL, or feature logic. |
 | `mtgdb/search/models.py` | add/change semantic Search criteria such as Supertypes, Content, or Paper-only<br>change Search worker-event or result-contract dataclasses/signatures | `mtgdb/ui/search.py`; `mtgdb/search/controller.py`; `mtgdb/database/search_queries.py` | No Tk state, taxonomy discovery, or SQL construction belongs here. |
 | `mtgdb/search/repository.py` | add a card field required by broad Results rows<br>change Search name-suggestion or filter-catalog gateway behavior | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/search/models.py` | Keep SQL in database owners and Tk in UI owners. |
 | `mtgdb/search/controller.py` | change Search cache or unchanged-search behavior<br>change generation invalidation, stale-event rejection, or worker queue lifecycle | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Do not read widgets or construct SQL here. |
@@ -335,7 +338,7 @@ rows override broader rows.
 | Layer / module | MAY import | MUST NOT import |
 | --- | --- | --- |
 | `mtgdb/__main__.py` | `mtgdb.main` | feature internals directly; `tkinter`; `sqlite3` |
-| `mtgdb/main.py` | `mtgdb.database.db`; `mtgdb.ui.app`; stdlib | `tkinter`; `sqlite3`; feature implementation modules other than the two startup owners |
+| `mtgdb/main.py` | `mtgdb.database.db`; `mtgdb.ui.app`; `mtgdb.core.version`; stdlib | `tkinter`; `sqlite3`; feature implementation modules other than the two startup owners |
 | `mtgdb/ui/**` | any owning `mtgdb` API; `tkinter`; presentation-only third-party deps | `sqlite3`; raw SQL construction |
 | `mtgdb/ui/search.py`, `ui/search_printings.py`, `ui/search_checklist.py`, `ui/results.py`, `ui/table_filters.py`, `ui/tables.py` | search/deck/preferences logic APIs; `mtgdb.database.constants`; sibling UI components | `sqlite3`; `mtgdb.database.db`/`CardDB` directly; SQL construction |
 | `mtgdb/ui/card_detail.py` | `mtgdb.images.service`; `mtgdb.deck.legality`; `mtgdb.database.constants`; `mtgdb.core.scryfall_json`; `PIL.ImageTk` for final Tk image conversion | direct network/cache-file/worker operations; image decoding owned by the image service; legality-payload normalization owned by `deck/legality.py` |
@@ -351,6 +354,7 @@ rows override broader rows.
 | `mtgdb/database/sync.py` | `mtgdb.core.{net,background_jobs}`; `mtgdb.database.{bulk_import,schema}` | `tkinter`; `mtgdb.search.*`; `mtgdb.ui.*`; `mtgdb.database.db` |
 | `mtgdb/core/scryfall_json.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/atomic_files.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
+| `mtgdb/core/version.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/format_names.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/comparison/models.py` | stdlib; `mtgdb.core.scryfall_json` | `tkinter`; `sqlite3`; `mtgdb.core.net`; any `mtgdb.ui.*` |
 | `mtgdb/images/service.py` | `mtgdb.core.{net,cache_names,background_jobs,scryfall_json}`; `PIL` | `tkinter`; `mtgdb.ui.*` |

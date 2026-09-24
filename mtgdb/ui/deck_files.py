@@ -83,6 +83,10 @@ class DeckFileWorkflowMixin:
             # Opening a deck never replaces the current workspace deck; it gets
             # its own session/tab and becomes the active deck.
             self._append_deck_session(deck, path=path, dirty=False)
+            log.info(
+                "Opened deck %r from %s: %d mainboard, %d sideboard, "
+                "%d unresolved", deck.name, os.path.basename(path),
+                deck.total("main"), deck.total("side"), len(missing))
             if missing:
                 messagebox.showwarning(
                     "Some cards not found",
@@ -120,6 +124,9 @@ class DeckFileWorkflowMixin:
             # A pasted deck has no file of its own yet, so it opens in a new tab
             # as an unsaved (dirty) session.
             self._append_deck_session(deck, path=None, dirty=True)
+            log.info(
+                "Pasted deck %r: %d mainboard, %d sideboard, %d unresolved",
+                deck.name, deck.total("main"), deck.total("side"), len(missing))
             if missing:
                 messagebox.showwarning(
                     "Some cards not found",
@@ -158,6 +165,7 @@ class DeckFileWorkflowMixin:
             session.path = path
             session.dirty = False
             self._render_deck_tabs()
+            log.info("Saved deck %r to %s", getattr(deck, "name", "?"), path)
             self._status(f"Saved {os.path.basename(path)}")
 
         future = submit_deck_file_job(
