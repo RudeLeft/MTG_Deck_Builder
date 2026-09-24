@@ -217,6 +217,7 @@ class DeckBuilderApp(
         filemenu = self._dark_menu(file_btn)
         filemenu.add_command(label="New Deck", command=self._new_deck)
         filemenu.add_command(label="Open Deck...", command=self._open_deck)
+        filemenu.add_command(label="Paste Decklist...", command=self._paste_deck)
         filemenu.add_command(label="Save Deck As...", command=self._save_deck)
         filemenu.add_command(label="Export JSON...", command=self._export_all_decks_json)
         filemenu.add_separator()

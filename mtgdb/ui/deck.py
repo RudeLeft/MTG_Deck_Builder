@@ -496,6 +496,7 @@ class DeckEditorMixin:
         menu = self._dark_menu()
         menu.add_command(label="New Deck", command=self._new_deck)
         menu.add_command(label="Open Deck TXT...", command=self._open_deck)
+        menu.add_command(label="Paste Decklist...", command=self._paste_deck)
         try:
             x = self._deck_plus_btn.winfo_rootx()
             y = self._deck_plus_btn.winfo_rooty() + self._deck_plus_btn.winfo_height()

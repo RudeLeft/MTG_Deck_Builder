@@ -99,6 +99,41 @@ def _token_tag_resolution():
     }
 
 
+def _paste_deck_check():
+    """Paste Decklist imports clipboard text via the Open Deck resolver."""
+    captured = {}
+    original_parse = deck_files.deck_from_text
+    original_submit = deck_files.submit_deck_file_job
+    try:
+        def fake_parse(raw, resolver, **kwargs):
+            captured["raw"] = raw
+            captured["resolver"] = resolver
+            captured["kwargs"] = kwargs
+            return object(), []
+
+        deck_files.deck_from_text = fake_parse
+        deck_files.submit_deck_file_job = (
+            lambda fn, *args, **_kwargs: _ImmediateFuture(fn(*args)))
+        owner = _Owner()
+        owner.clipboard_get = lambda: "// Pasted (modern)\n1 Some Card\n"
+        owner._paste_deck()
+    finally:
+        deck_files.deck_from_text = original_parse
+        deck_files.submit_deck_file_job = original_submit
+
+    return {
+        "Paste Decklist imports clipboard text unrestricted into a new session": (
+            captured.get("raw") == "// Pasted (modern)\n1 Some Card\n"
+            and captured.get("resolver") is owner.db
+            and captured.get("kwargs", {}).get("paper_only") is False
+            and captured.get("kwargs", {}).get("allowed_set_types") is None
+            and captured.get("kwargs", {}).get("allowed_set_codes") is None
+            and len(owner.opened) == 1
+            and owner.opened[0][1] is None
+            and owner.opened[0][2] is True),
+    }
+
+
 def main():
     source = (ROOT / "mtgdb/ui/deck_files.py").read_text(encoding="utf-8")
     app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
@@ -172,6 +207,7 @@ def main():
         "unrestricted import still resolves both rows": (
             not missing and imported.total("main") == 2),
         **_token_tag_resolution(),
+        **_paste_deck_check(),
     }
 
     ok = True

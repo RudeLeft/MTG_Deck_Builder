@@ -93,6 +93,42 @@ class DeckFileWorkflowMixin:
             load_and_resolve, name="mtg-deck-import")
         self._poll_deck_file_job(future, opened, error_title="Open failed")
 
+    def _paste_deck(self):
+        """Import a decklist from the clipboard using the Open Deck resolver."""
+        try:
+            raw = self.clipboard_get()
+        except tk.TclError:
+            raw = ""
+        if not str(raw).strip():
+            messagebox.showinfo(
+                "Paste Decklist",
+                "The clipboard is empty. Copy a decklist first, then paste it.")
+            return
+
+        def load_and_resolve():
+            # Same unrestricted resolution as Open Deck (independent of every
+            # interactive Search/Printings filter); a leading "// Name (format)"
+            # header still names the deck and explicit [SET]/[SET:COLLECTOR] tags
+            # stay authoritative inside deck_from_text.
+            return deck_from_text(
+                raw, self.db, name="Pasted Deck",
+                allowed_set_types=None, allowed_set_codes=None,
+                paper_only=False, lang=None)
+
+        def opened(result):
+            deck, missing = result
+            # A pasted deck has no file of its own yet, so it opens in a new tab
+            # as an unsaved (dirty) session.
+            self._append_deck_session(deck, path=None, dirty=True)
+            if missing:
+                messagebox.showwarning(
+                    "Some cards not found",
+                    "Couldn't match these names:\n\n" + "\n".join(missing[:30]))
+
+        self._status("Importing pasted deck…")
+        future = submit_deck_file_job(load_and_resolve, name="mtg-deck-paste")
+        self._poll_deck_file_job(future, opened, error_title="Paste failed")
+
 
     def _save_session_as(self, index, *, wait=False):
         """Save one deck session without losing the currently active tab.
