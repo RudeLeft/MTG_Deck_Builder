@@ -29,6 +29,7 @@ def _make_build_zip(path):
 
 def main():
     updates_source = (ROOT / "mtgdb/ui/updates.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "mtgdb/main.py").read_text(encoding="utf-8")
 
     release = {"assets": [
         {"name": "MTG_Deck_Builder-v1.2.0-source.zip",
@@ -36,6 +37,8 @@ def main():
         {"name": "MTG_Deck_Builder-v1.2.0-windows.zip",
          "browser_download_url": "https://example/win.zip", "size": 20,
          "digest": "sha256:abc"},
+        {"name": "SHA256SUMS.txt",
+         "browser_download_url": "https://example/SHA256SUMS.txt", "size": 5},
     ]}
 
     tmp = Path(tempfile.mkdtemp(prefix="mtg-selfupdate-"))
@@ -117,7 +120,49 @@ def main():
     checks["swap script relaunches the new exe"] = (
         os.path.join(program_dir, su.PROGRAM_EXE) in script)
 
+    checks["swap script backs up the program before overwriting it"] = (
+        su.backup_dir(data_dir) in script
+        and script.index(su.backup_dir(data_dir)) < script.index(
+            su.staged_program_dir(data_dir)))
+    checks["swap script health-gates on the started flag"] = (
+        su.started_flag_path(data_dir) in script
+        and "if exist" in script and ":wait" in script)
+    checks["swap script rolls back by restoring the backup on failure"] = (
+        ":rollback" in script and "taskkill" in script
+        and su.PROGRAM_EXE in script
+        # the rollback copies backup -> program (source precedes dest)
+        and script.rfind(su.backup_dir(data_dir))
+        < script.rfind(su.program_dir_for(data_dir)))
+
+    # checksums (A2): SHA256SUMS asset selection + parsing
+    checks["select_checksums_url finds the SHA256SUMS asset"] = (
+        su.select_checksums_url(release) == "https://example/SHA256SUMS.txt"
+        and su.select_checksums_url({"assets": []}) is None)
+    sums = (
+        "0" * 64 + "  MTG_Deck_Builder-v1.2.0-source.zip\n"
+        + "a" * 64 + " *MTG_Deck_Builder-v1.2.0-windows.zip\n")
+    checks["expected_sha256 reads the entry for the right asset"] = (
+        su.expected_sha256(sums, "MTG_Deck_Builder-v1.2.0-windows.zip") == "a" * 64
+        and su.expected_sha256(sums, "missing.zip") is None
+        and su.expected_sha256("", "x") is None)
+
+    # apply-in-progress marker (A1/A4): recency window drives who owns cleanup
+    checks["verify_is_recent is False with no marker, True right after writing"] = (
+        su.verify_is_recent(data_dir) is False)
+    su.write_verify(data_dir, "v1.2.0")
+    checks["verify_is_recent True for a fresh marker, False once it is old"] = (
+        su.verify_is_recent(data_dir) is True
+        and su.verify_is_recent(data_dir, max_age_seconds=0) is False
+        and (su.read_verify(data_dir) or {}).get("version") == "v1.2.0")
+    # note_started drops the health flag only on a post-update launch
+    checks["note_started signals a healthy launch when an apply is pending"] = (
+        su.note_started(data_dir) is True
+        and os.path.exists(su.started_flag_path(data_dir)))
     su.clear_update(data_dir)
+    checks["note_started is a no-op when no apply is pending"] = (
+        su.note_started(data_dir) is False
+        and not os.path.exists(su.started_flag_path(data_dir)))
+
     checks["clear_update removes the staging scratch"] = (
         not os.path.exists(su.update_dir(data_dir)))
 
@@ -132,6 +177,15 @@ def main():
             "self_update.build_swap_script(",
             "download(url, destination",
         ))
+    checks["updates.py verifies against SHA256SUMS and marks the apply in-flight"] = all(
+        token in updates_source for token in (
+            "self_update.select_checksums_url(",
+            "self_update.expected_sha256(",
+            "fetch_bytes(",
+            "self_update.write_verify(",
+            "self_update.verify_is_recent(",
+            "self_update.clear_update(",
+        ))
     checks["updates.py self-update is frozen-only and detaches the helper"] = all(
         token in updates_source for token in (
             'getattr(sys, "frozen", False)',
@@ -139,6 +193,9 @@ def main():
             "creationflags=_DETACHED_FLAGS",
             "self._on_app_close()",
         ))
+    checks["main.py signals a healthy launch early via note_started"] = (
+        "from mtgdb.core.self_update import note_started" in main_source
+        and "note_started(str(data_dir))" in main_source)
 
     ok = True
     for label, passed in checks.items():

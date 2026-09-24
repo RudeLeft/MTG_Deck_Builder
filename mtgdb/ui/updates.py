@@ -22,7 +22,7 @@ import webbrowser
 
 from mtgdb.core import self_update
 from mtgdb.core.background_jobs import spawn_daemon
-from mtgdb.core.net import get_json, download
+from mtgdb.core.net import get_json, download, fetch_bytes
 from mtgdb.core.update_check import (
     LATEST_RELEASE_URL, RELEASES_PAGE_URL, is_newer, latest_release)
 from mtgdb.core.version import app_version
@@ -120,12 +120,20 @@ class UpdateCheckMixin:
         current = app_version()
 
         def worker():
+            # An apply that may still be in flight owns the scratch dir (its
+            # helper is backing up / swapping / rolling back); never touch it.
+            if self_update.verify_is_recent(self.data_dir):
+                return
             # A verified update staged last session but never applied needs no
             # network: offer the restart straight away.
             staged = self_update.pending_version(self.data_dir)
             if staged and is_newer(staged, current):
                 self._post(lambda: self._show_update_ready(staged))
                 return
+            # No live apply and nothing newer staged: clear any leftover scratch
+            # (an incomplete download, an orphaned apply marker, or a stale
+            # already-installed staged build) before checking for a new release.
+            self_update.clear_update(self.data_dir)
             tag, page = latest_release(get_json)
             if tag and is_newer(tag, current):
                 self._post(lambda: self._show_update_available(tag, page))
@@ -214,14 +222,35 @@ class UpdateCheckMixin:
             self._post(lambda: self._show_update_progress(percent))
 
         download(url, destination, progress_cb=progress)
-        if not self_update.verify_zip(destination, digest):
+        # Prefer the published SHA256SUMS entry, then GitHub's asset digest; a
+        # well-formed hash from either MUST match, and the structure check always
+        # runs. Only when neither hash exists does verification fall back to
+        # structure alone (older releases that predate the checksums file).
+        expected = self._published_hash(data, url) or digest
+        if not self_update.verify_zip(destination, expected):
             raise RuntimeError("downloaded update failed verification")
         self_update.extract_staged(destination, self.data_dir)
         self_update.write_pending(self.data_dir, self._update_tag)
 
+    def _published_hash(self, release_json, asset_url):
+        """Return the sha256 recorded for the asset in SHA256SUMS.txt, or None."""
+        sums_url = self_update.select_checksums_url(release_json)
+        if not sums_url:
+            return None
+        try:
+            text = fetch_bytes(sums_url).decode("utf-8", "replace")
+        except Exception:
+            return None
+        asset_name = asset_url.rsplit("/", 1)[-1]
+        return self_update.expected_sha256(text, asset_name)
+
     def _apply_update(self):
         """Launch the swap helper, then close the app so it can replace files."""
         try:
+            # Mark the apply as in-flight before the helper starts, so a launch
+            # during the swap leaves the scratch dir to the helper (and its
+            # rollback) instead of clearing it.
+            self_update.write_verify(self.data_dir, self._update_tag)
             script = self_update.build_swap_script(self.data_dir)
             handle, script_path = tempfile.mkstemp(
                 prefix="mtgupdate-", suffix=".bat")

@@ -97,17 +97,31 @@ per-file attribution.)
 ### Code signing (optional, removes the SmartScreen warning)
 
 Signed builds skip the SmartScreen prompt above and build download reputation
-faster. To sign a build you need a code-signing certificate (an OV certificate
-is inexpensive; an EV certificate clears SmartScreen immediately but costs more).
-With a `.pfx` in hand, sign the built exe with the Windows SDK `signtool`:
+faster. You need a code-signing certificate: an OV certificate is inexpensive
+but earns reputation gradually, while an EV certificate clears SmartScreen
+immediately and costs more. Since 2023, CAs must keep the private key on
+hardware (a USB token or a cloud HSM/signing service such as Azure Trusted
+Signing), so a plain `.pfx` on disk is only possible with certain OV issuers;
+open-source projects can also sign for free through SignPath's foundation
+program.
+
+**CI signing is already wired up.** The Windows build workflow has a signing
+step that activates automatically when two repository secrets are present, and
+is skipped (building unsigned, as today) when they are not:
+
+- `WINDOWS_CERT_BASE64` — your signing certificate `.pfx`, base64-encoded.
+- `WINDOWS_CERT_PASSWORD` — its password.
+
+With those set, every tagged release build signs `MTGDeckBuilder.exe` before it
+is packaged and published. To sign a local build instead, use the Windows SDK
+`signtool` (always time-stamp with `/tr` so signatures outlive the certificate):
 
 ```
 signtool sign /f cert.pfx /p <password> /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\MTGDeckBuilder\MTGDeckBuilder.exe
 ```
 
-In CI, store the certificate and password as encrypted repository secrets and
-add a signing step after the "Build the portable app" step in
-`.github/workflows/build-windows.yml`, before the release is packaged.
+Every release also publishes `SHA256SUMS.txt` so downloads (and the in-app
+updater) can be verified against a known hash.
 
 ## Card data & legal
 

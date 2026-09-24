@@ -102,6 +102,7 @@ echo === [5/7] Running Windows pre-build guardrails ===
 python windows_tests\test_single_instance_windows.py || goto :err
 python windows_tests\test_ui_geometry_windows.py || goto :err
 python windows_tests\test_app_startup_windows.py || goto :err
+python windows_tests\test_self_update_swap_windows.py || goto :err
 
 echo.
 set "BUILD_STAGE=[6/7] PyInstaller build"

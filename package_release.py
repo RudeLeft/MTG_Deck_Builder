@@ -118,6 +118,7 @@ REQUIRED_RELEASE_MEMBERS = {
     Path("tests/test_workspace_architecture.py"),
     Path("windows_tests/smoke_packaged_windows.py"),
     Path("windows_tests/test_app_startup_windows.py"),
+    Path("windows_tests/test_self_update_swap_windows.py"),
     Path("windows_tests/test_single_instance_windows.py"),
     Path("windows_tests/test_ui_geometry_windows.py"),
 }
@@ -144,6 +145,7 @@ WINDOWS_SOURCE_GATES = (
     Path("windows_tests/test_single_instance_windows.py"),
     Path("windows_tests/test_ui_geometry_windows.py"),
     Path("windows_tests/test_app_startup_windows.py"),
+    Path("windows_tests/test_self_update_swap_windows.py"),
 )
 
 

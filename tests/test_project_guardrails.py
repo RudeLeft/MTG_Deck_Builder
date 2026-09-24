@@ -118,7 +118,8 @@ def _internal_import_allowed(module, imported):
         return imported == "mtgdb.main"
     if module == "mtgdb/main.py":
         return imported in {
-            "mtgdb.database.db", "mtgdb.ui.app", "mtgdb.core.version"}
+            "mtgdb.database.db", "mtgdb.ui.app", "mtgdb.core.version",
+            "mtgdb.core.self_update"}
     if module.startswith("mtgdb/core/"):
         return False
     if module.startswith("mtgdb/search/"):

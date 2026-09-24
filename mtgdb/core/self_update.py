@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import zipfile
 
 # The built portable app ships as ``MTG_Deck_Builder-<tag>-windows.zip`` whose
@@ -27,6 +28,9 @@ import zipfile
 # ``_internal``). The source zip ends ``-source.zip`` and is not installable, so
 # the asset match must be this exact suffix, never a bare ``.zip``.
 WINDOWS_ASSET_SUFFIX = "-windows.zip"
+# The release also carries a checksums file so a download can be verified even
+# when GitHub does not attach an asset ``digest``.
+SUMS_ASSET_NAME = "SHA256SUMS.txt"
 PROGRAM_EXE = "MTGDeckBuilder.exe"
 PROGRAM_DIRNAME = "MTGDeckBuilder"
 DATA_DIRNAME = "data"
@@ -34,7 +38,10 @@ DATA_DIRNAME = "data"
 _UPDATE_DIRNAME = "_update"
 _DOWNLOAD_NAME = "download.zip"
 _STAGED_NAME = "staged"
+_BACKUP_NAME = "backup"
 _MARKER_NAME = "pending.json"
+_VERIFY_NAME = "verifying.json"
+_STARTED_NAME = "started.ok"
 
 
 def update_dir(data_dir):
@@ -57,9 +64,24 @@ def staged_program_dir(data_dir):
     return os.path.join(staged_dir(data_dir), PROGRAM_DIRNAME)
 
 
+def backup_dir(data_dir):
+    """Where the current program files are copied before the swap, for rollback."""
+    return os.path.join(update_dir(data_dir), _BACKUP_NAME)
+
+
 def marker_path(data_dir):
     """The JSON marker recording that a verified update is staged and ready."""
     return os.path.join(update_dir(data_dir), _MARKER_NAME)
+
+
+def verify_marker_path(data_dir):
+    """The marker recording that an update is being applied right now."""
+    return os.path.join(update_dir(data_dir), _VERIFY_NAME)
+
+
+def started_flag_path(data_dir):
+    """The flag a freshly swapped build drops to prove it launched (health gate)."""
+    return os.path.join(update_dir(data_dir), _STARTED_NAME)
 
 
 def program_dir_for(data_dir):
@@ -88,6 +110,37 @@ def select_release_asset(release_json):
         if url and name.endswith(WINDOWS_ASSET_SUFFIX):
             return (str(url), asset.get("size"), asset.get("digest"))
     return (None, None, None)
+
+
+def select_checksums_url(release_json):
+    """Return the URL of the release's ``SHA256SUMS.txt`` asset, or ``None``."""
+    if not isinstance(release_json, dict):
+        return None
+    for asset in release_json.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        url = asset.get("browser_download_url")
+        if url and str(asset.get("name") or "") == SUMS_ASSET_NAME:
+            return str(url)
+    return None
+
+
+def expected_sha256(sums_text, asset_name):
+    """Return the hex sha256 recorded for ``asset_name`` in a SHA256SUMS file.
+
+    Accepts the usual ``<hex>  <name>`` lines, tolerating the binary ``*``
+    marker some tools prefix to the name. Returns ``None`` when the file or the
+    entry is absent or malformed, so the caller falls back to GitHub's digest.
+    """
+    for line in str(sums_text or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        digest, name = parts[0].lower(), parts[-1].lstrip("*")
+        if name == asset_name and len(digest) == 64 and all(
+                character in "0123456789abcdef" for character in digest):
+            return digest
+    return None
 
 
 def _sha256(path):
@@ -186,39 +239,117 @@ def pending_version(data_dir):
     return str(version) if version else None
 
 
+def write_verify(data_dir, version):
+    """Record that an update to ``version`` is being applied right now.
+
+    Timestamped so a later launch can tell an apply that may still be in flight
+    (its helper running) from an orphaned marker left by a helper that died.
+    """
+    os.makedirs(update_dir(data_dir), exist_ok=True)
+    payload = {"version": str(version), "started_at": time.time()}
+    with open(verify_marker_path(data_dir), "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+
+
+def read_verify(data_dir):
+    """Return the apply-in-progress marker dict, or ``None`` if absent/unreadable."""
+    try:
+        with open(verify_marker_path(data_dir), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def verify_is_recent(data_dir, max_age_seconds=120):
+    """True when an apply marker exists and is new enough that its helper may
+    still be running. The whole swap lifecycle is well under a minute, so an
+    older marker is an orphan the app may safely clean up rather than a live
+    apply it must leave alone.
+    """
+    marker = read_verify(data_dir)
+    if not marker:
+        return False
+    try:
+        started_at = float(marker.get("started_at", 0))
+    except (TypeError, ValueError):
+        return False
+    return 0 <= (time.time() - started_at) < max_age_seconds
+
+
+def note_started(data_dir):
+    """Drop the started flag when this is a freshly swapped build's first launch.
+
+    Called as early as possible in startup. When an apply marker is present the
+    running process is the newly swapped build proving it can start, so create
+    the flag the swap helper is waiting on; without it the helper rolls back.
+    Returns True when this was a post-update launch. On any ordinary launch
+    there is no marker and this is a cheap no-op.
+    """
+    if read_verify(data_dir) is None:
+        return False
+    try:
+        os.makedirs(update_dir(data_dir), exist_ok=True)
+        with open(started_flag_path(data_dir), "w", encoding="utf-8") as handle:
+            handle.write("ok")
+    except OSError:
+        pass
+    return True
+
+
 def clear_update(data_dir):
-    """Remove all staged-update scratch (download, staging, and marker)."""
+    """Remove all staged-update scratch (download, staging, backup, markers)."""
     shutil.rmtree(update_dir(data_dir), ignore_errors=True)
 
 
 def build_swap_script(data_dir):
-    """Return the text of a Windows ``.bat`` that installs the staged update.
+    """Return a Windows ``.bat`` that backs up, swaps, health-checks, rolls back.
 
-    It runs after the app exits: a short grace wait lets the old process release
-    its ``.exe``, ``robocopy /E`` copies the staged program files over the
-    install folder, ``/XD`` excludes ``data\\`` so decks/database/images/prefs
-    survive, the new ``.exe`` is relaunched, and the script removes the staging
-    area and returns robocopy's code. ``/E`` (copy, never purge) is deliberate:
-    a failed copy can never delete the working install, so the worst outcome is
-    an unchanged, still-runnable app rather than a broken one.
+    It runs after the app exits. In order: a short grace wait for the old
+    process to release its ``.exe``; back up the current program files; copy the
+    staged files over the install folder; relaunch; then wait for the new build
+    to prove it launched by creating the started flag. On success the whole
+    scratch area (backup, staging, markers) is removed. If the new build never
+    signals within the timeout -- it failed to launch -- the old files are
+    restored from the backup and relaunched, so a broken build can never strand
+    the user. Every copy is ``robocopy /E`` (additive, never purges) and
+    excludes ``data\\`` with ``/XD``, so decks/database/images/prefs always
+    survive and a failed copy can never delete the working install.
     """
     program = program_dir_for(data_dir)
     data = os.path.abspath(data_dir)
     staged = staged_program_dir(data_dir)
-    executable = os.path.join(program, PROGRAM_EXE)
+    backup = backup_dir(data_dir)
     scratch = update_dir(data_dir)
+    started = started_flag_path(data_dir)
+    executable = os.path.join(program, PROGRAM_EXE)
     lines = [
         "@echo off",
-        "setlocal",
+        "setlocal enableextensions",
         # ~2 seconds of grace for the exiting app to unlock its files; the
         # robocopy retries below absorb any remaining lock.
         "ping 127.0.0.1 -n 3 >nul",
+        f'robocopy "{program}" "{backup}" /E /XD "{data}" /R:3 /W:1 >nul',
         f'robocopy "{staged}" "{program}" /E /XD "{data}" /R:30 /W:1 >nul',
         # robocopy uses exit codes 0-7 for success; 8 and above is a real error.
-        "set RC=%ERRORLEVEL%",
+        "if %ERRORLEVEL% GEQ 8 goto rollback",
+        f'del /q "{started}" >nul 2>&1',
+        f'start "" "{executable}"',
+        "set /a N=0",
+        ":wait",
+        f'if exist "{started}" goto ok',
+        "set /a N+=1",
+        "if %N% GEQ 30 goto rollback",
+        "ping 127.0.0.1 -n 2 >nul",
+        "goto wait",
+        ":ok",
+        f'rmdir /s /q "{scratch}" >nul 2>&1',
+        "exit /b 0",
+        ":rollback",
+        f'taskkill /IM "{PROGRAM_EXE}" /F >nul 2>&1',
+        f'robocopy "{backup}" "{program}" /E /XD "{data}" /R:10 /W:1 >nul',
         f'rmdir /s /q "{scratch}" >nul 2>&1',
         f'start "" "{executable}"',
-        "endlocal",
-        "exit /b %RC%",
+        "exit /b 1",
     ]
     return "\r\n".join(lines) + "\r\n"

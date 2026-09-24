@@ -23,6 +23,14 @@ jobs:
     # the default token is read-only.
     permissions:
       contents: write
+    # Optional code-signing. Set these repository secrets to sign the exe:
+    # WINDOWS_CERT_BASE64 (a base64-encoded .pfx) and WINDOWS_CERT_PASSWORD.
+    # Lifted to job-level env so the signing step's `if:` can test them -- a
+    # secret cannot be referenced directly in an `if:` condition. Absent, the
+    # signing step is skipped and the build proceeds unsigned exactly as before.
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -70,9 +78,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python windows_tests/test_app_startup_windows.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python windows_tests/test_self_update_swap_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build the portable app
         run: pyinstaller MTGDeckBuilder.spec --noconfirm
+
+      - name: Sign the executable (only when signing secrets are set)
+        if: ${{ env.WINDOWS_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          $signtool = Get-ChildItem `
+            "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { Write-Error "signtool.exe not found"; exit 1 }
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            "dist/MTGDeckBuilder/MTGDeckBuilder.exe"
+          $rc = $LASTEXITCODE
+          Remove-Item $pfx -Force
+          if ($rc -ne 0) { exit $rc }
 
       - name: Run packaged portability smoke test
         run: python windows_tests/smoke_packaged_windows.py
@@ -122,11 +150,27 @@ jobs:
           Compress-Archive -Path "dist/MTGDeckBuilder" -DestinationPath $zip -CompressionLevel Optimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Generate release checksums
+        shell: pwsh
+        run: |
+          # SHA256SUMS.txt lets both the in-app updater and manual downloaders
+          # verify a download. Format is the standard "<hex>  <name>" so
+          # `sha256sum -c` and the app's parser both read it.
+          $sums = Get-ChildItem "release_dist/*.zip" | Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$hash  $($_.Name)"
+            }
+          Set-Content -Path "release_dist/SHA256SUMS.txt" -Value $sums -Encoding ascii
+          Get-Content "release_dist/SHA256SUMS.txt"
+
       - name: Upload the release zips as artifacts
         uses: actions/upload-artifact@v4
         with:
           name: MTGDeckBuilder-release-zips
-          path: release_dist/*.zip
+          path: |
+            release_dist/*.zip
+            release_dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -164,11 +208,13 @@ jobs:
           - Source (Python 3.11+): MTG_Deck_Builder-$tag-source.zip
             Run: pip install .   then   python -m mtgdb
 
+          Verify your download against SHA256SUMS.txt (e.g. ``sha256sum -c``).
           On first launch the app downloads current card data from Scryfall.
           "@
           gh release create "$tag" `
             "release_dist/MTG_Deck_Builder-$tag-windows.zip" `
             "release_dist/MTG_Deck_Builder-$tag-source.zip" `
+            "release_dist/SHA256SUMS.txt" `
             --title "MTG Deck Builder $tag" `
             --notes "$notes"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
