@@ -7,7 +7,8 @@ import os
 
 from mtgdb.database.schema import _INDEX_DEFINITIONS, open_writer_connection
 from mtgdb.database.semantics import (
-    _complete_type_line, _face0, _normalize_rules_text, _raw_type_line,
+    _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
+    _raw_type_line,
 )
 
 
@@ -89,13 +90,20 @@ def _extract_row(card):
     # counting the whole string answers "costs two green" for either half.
     pips = _mana_pips(mana_cost)
 
+    # Precompute the content scope so searches filter on a stored, indexed column
+    # instead of the per-row CARD_CONTENT_KIND SQL function.  Computed from the
+    # exact stored values (layout and the completed type line) so it stays
+    # identical to the function it replaces.
+    type_line = _complete_type_line(card)
+    content_kind = _card_content_kind(card.get("layout"), type_line)
+
     return (
         card["id"],
         card.get("oracle_id"),
         card["name"],
         mana_cost,
         float(card.get("cmc") or 0),
-        _complete_type_line(card),
+        type_line,
         _raw_type_line(card),
         card.get("oracle_text") or face.get("oracle_text") or "",
         _all_oracle_text(card),
@@ -139,6 +147,7 @@ def _extract_row(card):
         json.dumps(card.get("all_parts") or []),
         json.dumps(card.get("card_faces") or []),
         card.get("layout"),
+        content_kind,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
     )
 
@@ -185,10 +194,10 @@ INSERT OR REPLACE INTO cards (
     reserved, full_art, game_changer, color_indicator, security_stamp,
     universes_beyond, produced_mana,
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
-    related_parts, card_faces, layout,
+    related_parts, card_faces, layout, content_kind,
     pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-          ?,?,?,?,?,?)
+          ?,?,?,?,?,?,?)
 """
 
 

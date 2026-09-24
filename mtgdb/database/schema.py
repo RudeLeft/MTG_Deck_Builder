@@ -9,7 +9,7 @@ import sqlite3
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 14
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS cards (
     related_parts     TEXT,   -- json array copied from Scryfall all_parts
     card_faces        TEXT,   -- json array; preserves future multi-face structure
     layout            TEXT,
+    content_kind      TEXT,   -- precomputed CARD_CONTENT_KIND(layout, type_line)
     -- Coloured mana symbols in the cost, counted once per colour. Hybrid
     -- halves count for both of their colours, which is what devotion does
     -- and what "costs two green" is asked to mean.
@@ -106,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_set_lang ON cards(set_code, lang);
 CREATE INDEX IF NOT EXISTS idx_cards_settype_lang ON cards(set_type, lang);
 CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity);
 CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity);
+CREATE INDEX IF NOT EXISTS idx_cards_content_kind ON cards(content_kind);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -131,6 +133,8 @@ _INDEX_DEFINITIONS = [
     ("idx_cards_rarity", "CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity)"),
     ("idx_cards_color_identity",
      "CREATE INDEX IF NOT EXISTS idx_cards_color_identity ON cards(color_identity)"),
+    ("idx_cards_content_kind",
+     "CREATE INDEX IF NOT EXISTS idx_cards_content_kind ON cards(content_kind)"),
 ]
 
 PRIMARY_PRAGMAS = (
