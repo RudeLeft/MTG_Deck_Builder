@@ -76,6 +76,17 @@ To build the standalone Windows executable yourself, run `build_windows.bat`. It
 creates an isolated build environment, runs the project's checks, and produces
 the portable app in `dist/MTGDeckBuilder/`.
 
+The test suite is a set of standalone scripts under `tests/`. For fast local
+iteration, run them all in parallel:
+
+```bash
+python tests/run_tests.py
+```
+
+It prints a PASS/FAIL summary and the full output of any failure. (The build
+script and CI run the same tests one at a time for deterministic, early-exit
+per-file attribution.)
+
 ### Code signing (optional, removes the SmartScreen warning)
 
 Signed builds skip the SmartScreen prompt above and build download reputation
