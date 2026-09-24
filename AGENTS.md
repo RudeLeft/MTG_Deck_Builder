@@ -216,7 +216,7 @@ only in the module that owns X.
 | `mtgdb/database/authorities.py` | Declarative registry of upstream Scryfall catalogs the application understands, their semantic roles, subtype applicability, and compatibility metadata keys; never value whitelists |
 | `mtgdb/database/constants.py` | Shared database/search semantics: colors, trusted content classes, known/playable legality statuses, known layout classes, and preferred rarity display order |
 | `mtgdb/database/db.py` | Stable `CardDB` façade, metadata/catalog composition, lifecycle delegation, public API |
-| `mtgdb/database/schema.py` | Schema version, columns, indexes, connection policy, query-function registration, migration |
+| `mtgdb/database/schema.py` | Schema version, columns, indexes, connection policy, corrupt-database quarantine and rebuild, query-function registration, migration |
 | `mtgdb/database/semantics.py` | Rules normalization, type-line repair, phrase-safe type/subtype matching, stable Cards/Tokens/Emblems/Art Series classification plus internal unknown-layout classification, SQLite semantic functions |
 | `mtgdb/database/bulk_import.py` | Row projection, strict streaming JSON/JSONL/gzip parsing, transactional bulk replacement, distinct-row threshold protection, index rebuild |
 | `mtgdb/database/queries.py` | Exact-printing lookup, import-resolver ranking, and name suggestions |
@@ -292,7 +292,7 @@ have at least two routing examples.
 | `mtgdb/database/authorities.py` | change which Scryfall catalogs/concepts this build understands<br>change subtype-family applicability or compatibility metadata keys | `mtgdb/database/sync.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/schema.py` | Registry entries describe authority semantics only; never add Card Type/Subtype/Mechanic values here and never auto-interpret an unknown endpoint. |
 | `mtgdb/database/constants.py` | change color/content/layout vocabulary<br>change known/playable-legality semantics or preferred rarity ordering | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/semantics.py`; `mtgdb/deck/legality.py` | Do not hardcode allowed Card Types, Supertypes, set groupings, Subtypes, Mechanics, Formats, Sets, Set Types, or Rarity membership here. Familiar rarity values MAY define display order only when unknown observed rarities remain accepted. |
 | `mtgdb/database/db.py` | add or change a stable public `CardDB` façade method<br>change database mixin composition or connection/lifecycle delegation | `mtgdb/database/schema.py`; `mtgdb/database/queries.py`; `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py` | Do not implement SQL/query algorithms directly in the façade. |
-| `mtgdb/database/schema.py` | add a stored card column or index<br>change schema migration, connection policy, or SQLite function registration | `mtgdb/database/bulk_import.py`; `mtgdb/database/semantics.py`; query owners | Do not parse Scryfall payloads or build UI here. |
+| `mtgdb/database/schema.py` | add a stored card column or index<br>change schema migration, connection policy, corrupt-database recovery on open, or SQLite function registration | `mtgdb/database/bulk_import.py`; `mtgdb/database/semantics.py`; query owners | Do not parse Scryfall payloads or build UI here. |
 | `mtgdb/database/semantics.py` | change Oracle/type-line normalization, repair, or exact type/subtype matching<br>change Cards/Tokens/Emblems/Art Series row classification or registered SQLite semantic functions | `mtgdb/database/schema.py`; `mtgdb/database/bulk_import.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/search_queries.py` | Keep taxonomy vocabulary discovery, schema DDL, transport, and UI outside semantic normalization. |
 | `mtgdb/database/bulk_import.py` | map a new Scryfall field into stored rows<br>change strict JSON/JSONL/gzip parsing, replacement threshold, or index rebuild | `mtgdb/database/schema.py`; `mtgdb/database/semantics.py`; `mtgdb/database/sync.py` | Do not own HTTP transport or interactive Search SQL. |
 | `mtgdb/database/queries.py` | change exact-printing lookup behavior<br>change imported-card resolver ranking or name suggestions | `mtgdb/database/db.py`; `mtgdb/deck/io.py`; `mtgdb/database/schema.py` | Interactive filter SQL belongs in `database/search_queries.py`. |
@@ -780,8 +780,12 @@ every feature together and is exempt.
   _Verification:_ **AUTO**.
 - **DBI-002 — MUST:** Keep schema version, tables, indexes, connection policy,
   query-function registration, migration, and init in `database/schema.py`, and
-  make every schema migration one rollback-safe transaction.
-  _Verification:_ **AUTO**.
+  make every schema migration one rollback-safe transaction. Opening the primary
+  connection MUST first quarantine a malformed `cards.db` (moving it and its WAL
+  sidecars aside as `*.corrupt`) and let a fresh empty database be created, so a
+  truncated or corrupt file recovers on the next launch instead of crashing
+  startup; the probe MUST close its connection before quarantining so no handle
+  keeps the file locked on Windows. _Verification:_ **AUTO**.
 - **DBI-003 — MUST:** Keep row projection, strict streaming bulk parsing,
   isolated replacement transactions, distinct committed-card threshold
   protection, and index rebuild in `database/bulk_import.py`; malformed JSONL,

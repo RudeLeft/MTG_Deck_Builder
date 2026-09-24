@@ -1,8 +1,12 @@
 """SQLite schema, indexes, migration, and connection configuration."""
 
+import logging
+import os
 import re
 import sqlite3
 
+
+log = logging.getLogger("mtg")
 
 
 _SCHEMA_VERSION = 13
@@ -177,7 +181,59 @@ def register_functions(connection, functions):
             connection.create_function(name, arguments, callback)
 
 
+def _database_is_corrupt(path):
+    """True only when an existing file will not open as a SQLite database.
+
+    A throwaway connection probes ``sqlite_master`` and is always closed before
+    returning, so no handle lingers to block quarantining the file on Windows.
+    A missing file, or an empty/valid database whose ``cards`` table is simply
+    absent, is not corruption -- schema init recreates the table. Only a
+    malformed file (interrupted write, disk fault) raises ``DatabaseError`` here.
+    """
+    if not os.path.exists(path):
+        return False
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+        return False
+    except sqlite3.DatabaseError:
+        return True
+    finally:
+        connection.close()
+
+
+def _quarantine_database(path):
+    """Move a corrupt database and its WAL sidecars aside as ``*.corrupt``.
+
+    The bad file is kept for inspection; only the most recent quarantine is
+    retained. A rename that fails (locked, permissions) falls back to deletion
+    so a fresh rebuild can always proceed rather than stalling on the bad file.
+    """
+    for suffix in ("", "-wal", "-shm"):
+        candidate = path + suffix
+        if not os.path.exists(candidate):
+            continue
+        try:
+            os.replace(candidate, candidate + ".corrupt")
+        except OSError:
+            try:
+                os.remove(candidate)
+            except OSError:
+                pass
+
+
 def open_primary_connection(path, functions):
+    # A truncated or malformed cards.db (interrupted write, disk fault) would
+    # otherwise crash startup on the first query with no recourse. Quarantine it
+    # and let a fresh empty database be created here; the launch sync then
+    # repopulates it from Scryfall exactly as it does on a first launch. Subtle
+    # page corruption not caught by this cheap probe still surfaces as an
+    # ordinary query error later -- a full integrity scan every launch is not
+    # worth its cost. This is the single choke point through which the primary
+    # connection is opened, so every CardDB gets the same recovery.
+    if _database_is_corrupt(path):
+        log.warning("cards.db failed its integrity probe; rebuilding it from scratch")
+        _quarantine_database(path)
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     _apply_pragmas(connection, PRIMARY_PRAGMAS)

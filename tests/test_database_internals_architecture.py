@@ -275,6 +275,38 @@ def _content_scope_sql_parity_check():
     return ok and rejected
 
 
+def _corrupt_db_recovery_check():
+    """Opening a corrupt file quarantines and rebuilds it; a valid one is kept.
+
+    Recovery is owned by ``schema.open_primary_connection`` (the single choke
+    point for the primary connection), so plain ``CardDB(path)`` self-heals and
+    no separate opener is needed. A malformed file must be moved aside and a
+    fresh empty database created; an intact one must open untouched.
+    """
+    from mtgdb.database.db import CardDB
+
+    tmp = tempfile.mkdtemp(prefix="mtgdb-corrupt-")
+    atexit.register(shutil.rmtree, tmp, True)
+
+    corrupt = Path(tmp) / "cards.db"
+    corrupt.write_bytes(b"this is not a sqlite database" * 64)
+    recovered = CardDB(str(corrupt))
+    healed = recovered.has_cards() is False and recovered.count() == 0
+    recovered.close()
+    quarantined = (corrupt.parent / "cards.db.corrupt").exists()
+
+    good = Path(tmp) / "good.db"
+    seed = CardDB(str(good))
+    seed.load_cards([{"id": "z", "name": "Z", "layout": "normal"}])
+    seed.close()
+    reopened = CardDB(str(good))
+    preserved = reopened.count() == 1
+    reopened.close()
+    untouched = not (good.parent / "good.db.corrupt").exists()
+
+    return healed and quarantined and preserved and untouched
+
+
 def main():
     sources = {
         name: (ROOT / name).read_text(encoding="utf-8")
@@ -400,6 +432,8 @@ def main():
     inserts_demoted = _booster_insert_check()
 
     checks = {
+        "a corrupt card database is quarantined and rebuilt on open":
+            _corrupt_db_recovery_check(),
         "pure-SQL content scope matches CARD_CONTENT_KIND for every layout":
             _content_scope_sql_parity_check(),
         "a booster insert never outranks an ordinary printing":
