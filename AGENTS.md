@@ -72,6 +72,7 @@ mtgdb/
     background_jobs.py   #   JobCancelled, check_cancel, spawn_daemon, GenerationalWorker
     atomic_files.py      #   atomic-write temp naming + abandoned-temp sweep
     version.py           #   single runtime source for the app version (metadata/pyproject)
+    update_check.py      #   pure latest-release version comparison (dependency-injected)
     format_names.py      #   readable names for Scryfall format keys
   search/                # interactive search domain (Tk-free)
     models.py            #   SearchCriteria, worker events, result contracts
@@ -135,6 +136,7 @@ mtgdb/
     database_sync.py     #   refresh scheduling, progress dialog, Tk polling
     printing.py          #   print destination, progress dialog, Tk polling
     mana.py              #   mana pip/symbol assets and Tk image composition
+    updates.py           #   UpdateCheckMixin: background release check + dismissible banner
     window.py            #   WindowServicesMixin: geometry, dark titlebars, scroll, DPI, icons
 assets/                  # application icon and bundled mana symbols
 tests/                   # cross-platform functional, architecture, contract gates
@@ -196,6 +198,7 @@ only in the module that owns X.
 | `mtgdb/core/background_jobs.py` | Shared cancellation exception, cooperative cancel check, daemon-thread factory, and generation-tagged single-worker controller for printing and syncing |
 | `mtgdb/core/atomic_files.py` | Shared temporary-file naming for atomic writes and the sweep that removes temporaries a killed process left behind |
 | `mtgdb/core/version.py` | Single runtime source for the application version (installed/frozen distribution metadata, falling back to `pyproject.toml`) |
+| `mtgdb/core/update_check.py` | Pure version parsing/compare and latest-GitHub-release selection, dependency-injected (no Tk, no direct network) |
 | `mtgdb/core/format_names.py` | The single mapping from Scryfall format key to readable format name, shared by the Format picker, the card preview, and the deck legality report |
 | `mtgdb/search/models.py` | Immutable search criteria, signatures, worker events, result contracts |
 | `mtgdb/search/repository.py` | Interactive-search DB gateway, narrow projection, name suggestions, filter catalogs |
@@ -249,6 +252,7 @@ only in the module that owns X.
 | `mtgdb/ui/database_sync.py` | Refresh scheduling, progress-dialog presentation, Tk polling, completion reconciliation, error/shutdown adaptation |
 | `mtgdb/ui/printing.py` | Print destination selection, progress-dialog presentation, Tk polling, completion/error/shutdown adaptation |
 | `mtgdb/ui/mana.py` | Mana pip drawing, bundled symbol loading, fallback symbols, mana-cost Tk image composition and caches |
+| `mtgdb/ui/updates.py` | `UpdateCheckMixin`: background GitHub release check and the dismissible "update available" banner with a Download link |
 | `mtgdb/ui/window.py` | `WindowServicesMixin`: popup geometry, per-monitor visible work-area resolution, dark title bars, scrolling, icons, DPI, window behavior |
 
 ## Module map
@@ -273,6 +277,7 @@ have at least two routing examples.
 | `mtgdb/core/format_names.py` | change how a Scryfall format key is displayed<br>add a readable name for a format key | `mtgdb/ui/components.py`; `mtgdb/deck/legality.py`; `mtgdb/ui/search.py`; `mtgdb/ui/card_detail.py` | Presentation only: this mapping never authorizes Format vocabulary, and an unmapped key MUST still display and stay selectable. |
 | `mtgdb/core/atomic_files.py` | change atomic-write temporary naming<br>change which abandoned temporaries a writer sweeps | `mtgdb/workspace/repository.py`; `mtgdb/preferences/repository.py`; `mtgdb/deck/io.py` | Naming and cleanup only: the writers keep their own payload semantics, and a sweep never removes a file this application did not name. |
 | `mtgdb/core/version.py` | change how the runtime application version is resolved<br>change the distribution-metadata vs `pyproject.toml` fallback order | `mtgdb/main.py`; `mtgdb/ui/app.py` | Read-only version resolution; no Tk, SQL, or feature logic. |
+| `mtgdb/core/update_check.py` | change version parsing or the newer-than comparison<br>change latest-release selection or the release feed URL | `mtgdb/ui/updates.py`; `mtgdb/core/net.py` | Pure and dependency-injected: no Tk and no direct network; the caller supplies the fetcher. |
 | `mtgdb/search/models.py` | add/change semantic Search criteria such as Supertypes, Content, or Paper-only<br>change Search worker-event or result-contract dataclasses/signatures | `mtgdb/ui/search.py`; `mtgdb/search/controller.py`; `mtgdb/database/search_queries.py` | No Tk state, taxonomy discovery, or SQL construction belongs here. |
 | `mtgdb/search/repository.py` | add a card field required by broad Results rows<br>change Search name-suggestion or filter-catalog gateway behavior | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/search/models.py` | Keep SQL in database owners and Tk in UI owners. |
 | `mtgdb/search/controller.py` | change Search cache or unchanged-search behavior<br>change generation invalidation, stale-event rejection, or worker queue lifecycle | `mtgdb/search/repository.py`; `mtgdb/search/models.py`; `mtgdb/ui/search.py` | Do not read widgets or construct SQL here. |
@@ -326,6 +331,7 @@ have at least two routing examples.
 | `mtgdb/ui/printing.py` | change print destination selection or progress-dialog presentation<br>change Tk polling, completion/error messages, or print shutdown adaptation | `mtgdb/printing/service.py`; `mtgdb/printing/renderer.py` | Rendering, downloading, caching, and worker lifecycle stay outside UI. |
 | `mtgdb/ui/mana.py` | change mana pip/symbol drawing or fallback symbols<br>change bundled mana-symbol loading, mana-cost Tk composition, or symbol caches | `mtgdb/ui/assets.py`; `assets/mana/*`; `mtgdb/ui/tokens.py` | Do not add general card-image downloading or deck-analysis rules here. |
 | `mtgdb/ui/window.py` | change popup/window geometry, scrolling, or icon behavior<br>change dark titlebar handling, Tk scaling/DPI adaptation, or general window services | `mtgdb/ui/tokens.py`; `mtgdb/ui/assets.py`; `mtgdb/ui/app.py` | Feature layouts and feature-specific dialogs stay with their feature modules. |
+| `mtgdb/ui/updates.py` | change the startup update-check trigger or its background thread<br>change the update banner appearance, Download action, or dismissal | `mtgdb/core/update_check.py`; `mtgdb/core/net.py`; `mtgdb/core/version.py` | Only the release check and its banner; no other feature behavior. |
 
 ## Import allow/deny matrix
 
@@ -355,6 +361,7 @@ rows override broader rows.
 | `mtgdb/core/scryfall_json.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/atomic_files.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/version.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
+| `mtgdb/core/update_check.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/core/format_names.py` | stdlib | `tkinter`; `sqlite3`; `PIL`; any `mtgdb.*` module |
 | `mtgdb/comparison/models.py` | stdlib; `mtgdb.core.scryfall_json` | `tkinter`; `sqlite3`; `mtgdb.core.net`; any `mtgdb.ui.*` |
 | `mtgdb/images/service.py` | `mtgdb.core.{net,cache_names,background_jobs,scryfall_json}`; `PIL` | `tkinter`; `mtgdb.ui.*` |
@@ -381,6 +388,7 @@ every feature together and is exempt.
 | Printing | `printing.py` | `mtgdb.printing.` |
 | Database sync | `database_sync.py` | `mtgdb.database.` |
 | Workspace | `workspace.py` | `mtgdb.workspace.`, `mtgdb.deck.` |
+| Updates | `updates.py` | — |
 | Shared presentation | `tokens.py`, `components.py`, `styles.py`, `assets.py`, `window.py`, `mana.py` | — |
 
 - **LAYER-001 — MUST:** Import `tkinter` (or build a Tk widget/image) only from

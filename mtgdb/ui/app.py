@@ -41,6 +41,7 @@ from mtgdb.ui.search import SearchFeatureMixin
 from mtgdb.ui.set_filters import SetFilterSupportMixin
 from mtgdb.ui.styles import install_ui_styles
 from mtgdb.ui.tables import TableInfrastructureMixin
+from mtgdb.ui.updates import UpdateCheckMixin
 from mtgdb.ui.tokens import (
     MAIN_CARD_PREVIEW_HEIGHT, MAIN_CENTER_COLUMN_WIDTH, MAIN_DECK_WEIGHT,
     MAIN_SEARCH_WEIGHT, MAIN_SIDE_MIN_WIDTH, PANEL_PADDING, WINDOW_GUTTER,
@@ -56,7 +57,7 @@ class DeckBuilderApp(
         ManaSymbolsMixin, SetFilterSupportMixin,
         SearchFeatureMixin, TableFilterMixin, SearchResultsMixin,
         TableInfrastructureMixin, CardDetailMixin,
-        WindowServicesMixin, tk.Tk):
+        UpdateCheckMixin, WindowServicesMixin, tk.Tk):
     def __init__(self, db, image_cache_dir, data_dir, log_path=None):
         super().__init__()
         # Construct the complete styled root while hidden so Windows never shows
@@ -140,6 +141,7 @@ class DeckBuilderApp(
         self._load_symbol_keys()
         self._set_window_icon()
         self._build_menu()
+        self._build_update_banner(self)
         self._build_body()
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._refresh_deck_views()
@@ -334,6 +336,8 @@ class DeckBuilderApp(
     def _build_body(self):
         outer = ttk.Frame(self, padding=WINDOW_GUTTER, style="Bg.TFrame")
         outer.pack(fill="both", expand=True)
+        # The update banner, when shown, sits between the menu and the body.
+        self._update_banner_below = outer
 
         # The main shell intentionally has no draggable sashes.  The center
         # column is fixed so the complete card preview and its action row never
@@ -525,6 +529,8 @@ class DeckBuilderApp(
         # Build the bitset facet index in the background now, so the first live
         # filter pick is instant instead of paying the one-time build cost.
         self.search_context_controller.warm_facet_index()
+        # Ask GitHub whether a newer release exists; a banner appears only if so.
+        self._start_update_check()
 
     # workspace autosave / crash recovery
     # ======================================================================

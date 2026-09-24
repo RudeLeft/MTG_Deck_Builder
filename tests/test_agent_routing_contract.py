@@ -23,6 +23,7 @@ SOURCE_MARKERS = {
     "mtgdb/core/atomic_files.py": (
         "def sweep_abandoned_writes(", "def temp_prefix("),
     "mtgdb/core/version.py": ("def app_version(", "_DISTRIBUTION"),
+    "mtgdb/core/update_check.py": ("def latest_release(", "def is_newer("),
     "mtgdb/search/models.py": ("class SearchCriteria", "def query_arguments("),
     "mtgdb/search/repository.py": ("SEARCH_RESULT_COLUMNS", "class SearchRepository"),
     "mtgdb/search/controller.py": ("class SearchController", "def invalidate("),
@@ -76,6 +77,7 @@ SOURCE_MARKERS = {
     "mtgdb/ui/printing.py": ("class PrintingMixin", "def _poll_print_events("),
     "mtgdb/ui/mana.py": ("class ManaSymbolsMixin", "def _cost_image("),
     "mtgdb/ui/window.py": ("class WindowServicesMixin", "def _center_popup_on_screen("),
+    "mtgdb/ui/updates.py": ("class UpdateCheckMixin", "def _start_update_check("),
 }
 
 STOPWORDS = {
