@@ -8,7 +8,7 @@ import os
 from mtgdb.database.schema import _INDEX_DEFINITIONS, open_writer_connection
 from mtgdb.database.semantics import (
     _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
-    _raw_type_line,
+    _raw_type_line, color_mask, derive_trait_flags,
 )
 
 
@@ -97,6 +97,15 @@ def _extract_row(card):
     type_line = _complete_type_line(card)
     content_kind = _card_content_kind(card.get("layout"), type_line)
 
+    # Precomputed colour bitmasks and packed trait flags, from the exact stored
+    # string values so a query on them reproduces the LIKE/GLOB filter results.
+    colors_mask = color_mask(",".join(colors))
+    identity_mask = color_mask(",".join(identity))
+    produced_mask = color_mask(",".join(sorted(card.get("produced_mana") or [])))
+    trait_flags = derive_trait_flags(
+        mana_cost, either("power"), either("toughness"),
+        json.dumps(card.get("card_faces") or []), ",".join(indicator))
+
     return (
         card["id"],
         card.get("oracle_id"),
@@ -148,6 +157,7 @@ def _extract_row(card):
         json.dumps(card.get("card_faces") or []),
         card.get("layout"),
         content_kind,
+        colors_mask, identity_mask, produced_mask, trait_flags,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
     )
 
@@ -195,9 +205,10 @@ INSERT OR REPLACE INTO cards (
     universes_beyond, produced_mana,
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
     related_parts, card_faces, layout, content_kind,
+    colors_mask, identity_mask, produced_mask, trait_flags,
     pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-          ?,?,?,?,?,?,?)
+          ?,?,?,?,?,?,?,?,?,?,?)
 """
 
 

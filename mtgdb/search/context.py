@@ -21,8 +21,8 @@ import time
 from mtgdb.core.background_jobs import spawn_daemon
 from mtgdb.database.constants import COLORS
 from mtgdb.database.semantics import (
-    _card_content_kind, _mana_cost_symbol_colors, _mana_cost_symbol_match,
-    _type_key, _type_line_search_parts,
+    _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
+    _mana_cost_symbol_match, _type_key, _type_line_search_parts,
 )
 from mtgdb.search.models import SearchCriteria
 
@@ -179,31 +179,6 @@ def _finite(value):
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
-
-
-_NON_NUMERIC = re.compile(r"[^0-9.\-]")
-_NUMERIC_PREFIX = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
-
-
-def _glob_numeric(value):
-    """True when a TEXT stat passes the search filter's GLOB numeric guard.
-
-    Mirrors ``field NOT GLOB '*[^0-9.-]*' AND field <> ''`` so a predictive count
-    classifies power/toughness exactly as ``TRAIT_CLAUSES`` does.
-    """
-    text = "" if value is None else str(value)
-    return text != "" and _NON_NUMERIC.search(text) is None
-
-
-def _cast_real(text):
-    """Approximate SQLite ``CAST(x AS REAL)`` for a GLOB-numeric stored value."""
-    match = _NUMERIC_PREFIX.match(str(text or "").strip())
-    if not match:
-        return 0.0
-    try:
-        return float(match.group(0))
-    except ValueError:
-        return 0.0
 
 
 def _has_faces(value):

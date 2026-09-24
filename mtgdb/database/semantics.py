@@ -329,3 +329,86 @@ def _escape_like(value):
     """Escape SQLite LIKE wildcards so user text is treated literally."""
     return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+
+# -- numeric stat classification (shared by import, SQL, and the facet engine) --
+# Moved here from search/context so the import projection, the search-filter SQL,
+# and the in-memory predictive counts all classify power/toughness through one
+# implementation rather than three copies that could drift.
+_NON_NUMERIC = re.compile(r"[^0-9.\-]")
+_NUMERIC_PREFIX = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _glob_numeric(value):
+    """True when a TEXT stat passes the search filter's GLOB numeric guard.
+
+    Mirrors ``field NOT GLOB '*[^0-9.-]*' AND field <> ''`` so every caller
+    classifies power/toughness exactly as ``TRAIT_CLAUSES`` does.
+    """
+    text = "" if value is None else str(value)
+    return text != "" and _NON_NUMERIC.search(text) is None
+
+
+def _cast_real(text):
+    """Approximate SQLite ``CAST(x AS REAL)`` for a GLOB-numeric stored value."""
+    match = _NUMERIC_PREFIX.match(str(text or "").strip())
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return 0.0
+
+
+# -- precomputed search columns (populated at import) --------------------------
+# Colour membership as a bitmask so the search filter can test presence with an
+# indexed integer AND instead of a LIKE over the comma-joined column.
+COLOR_BITS = {"W": 1, "U": 2, "B": 4, "R": 8, "G": 16, "C": 32}
+
+# Per-card boolean traits packed into one integer, mirroring the filter semantics
+# in ``search_queries.TRAIT_CLAUSES`` (and ``facet_index._trait_filter_keys``)
+# exactly, so a query built on the column reproduces today's results.
+TRAIT_MULTI_FACED = 1
+TRAIT_HYBRID_MANA = 2
+TRAIT_PHYREXIAN_MANA = 4
+TRAIT_HAS_X_COST = 8
+TRAIT_VARIABLE_STATS = 16
+TRAIT_TOP_HEAVY = 32
+TRAIT_COLOR_INDICATOR = 64
+
+
+def color_mask(comma_text):
+    """Bitmask of the colours in a stored comma-joined colour string."""
+    mask = 0
+    for member in str(comma_text or "").split(","):
+        mask |= COLOR_BITS.get(member.strip().upper(), 0)
+    return mask
+
+
+def derive_trait_flags(mana_cost, power, toughness, card_faces, color_indicator):
+    """Pack the per-card boolean traits, computed from stored column values.
+
+    ``card_faces`` and ``color_indicator`` are the stored string forms (a JSON
+    array and a comma-joined string) so the multi-faced / colour-indicator bits
+    match the filter, which reads those same stored strings.
+    """
+    flags = 0
+    if card_faces is not None and str(card_faces) not in ("", "[]", "null"):
+        flags |= TRAIT_MULTI_FACED
+    mana = str(mana_cost or "").upper()
+    if "/" in mana and "/P" not in mana:
+        flags |= TRAIT_HYBRID_MANA
+    if "/P" in mana:
+        flags |= TRAIT_PHYREXIAN_MANA
+    if "{X}" in mana:
+        flags |= TRAIT_HAS_X_COST
+    power_text = str(power or "")
+    toughness_text = str(toughness or "")
+    if "*" in power_text or "*" in toughness_text:
+        flags |= TRAIT_VARIABLE_STATS
+    if (_glob_numeric(power_text) and _glob_numeric(toughness_text)
+            and _cast_real(power_text) > _cast_real(toughness_text)):
+        flags |= TRAIT_TOP_HEAVY
+    if color_indicator is not None and str(color_indicator) != "":
+        flags |= TRAIT_COLOR_INDICATOR
+    return flags
+

@@ -9,7 +9,7 @@ import sqlite3
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 14
+_SCHEMA_VERSION = 15
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS cards (
     card_faces        TEXT,   -- json array; preserves future multi-face structure
     layout            TEXT,
     content_kind      TEXT,   -- precomputed CARD_CONTENT_KIND(layout, type_line)
+    colors_mask       INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of colors
+    identity_mask     INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of color_identity
+    produced_mask     INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of produced_mana
+    trait_flags       INTEGER NOT NULL DEFAULT 0, -- packed per-card boolean traits
     -- Coloured mana symbols in the cost, counted once per colour. Hybrid
     -- halves count for both of their colours, which is what devotion does
     -- and what "costs two green" is asked to mean.
