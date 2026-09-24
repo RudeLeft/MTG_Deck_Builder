@@ -15,6 +15,11 @@ settings stay on your machine.
 2. Unzip it and keep the `MTGDeckBuilder` folder together.
 3. Run `MTGDeckBuilder.exe`.
 
+**First-run Windows warning:** the app isn't code-signed yet, so Windows
+SmartScreen may show *"Windows protected your PC."* This is expected for a new
+independent app. Click **More info → Run anyway** to start it. (SmartScreen
+stops warning once the app has been run a few times, or once signing is added.)
+
 No Python required. The app is fully portable — it keeps its card database and
 your saved decks in its own folder and writes nothing to AppData or the registry,
 so you can copy the folder between PCs or run it from a USB stick.
@@ -70,6 +75,21 @@ python -m mtgdb
 To build the standalone Windows executable yourself, run `build_windows.bat`. It
 creates an isolated build environment, runs the project's checks, and produces
 the portable app in `dist/MTGDeckBuilder/`.
+
+### Code signing (optional, removes the SmartScreen warning)
+
+Signed builds skip the SmartScreen prompt above and build download reputation
+faster. To sign a build you need a code-signing certificate (an OV certificate
+is inexpensive; an EV certificate clears SmartScreen immediately but costs more).
+With a `.pfx` in hand, sign the built exe with the Windows SDK `signtool`:
+
+```
+signtool sign /f cert.pfx /p <password> /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\MTGDeckBuilder\MTGDeckBuilder.exe
+```
+
+In CI, store the certificate and password as encrypted repository secrets and
+add a signing step after the "Build the portable app" step in
+`.github/workflows/build-windows.yml`, before the release is packaged.
 
 ## Card data & legal
 
