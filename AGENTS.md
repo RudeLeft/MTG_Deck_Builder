@@ -1582,7 +1582,12 @@ every feature together and is exempt.
   equivalent: normal secondary controls use `surface2`, hover/active uses the
   lighter `surface3`, text stays `text`, and pressed/click-pulse feedback uses the
   shared `select`/accent outline treatment. A classic secondary button MUST NOT
-  darken on hover while its ttk counterpart lightens. _Verification:_ **AUTO**.
+  darken on hover while its ttk counterpart lightens. A classic button MUST paint
+  its one-pixel `border` outline (`accent` for primary roles) as a containing
+  border frame, never relying on `highlightthickness`: Windows Tk drops a classic
+  button's highlight ring regardless of colour or thickness, which left classic
+  buttons borderless beside their bordered ttk counterparts. Outline-exempt roles
+  (chip close) keep no border. _Verification:_ **AUTO**.
 - **TYP-001 — MUST:** Define and consume typography through shared tokens, using
   Segoe UI at the size/weight assigned per role; no local font tuples in feature
   code. _Verification:_ **AUTO**.

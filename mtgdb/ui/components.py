@@ -428,48 +428,66 @@ def _classic_button_outline(role):
     return PALETTE["border"]
 
 
-class ClassicButton(tk.Button):
+class ClassicButton(tk.Frame):
+    """A classic Tk button wrapped in a one-pixel border frame.
+
+    Windows Tk does not paint a classic ``tk.Button``'s ``highlightthickness``
+    outline -- the ring is dropped regardless of colour or thickness, unlike
+    ttk's clam relief border -- so a secondary classic button had no visible
+    outline and blended into the dialog surface, while its ttk counterpart
+    (e.g. the Results *Clear* button) showed a crisp box. Drawing the shared
+    one-pixel ``border`` outline (``accent`` for primary roles) as a containing
+    frame restores parity with the ttk button families required by CLR-006.
+    Outline-exempt roles (chip close) keep no border. The frame is the packed
+    widget, so ``pack``/``grid`` behave as before, and every button option is
+    forwarded to the inner button.
+    """
+
     CLICK_PULSE_MS = 140
 
     def __init__(self, master=None, *, role="secondary", **kwargs):
         outlined = role not in _CLASSIC_OUTLINE_EXEMPT_ROLES
         outline = _classic_button_outline(role)
-        options = {
-            "relief": "flat", "bd": 0,
-            "highlightthickness": 1 if outlined else 0,
-            "highlightbackground": outline, "highlightcolor": outline,
-        }
+        options = {"relief": "flat", "bd": 0, "highlightthickness": 0}
         options.update(_CLASSIC_BUTTON_ROLES[role])
         options.update(kwargs)
         _protect_explicit_text_width(options)
-        super().__init__(master, **options)
-        self._ui_click_outline = outline
-        self._ui_click_background = str(self.cget("background"))
-        self._ui_click_activebackground = str(self.cget("activebackground"))
+        pad = 1 if outlined else 0
+        self._ui_outlined = outlined
+        self._ui_border_color = outline if outlined else options.get(
+            "bg", PALETTE["surface2"])
+        super().__init__(master, bg=self._ui_border_color, bd=0,
+                         highlightthickness=0)
+        self._ui_button = tk.Button(self, **options)
+        self._ui_button.pack(fill="both", expand=True, padx=pad, pady=pad)
+        self._ui_click_background = str(self._ui_button.cget("background"))
+        self._ui_click_activebackground = str(
+            self._ui_button.cget("activebackground"))
         self._ui_click_pulse_background = (
             PALETTE["accent2"] if role in _CLASSIC_PRIMARY_ROLES
             else PALETTE["select"]
         )
         self._ui_click_pulse_after = None
-        self.bind("<ButtonRelease-1>", self._pulse_click_feedback, add="+")
+        self._ui_button.bind(
+            "<ButtonRelease-1>", self._pulse_click_feedback, add="+")
         self.bind("<Destroy>", self._release_click_feedback, add="+")
 
     def _pulse_click_feedback(self, event=None):
         try:
-            if str(self.cget("state")) == "disabled":
+            if str(self._ui_button.cget("state")) == "disabled":
                 return
             if event is not None and not (
-                    0 <= int(event.x) < self.winfo_width()
-                    and 0 <= int(event.y) < self.winfo_height()):
+                    0 <= int(event.x) < self._ui_button.winfo_width()
+                    and 0 <= int(event.y) < self._ui_button.winfo_height()):
                 return
             pending = self._ui_click_pulse_after
             if pending is not None:
                 self.after_cancel(pending)
-            self.configure(
+            self._ui_button.configure(
                 relief="sunken", background=self._ui_click_pulse_background,
-                activebackground=self._ui_click_pulse_background,
-                highlightbackground=PALETTE["accent"],
-                highlightcolor=PALETTE["accent"])
+                activebackground=self._ui_click_pulse_background)
+            if self._ui_outlined:
+                self.configure(bg=PALETTE["accent"])
             self._ui_click_pulse_after = self.after(
                 self.CLICK_PULSE_MS, self._clear_click_feedback)
         except tk.TclError:
@@ -478,11 +496,11 @@ class ClassicButton(tk.Button):
     def _clear_click_feedback(self):
         self._ui_click_pulse_after = None
         try:
-            self.configure(
+            self._ui_button.configure(
                 relief="flat", background=self._ui_click_background,
-                activebackground=self._ui_click_activebackground,
-                highlightbackground=self._ui_click_outline,
-                highlightcolor=self._ui_click_outline)
+                activebackground=self._ui_click_activebackground)
+            if self._ui_outlined:
+                self.configure(bg=self._ui_border_color)
         except tk.TclError:
             pass
 

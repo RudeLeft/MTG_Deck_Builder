@@ -269,6 +269,15 @@ def main():
         "every semantic primary button is gold with dark text": primary_contract,
         "classic primary buttons use the same gold contrast": (
             classic_primary_contract),
+        # Windows Tk drops a classic button's highlightthickness ring (any
+        # colour, any thickness), so the one-pixel outline MUST be drawn as a
+        # containing border frame or classic buttons blend into the dialog while
+        # their ttk counterparts show a crisp box (CLR-006).
+        "classic buttons paint their outline as a border frame": (
+            issubclass(C.ClassicButton, C.tk.Frame)
+            and not issubclass(C.ClassicButton, C.tk.Button)
+            and "tk.Button(self, **options)" in sources["components.py"]
+            and "padx=pad, pady=pad" in sources["components.py"]),
         "every semantic secondary button is dark with light text": secondary_contract,
         "Search section button is dark with gold section emphasis": (
             fake_style.configured["SearchSection.TButton"].get("background")
