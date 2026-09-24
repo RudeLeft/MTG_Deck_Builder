@@ -24,6 +24,13 @@ No Python required. The app is fully portable — it keeps its card database and
 your saved decks in its own folder and writes nothing to AppData or the registry,
 so you can copy the folder between PCs or run it from a USB stick.
 
+**Updating:** when a newer release exists, a banner appears at the top of the
+window. Click **Update** and the app downloads and verifies the new version, then
+**Restart now** swaps it in and relaunches — your `data\` folder (decks, database,
+images, settings) is preserved, so there's no re-download of card data. (The first
+launch of a freshly downloaded build may show the SmartScreen prompt again until
+the app is signed.)
+
 On first launch it downloads current card data from [Scryfall](https://scryfall.com)
 (a few hundred MB); after that it runs offline and refreshes on its own schedule.
 

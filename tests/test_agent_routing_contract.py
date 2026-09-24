@@ -24,6 +24,7 @@ SOURCE_MARKERS = {
         "def sweep_abandoned_writes(", "def temp_prefix("),
     "mtgdb/core/version.py": ("def app_version(", "_DISTRIBUTION"),
     "mtgdb/core/update_check.py": ("def latest_release(", "def is_newer("),
+    "mtgdb/core/self_update.py": ("def select_release_asset(", "def build_swap_script("),
     "mtgdb/search/models.py": ("class SearchCriteria", "def query_arguments("),
     "mtgdb/search/repository.py": ("SEARCH_RESULT_COLUMNS", "class SearchRepository"),
     "mtgdb/search/controller.py": ("class SearchController", "def invalidate("),
