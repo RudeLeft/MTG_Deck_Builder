@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mtgdb.database.db import CardDB
-from mtgdb.search.context import SearchContextController
+from mtgdb.database.semantics import pip_minimum_threshold
+from mtgdb.search.context import SearchContextController, _predict_pips
 from mtgdb.search.facet_index import FacetIndex
 from mtgdb.search.models import SearchCriteria
 from mtgdb.search.repository import SearchRepository
@@ -59,6 +60,19 @@ CARDS = [
           color_identity=[], power="1", toughness="1", layout="token"),
     _card("art", "Bear Art", "Card", layout="art_series", colors=[],
           color_identity=[]),
+    # Costs whose "/" is NOT a hybrid symbol (split and adventure halves are
+    # joined by " // "), and a compleated {G/U/P} that IS one.
+    _card("split", "Fire // Ice", "Instant // Instant", cmc=4.0,
+          colors=["R", "U"], color_identity=["R", "U"],
+          mana_cost="{1}{R} // {1}{U}", layout="split", rarity="uncommon"),
+    _card("adventure", "Giant // Stomp",
+          "Creature \u2014 Giant // Instant \u2014 Adventure",
+          cmc=3.0, colors=["R"], color_identity=["R"],
+          mana_cost="{2}{R} // {1}{R}", layout="adventure"),
+    _card("compleated", "Compleated Sage",
+          "Legendary Planeswalker \u2014 Tamiyo",
+          cmc=5.0, colors=["G", "U"], color_identity=["G", "U"],
+          mana_cost="{2}{G}{G/U/P}{U}", loyalty="5", rarity="mythic"),
 ]
 
 
@@ -225,6 +239,33 @@ def main():
     checks["top_heavy count matches its filter (GLOB/CAST)"] = (
         filter_count == 2 and predictive.get("top_heavy") == 2)
 
+    # 3b. A property option's predicted count must equal what selecting it returns
+    #     (SRCH-045).  Hybrid mana disagreed: the count treated a split/adventure
+    #     cost's "//" as hybrid and missed a compleated {G/U/P}.  Checked on the
+    #     bitset index AND the SQLite worker, against the real search count.
+    parity_ok = True
+    empty = SearchCriteria(content_types=("card",))
+    index_counts = index.context_counts(empty, vocab)["mana_feature_counts"]
+    worker_counts = worker(empty).mana_feature_counts
+    for key in ("hybrid_mana", "phyrexian_mana", "has_x_cost"):
+        selected = SearchCriteria(
+            content_types=("card",), mana_features=(key,),
+            mana_feature_mode="any")
+        want = repo.count(selected, reader)
+        for source, counts in (("index", index_counts), ("worker", worker_counts)):
+            if counts.get(key, 0) != want:
+                parity_ok = False
+                print("    %s count for %s: %s != selecting returns %s"
+                      % (source, key, counts.get(key), want))
+    hybrid_returns = {
+        card["id"] for card in db.search(
+            content_types=["card"], mana_features=["hybrid_mana"],
+            mana_feature_mode="any")}
+    checks["mana-feature counts equal what selecting them returns"] = (
+        parity_ok
+        # {W/U} and the compleated {G/U/P} are hybrid; "//" costs are not.
+        and hybrid_returns == {"hybrid", "compleated"})
+
     # 4. Subtype matching is whitespace-bounded: "Urza" must NOT match
     #    "Urza's Saga" (they are different subtypes), while the full subtype
     #    does -- and the count equals the selectable result (no gap).
@@ -253,7 +294,19 @@ def main():
             SearchCriteria(content_types=("card",), pip_min=2),
             SearchCriteria(content_types=("card",), pips=("W", "U"), pip_min=3.5),
             SearchCriteria(content_types=("card",), pips=("G",),
-                           pip_min=float("inf"))))
+                           pip_min=float("inf")),
+            SearchCriteria(content_types=("card",), pips=("G",),
+                           pip_min=float("-inf")),
+            SearchCriteria(content_types=("card",), pip_min=float("nan")),
+            # An infinite release year made the index raise OverflowError
+            # (int(float(inf))); a NaN one it silently ignored.  The builder
+            # rejects both, so the index must not answer for it.
+            SearchCriteria(content_types=("card",), released_from=float("inf")),
+            SearchCriteria(content_types=("card",), released_to=float("nan")),
+            SearchCriteria(content_types=("card",), cmc_min=float("nan")),
+            SearchCriteria(content_types=("card",), power_max=float("inf")),
+            SearchCriteria(content_types=("card",), loyalty_min=float("-inf")),
+            SearchCriteria(content_types=("card",), defense_max=float("nan"))))
     checks["the Minimum box's default of 1 is represented, so the UI never falls back"] = all(
         index.filter_bitset(drafts[name]) is not None
         and index.context_counts(drafts[name], vocab) is not None
@@ -261,6 +314,45 @@ def main():
             "pips_any_wu_min1", "pips_all_wu_min1", "pips_none_g_min1",
             "pips_min_zero", "pips_min_fraction", "min1_no_pips",
             "ui_defaults", "ui_defaults_plus_filters"))
+
+    # A non-finite Minimum is refused where every other numeric filter is
+    # (SRCH-015), never leaked as an OverflowError.  The shared reader and the
+    # worker's predictor must not raise on it (they are also reached with no
+    # colour chosen, where the builder never looks at the value), the builder
+    # must say why, and the worker must report it as an ordinary error event and
+    # stay alive for the next request.
+    import time as _t
+    non_finite = (float("inf"), float("-inf"), float("nan"), "abc", 1e400)
+    checks["the Minimum reader and predictor never raise on non-finite input"] = (
+        all(pip_minimum_threshold(v) == 1 for v in non_finite)
+        and all(isinstance(_predict_pips([], ("G",), v), dict) for v in non_finite))
+    try:
+        repo.count(SearchCriteria(content_types=("card",), pips=("G",),
+                                  pip_min=float("inf")), reader)
+        builder_message = ""
+    except ValueError as exc:
+        builder_message = str(exc)
+    checks["the builder refuses an infinite Minimum with a clear message"] = (
+        "finite" in builder_message and "minimum" in builder_message)
+
+    def _next_event(controller, timeout=10.0):
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            event = controller.poll_latest()
+            if event is not None:
+                return event
+            _t.sleep(0.02)
+        return None
+
+    ctrl.request(SearchCriteria(
+        content_types=("card",), pips=("G",), pip_min=float("inf")))
+    bad_event = _next_event(ctrl)
+    ctrl.request(SearchCriteria(content_types=("card",), card_types=("Creature",)))
+    good_event = _next_event(ctrl)
+    checks["the worker reports it as an error event and keeps serving"] = (
+        bad_event is not None and bad_event.kind == "error"
+        and "finite" in str(bad_event.payload)
+        and good_event is not None and good_event.kind == "done")
 
     # The controller must actually take that path: an index that is built but
     # bypassed answers nothing.  The SQLite fallback is the only route that
@@ -294,6 +386,36 @@ def main():
             SearchCriteria(content_types=("card",), cmc_min=1.0),
             SearchCriteria(content_types=("card",), power_min=1.0, power_max=3.0),
             SearchCriteria(content_types=("card",), pips=("W", "U"), pip_mode="any")))
+
+    # 5b. A database refresh that lands while the index is being built.  The
+    #     refresh's reset saw no index (the build had not published yet) and its
+    #     warm-up saw a build "in progress", so the finished build -- made from
+    #     the OLD rows -- used to be published and kept until restart.
+    class _RefreshLandsMidBuild:
+        def __init__(self, real, controller):
+            self._real = real
+            self._controller = controller
+            self.fired = False
+
+        def open_reader(self):
+            reader = self._real.open_reader()
+            if not self.fired:
+                self.fired = True
+                self._controller.reset_facet_index()
+            return reader
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    racing = SearchContextController(repo)
+    racing.repository = _RefreshLandsMidBuild(repo, racing)
+    first = racing._ensure_facet_index()
+    discarded = first is None and racing._facet_index is None
+    second = racing._ensure_facet_index()
+    republished = second is not None and racing._facet_index is second
+    racing.shutdown()
+    checks["a build overtaken by a database refresh is discarded, then rebuilt"] = (
+        discarded and republished)
 
     # 6. warm_facet_index builds the index off the request path (startup / post
     #    sync) so the first live pick is instant.

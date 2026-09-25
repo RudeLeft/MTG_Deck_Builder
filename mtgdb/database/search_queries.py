@@ -376,6 +376,9 @@ class SearchQueryBuilder:
         total so one hybrid symbol may represent both colors without counting
         twice toward Minimum.
         """
+        # SRCH-015: reject a non-finite Minimum here, as every other numeric
+        # filter does, rather than let infinity escape as an OverflowError.
+        pip_min = self._finite_number(pip_min, "mana symbol minimum")
         selected = sorted({
             str(value).strip().upper() for value in (pips or [])
             if str(value).strip().upper() in (*COLORS, "C")

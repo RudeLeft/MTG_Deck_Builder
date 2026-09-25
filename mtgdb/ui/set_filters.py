@@ -720,13 +720,6 @@ class PrintingFilter:
         self._render_individual_set_checks()
         self._update_summary()
 
-    def is_default_selection(self):
-        return (
-            bool(self.paper_only.get())
-            and not self.selected_set_types()
-            and not self.selected_set_codes()
-        )
-
     def summary_text(self):
         selected_types = self.selected_set_types()
         selected_sets = self.selected_set_codes()

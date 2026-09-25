@@ -23,7 +23,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _mana_cost_symbol_match, _type_key, _type_line_search_parts,
-    pip_minimum_threshold,
+    mana_cost_has_hybrid_symbol, pip_minimum_threshold,
 )
 from mtgdb.search.models import SearchCriteria
 
@@ -205,7 +205,11 @@ def _trait_keys(row):
     if bool(row.get("game_changer")):
         values.add("game_changer")
     values.add("multi_faced" if faces else "single_faced")
-    if "/" in mana_cost and "/P" not in mana_cost:
+    # The same rule the filter stores (derive_trait_flags), so the count on the
+    # option equals what selecting it returns: a split/adventure cost's "//" is
+    # not a hybrid symbol, and a compleated {G/W/P} is.  The "/" test only
+    # spares the ~97% of costs that cannot be hybrid the regex scan.
+    if "/" in mana_cost and mana_cost_has_hybrid_symbol(mana_cost):
         values.add("hybrid_mana")
     if "/P" in mana_cost:
         values.add("phyrexian_mana")
@@ -691,6 +695,9 @@ class SearchContextController:
         self._cache = OrderedDict()
         self._facet_index = None
         self._facet_index_disabled = False
+        # Bumped by every reset, so a build can tell that a database refresh
+        # landed while it was reading the old rows.
+        self._facet_index_epoch = 0
         self._warm_requested = False
         self._thread = spawn_daemon(self._run, "search-context")
 
@@ -699,6 +706,7 @@ class SearchContextController:
         with self._condition:
             self._facet_index = None
             self._facet_index_disabled = False
+            self._facet_index_epoch += 1
 
     def warm_facet_index(self):
         """Ask the worker to build the index now, so the first pick isn't slow.
@@ -740,6 +748,7 @@ class SearchContextController:
                 return self._facet_index
             if self._facet_index_disabled:
                 return None
+            epoch = self._facet_index_epoch
         try:
             from mtgdb.search.facet_index import FacetIndex
             columns = ", ".join(FacetIndex.INDEX_COLUMNS)
@@ -767,6 +776,13 @@ class SearchContextController:
                       exc_info=True)
             return None
         with self._condition:
+            if epoch != self._facet_index_epoch:
+                # A database refresh finished while these rows were being read,
+                # so they describe the old cards.  Publishing them would keep
+                # serving pre-refresh counts until restart (the refresh's own
+                # warm-up saw a build "in progress" and skipped).  Discard: this
+                # request uses SQLite and the pending warm-up rebuilds.
+                return None
             self._facet_index = index
         return index
 

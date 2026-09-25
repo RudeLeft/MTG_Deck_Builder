@@ -1372,8 +1372,24 @@ class SearchFeatureMixin:
             return ""
         return rules.entry.get()
 
-    def _numeric_field_value(self, widget):
-        """Spinbox value as a number, or None when absent or blank."""
+    NUMERIC_FIELD_LABELS = {
+        "q_cmc_min": "Mana value minimum", "q_cmc_max": "Mana value maximum",
+        "q_power_min": "Power minimum", "q_power_max": "Power maximum",
+        "q_toughness_min": "Toughness minimum",
+        "q_toughness_max": "Toughness maximum",
+        "q_loyalty_min": "Loyalty minimum", "q_loyalty_max": "Loyalty maximum",
+        "q_defense_min": "Defense minimum", "q_defense_max": "Defense maximum",
+        "q_released_min": "Released minimum", "q_released_max": "Released maximum",
+        "q_pip_min": "Mana symbols minimum",
+    }
+
+    def _numeric_field_value(self, name):
+        """Value of the numeric Search field ``name`` (a widget attribute).
+
+        None when the field is absent or blank; an invalid entry raises an error
+        that names the field, so the message says which box to fix.
+        """
+        widget = getattr(self, name, None)
         if widget is None:
             return None
         try:
@@ -1382,7 +1398,7 @@ class SearchFeatureMixin:
             return None
         if not text:
             return None
-        return self._parse_search_number(text, "filter value")
+        return self._parse_search_number(text, self.NUMERIC_FIELD_LABELS[name])
 
     ADVANCED_TEXT_FIELDS = (
         "q_loyalty_min", "q_loyalty_max", "q_defense_min", "q_defense_max",
@@ -3457,12 +3473,12 @@ class SearchFeatureMixin:
         and draft context therefore cannot drift in how a filter is interpreted.
         """
         numeric = {
-            "cmc_min": self._numeric_field_value(getattr(self, "q_cmc_min", None)),
-            "cmc_max": self._numeric_field_value(getattr(self, "q_cmc_max", None)),
-            "power_min": self._numeric_field_value(getattr(self, "q_power_min", None)),
-            "power_max": self._numeric_field_value(getattr(self, "q_power_max", None)),
-            "toughness_min": self._numeric_field_value(getattr(self, "q_toughness_min", None)),
-            "toughness_max": self._numeric_field_value(getattr(self, "q_toughness_max", None)),
+            "cmc_min": self._numeric_field_value("q_cmc_min"),
+            "cmc_max": self._numeric_field_value("q_cmc_max"),
+            "power_min": self._numeric_field_value("q_power_min"),
+            "power_max": self._numeric_field_value("q_power_max"),
+            "toughness_min": self._numeric_field_value("q_toughness_min"),
+            "toughness_max": self._numeric_field_value("q_toughness_max"),
         }
         optional_ranges = {
             "Loyalty": ("q_loyalty_min", "q_loyalty_max"),
@@ -3470,15 +3486,15 @@ class SearchFeatureMixin:
             "Released": ("q_released_min", "q_released_max"),
         }
         for _label, (low, high) in optional_ranges.items():
-            numeric[low] = self._numeric_field_value(getattr(self, low, None))
-            numeric[high] = self._numeric_field_value(getattr(self, high, None))
+            numeric[low] = self._numeric_field_value(low)
+            numeric[high] = self._numeric_field_value(high)
         self._validate_search_range("Mana value", numeric["cmc_min"], numeric["cmc_max"])
         self._validate_search_range("Power", numeric["power_min"], numeric["power_max"])
         self._validate_search_range(
             "Toughness", numeric["toughness_min"], numeric["toughness_max"])
         for label, (low, high) in optional_ranges.items():
             self._validate_search_range(label, numeric[low], numeric[high])
-        numeric["q_pip_min"] = self._numeric_field_value(getattr(self, "q_pip_min", None))
+        numeric["q_pip_min"] = self._numeric_field_value("q_pip_min")
 
         name_filter, exact_names = self._effective_name_filters()
         rules = self._rules_text_values(commit_pending=commit_rules)

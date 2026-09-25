@@ -282,6 +282,71 @@ def main():
         and _passes(_probe_card,
                     {"cmc": {"kind": "numeric", "min": 1.0, "max": 5.0}}) is True)
 
+    # The numeric filter popup refuses a reversed or non-finite range WITH a
+    # message (it used to apply min > max, silently emptying the table, and
+    # refuse bad text without a word), and still applies ordinary bounds.
+    import tkinter as _tk
+    from mtgdb.ui.tokens import PALETTE as _PALETTE
+    from mtgdb.ui.table_filters import TableFilterMixin as _TableFilterMixin
+    _root = _tk.Tk()
+    _root.withdraw()
+    try:
+        class _FilterOwner(_TableFilterMixin):
+            def __init__(self):
+                self._table_filters = {"results": {}}
+                self.refreshed = 0
+                self.hidden = 0
+
+            def _bind_editable_focus_behavior(self, _widget):
+                pass
+
+            def _refresh_table_after_filter(self, _view):
+                self.refreshed += 1
+
+            def _hide_filter_popup(self):
+                self.hidden += 1
+
+        def _numeric_editor_outcome(low, high):
+            owner = _FilterOwner()
+            editor = _tk.Frame(_root)
+            apply_filter = owner._build_numeric_filter_editor(
+                editor, "results", "cmc", {})
+            entries = [w for w in editor.winfo_children()
+                       if isinstance(w, _tk.Entry)]
+            message = [w for w in editor.winfo_children()
+                       if isinstance(w, _tk.Label)
+                       and str(w.cget("fg")) == _PALETTE["deck_bad"]][0]
+            entries[0].insert(0, low)
+            entries[1].insert(0, high)
+            apply_filter()
+            outcome = (owner._table_filters["results"].get("cmc"),
+                       str(message.cget("text")).strip(), owner.refreshed,
+                       owner.hidden)
+            editor.destroy()
+            return outcome
+
+        reversed_range = _numeric_editor_outcome("5", "2")
+        bad_minimum = _numeric_editor_outcome("abc", "2")
+        bad_maximum = _numeric_editor_outcome("1", "nan")
+        applied_range = _numeric_editor_outcome("1", "3")
+        minimum_only = _numeric_editor_outcome("2", "")
+        cleared = _numeric_editor_outcome("", "")
+        table_filter_messages = (
+            # Refused: nothing stored, nothing refreshed, popup left open.
+            reversed_range[0] is None and reversed_range[2:] == (0, 0)
+            and "greater" in reversed_range[1]
+            and bad_minimum[0] is None and bad_minimum[2:] == (0, 0)
+            and bad_minimum[1].startswith("Minimum")
+            and bad_maximum[0] is None and bad_maximum[2:] == (0, 0)
+            and bad_maximum[1].startswith("Maximum")
+            # Accepted: stored, table refreshed, popup closed, no message.
+            and applied_range[0] == {"kind": "numeric", "min": 1.0, "max": 3.0}
+            and applied_range[1] == "" and applied_range[2:] == (1, 1)
+            and minimum_only[0] == {"kind": "numeric", "min": 2.0, "max": None}
+            and cleared[0] is None and cleared[2:] == (1, 1))
+    finally:
+        _root.destroy()
+
     # Every column heading opens a filter, so every column needs a value to
     # match against. Cost had none: table_value fell through to "" while the
     # popup listed mana costs from a special case of its own, so filtering the
@@ -298,6 +363,18 @@ def main():
         str(table_value(filterable_card, key, qty=2))
         for key in TABLE_COLUMN_ORDER if key not in numeric_columns)
     from mtgdb.search.results import cost_symbol_groups
+    from mtgdb.database.semantics import (
+        mana_cost_has_hybrid_symbol, mana_cost_has_phyrexian_symbol)
+    # The Cost column's Hybrid / Phyrexian groups and Search's Hybrid mana /
+    # Phyrexian mana must classify a single-face cost identically.
+    _single_face_costs = (
+        "{W/U}", "{2/W}", "{C/W}", "{W/P}", "{G/W/P}", "{2}{G}{G/U/P}{U}",
+        "{R}", "{X}{R}", "{2}{B}{B}", "")
+    cost_column_agrees_with_search_hybrid = all(
+        ("hybrid" in cost_symbol_groups(cost)) == mana_cost_has_hybrid_symbol(cost)
+        and ("phyrexian" in cost_symbol_groups(cost))
+        == mana_cost_has_phyrexian_symbol(cost)
+        for cost in _single_face_costs)
     cost_filters_by_mana_symbol = (
         # Cost is filtered by which mana-symbol groups appear, not free text, so
         # a user picks recognizable pips instead of guessing brace syntax.
@@ -307,7 +384,13 @@ def main():
         and cost_symbol_groups("{X}{R}") == frozenset({"x", "R"})
         and cost_symbol_groups("{G/U}") == frozenset({"hybrid", "G", "U"})
         and cost_symbol_groups("{W/P}") == frozenset({"phyrexian", "W"})
+        # A compleated symbol is a hybrid choice too, exactly as in Search's
+        # Hybrid mana; {W/P} alone (one colour plus life) is not.
+        and cost_symbol_groups("{2}{G}{G/W/P}{U}") == frozenset(
+            {"generic", "G", "W", "U", "phyrexian", "hybrid"})
+        and cost_symbol_groups("{2/W}") == frozenset({"hybrid", "generic", "W"})
         and cost_symbol_groups("") == frozenset({"none"})
+        and cost_column_agrees_with_search_hybrid
         # Any/All/None over the selected groups.
         and row_passes_filters(
             filterable_card, {"cost": {"kind": "cost", "mode": "Any",
@@ -382,6 +465,8 @@ def main():
             every_column_has_a_filter_value
             and cost_filters_by_mana_symbol),
         "table numeric filters refuse non-finite bounds": finite_filter_bounds,
+        "table numeric filters explain a refusal and apply valid ranges": (
+            table_filter_messages),
         "column drag reorder lands on the dropped slot, including the last": (
             _column_reorder_matches_oracle()),
         "table schema has one production owner": (

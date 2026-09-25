@@ -63,6 +63,18 @@ class CardTaxonomyMixin:
             clauses.append(f"{field('paper')} = 1")
         return " AND ".join(clauses) if clauses else "1", params
 
+    @staticmethod
+    def _platform_key(games):
+        """The platforms a scope actually restricts to, as a cache-key part.
+
+        Selecting none or all three is no restriction (DATA-010), so both
+        collapse to the same empty key and share one cached scan.
+        """
+        selected = tuple(
+            value for value in ("paper", "mtgo", "arena")
+            if value in {str(item).casefold() for item in (games or ())})
+        return selected if 0 < len(selected) < 3 else ()
+
     def sets(self, allowed_types=None, content_types=None, paper_only=False,
              games=None):
         """Distinct Scryfall sets present locally, newest first."""
@@ -173,8 +185,8 @@ class CardTaxonomyMixin:
                         break
         return tuple(sorted(equivalent, key=str.casefold))
 
-    def rarities(self, content_types=None, paper_only=False):
-        scope, params = self._scope(content_types, paper_only)
+    def rarities(self, content_types=None, paper_only=False, games=None):
+        scope, params = self._scope(content_types, paper_only, games=games)
         rows = self._read(
             "SELECT DISTINCT rarity FROM cards "
             "WHERE rarity IS NOT NULL AND rarity <> '' "
@@ -230,7 +242,7 @@ class CardTaxonomyMixin:
         """
         return list(self.formats_by_status(content_types, paper_only)["playable"])
 
-    def _type_lines(self, content_types=None, paper_only=False):
+    def _type_lines(self, content_types=None, paper_only=False, games=None):
         # card_types, supertypes, and subtypes each derive from the same scoped
         # DISTINCT type_line corpus.  Within one reader session (a catalog load)
         # the snapshot is fixed, so share a single scan instead of running it once
@@ -241,11 +253,11 @@ class CardTaxonomyMixin:
         if cache is not None:
             key = ("type_lines",
                    tuple(content_types) if content_types is not None else None,
-                   bool(paper_only))
+                   bool(paper_only), self._platform_key(games))
             cached = cache.get(key)
             if cached is not None:
                 return cached
-        scope, params = self._scope(content_types, paper_only)
+        scope, params = self._scope(content_types, paper_only, games=games)
         rows = self._read(
             "SELECT DISTINCT type_line FROM cards "
             "WHERE type_line IS NOT NULL AND type_line <> '' "
@@ -255,7 +267,7 @@ class CardTaxonomyMixin:
             cache[key] = result
         return result
 
-    def card_types(self, content_types=None, paper_only=False):
+    def card_types(self, content_types=None, paper_only=False, games=None):
         """Authoritative Scryfall card types that occur on scoped local rows.
 
         ``card-types`` is a first-class Scryfall catalog. Local Oracle type lines
@@ -266,7 +278,7 @@ class CardTaxonomyMixin:
         catalog = self.catalog("card-types")
         if not catalog:
             return []
-        lines = self._type_lines(content_types, paper_only)
+        lines = self._type_lines(content_types, paper_only, games)
         return [
             value for value in catalog
             if any(_card_has_type(type_line, value) for type_line in lines)
@@ -332,7 +344,7 @@ class CardTaxonomyMixin:
         error = str(self.get_meta(RULES_SUPERTYPES_ERROR_META_KEY, "") or "").strip()
         return bool(values), error
 
-    def supertypes(self, content_types=None, paper_only=False):
+    def supertypes(self, content_types=None, paper_only=False, games=None):
         """Official Wizards supertypes that occur on scoped Scryfall rows.
 
         Vocabulary comes only from the last strictly verified Comprehensive
@@ -342,7 +354,7 @@ class CardTaxonomyMixin:
         rules_values = self._verified_rules_supertypes()
         if not rules_values:
             return []
-        lines = self._type_lines(content_types, paper_only)
+        lines = self._type_lines(content_types, paper_only, games)
         observed = []
         for candidate in rules_values:
             label = None
@@ -354,7 +366,7 @@ class CardTaxonomyMixin:
                 observed.append(label)
         return observed
 
-    def subtype_catalog(self, content_types=None, paper_only=False):
+    def subtype_catalog(self, content_types=None, paper_only=False, games=None):
         """Return authoritative observed ``(subtype, category)`` values only.
 
         Phrase boundaries and categories come exclusively from Scryfall catalog
@@ -382,7 +394,7 @@ class CardTaxonomyMixin:
             r"(?<![\w-])(" + "|".join(re.escape(value) for value in alternatives)
             + r")(?![\w-])")
         observed = set()
-        for type_line in self._type_lines(content_types, paper_only):
+        for type_line in self._type_lines(content_types, paper_only, games):
             for left, right in _type_line_faces(type_line):
                 _type_words, subtype_text = _semantic_type_face_parts(left, right)
                 normalized = " ".join(_type_key(subtype_text).split())
@@ -408,9 +420,10 @@ class CardTaxonomyMixin:
             if category == "Creature"
         ]
 
-    def keywords(self, content_types=None, paper_only=False):
+    def keywords(self, content_types=None, paper_only=False, games=None):
         """Distinct Scryfall card ``keywords`` actually present in scoped rows."""
-        scope, params = self._scope(content_types, paper_only, prefix="cards.")
+        scope, params = self._scope(
+            content_types, paper_only, prefix="cards.", games=games)
         try:
             with self._lock:
                 rows = self.conn.execute(
@@ -421,7 +434,7 @@ class CardTaxonomyMixin:
         except sqlite3.OperationalError:
             seen = set()
             fallback_scope, fallback_params = self._scope(
-                content_types, paper_only)
+                content_types, paper_only, games=games)
             with self._lock:
                 rows = self.conn.execute(
                     "SELECT keywords FROM cards "
@@ -436,7 +449,7 @@ class CardTaxonomyMixin:
                     pass
             return sorted(seen, key=str.casefold)
 
-    def keyword_catalog(self, content_types=None, paper_only=False):
+    def keyword_catalog(self, content_types=None, paper_only=False, games=None):
         """Observed card keywords intersected with authoritative catalogs."""
         catalog_entries = {}
         for authority in MECHANIC_AUTHORITIES:
@@ -446,7 +459,8 @@ class CardTaxonomyMixin:
         if not catalog_entries:
             return []
         observed_keys = {
-            _type_key(value) for value in self.keywords(content_types, paper_only)
+            _type_key(value)
+            for value in self.keywords(content_types, paper_only, games)
         }
         values = [
             catalog_entries[key] for key in observed_keys

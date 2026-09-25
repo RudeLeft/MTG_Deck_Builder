@@ -106,6 +106,104 @@ def build():
     return db
 
 
+def _platform_scoped_vocabulary_checks():
+    """DATA-010: the platform selection scopes EVERY vocabulary query.
+
+    Only the set/layout/format/release queries used to take the Paper/Arena/MTGO
+    choice; Card Type, Supertype, Subtype, Mechanic and Rarity ignored it, so an
+    Arena-only search still listed types that exist only on paper.  Selecting
+    none or all three platforms remains no restriction.
+    """
+    import time
+    from mtgdb.search.catalogs import SearchCatalogController
+    from mtgdb.search.repository import SearchRepository
+
+    workspace = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, workspace, ignore_errors=True)
+    db = CardDB(os.path.join(workspace, "platforms.db"))
+    for name, values in {
+        "card-types": ["Creature", "Sorcery"],
+        "creature-types": ["Goblin", "Angel"],
+        "planeswalker-types": [], "land-types": [], "artifact-types": [],
+        "enchantment-types": [], "battle-types": [], "spell-types": [],
+        "keyword-abilities": ["Flying", "Haste"],
+        "keyword-actions": [], "ability-words": [],
+    }.items():
+        db.set_meta(f"catalog:{name}", json.dumps(values))
+    db.set_meta(RULES_SUPERTYPES_META_KEY, json.dumps(["legendary", "snow"]))
+    db.set_meta("catalog:supertypes", json.dumps(["Legendary", "Snow"]))
+    db.load_cards([
+        base("paper-goblin", "Paper Goblin", "Snow Creature \u2014 Goblin", "1",
+             games=["paper"], keywords=["Haste"], rarity="common"),
+        base("arena-angel", "Arena Angel", "Legendary Creature \u2014 Angel", "2",
+             games=["arena"], keywords=["Flying"], rarity="mythic"),
+        base("mtgo-spell", "Mtgo Spell", "Sorcery", "3",
+             games=["mtgo"], rarity="uncommon"),
+    ])
+
+    def scoped(games):
+        return (
+            list(db.card_types(None, False, games)),
+            list(db.supertypes(None, False, games)),
+            sorted(value for value, _c in db.subtype_catalog(None, False, games)),
+            sorted(value for value, _c in db.keyword_catalog(None, False, games)),
+            sorted(db.rarities(None, False, games)))
+
+    unrestricted = scoped(None)
+    arena = scoped(("arena",))
+    mtgo = scoped(("mtgo",))
+    paper_arena = scoped(("paper", "arena"))
+    all_three = scoped(("paper", "arena", "mtgo"))
+
+    # The same scopes end to end through the trusted-catalog controller, whose
+    # cache key already carries the platforms.
+    controller = SearchCatalogController(SearchRepository(db))
+
+    def snapshot(games):
+        controller.request(("card",), False, (), games)
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            event = controller.poll_latest()
+            if event is not None and event.kind == "done":
+                return event.payload
+            time.sleep(0.02)
+        return None
+
+    try:
+        arena_snapshot = snapshot(("arena",))
+        mtgo_snapshot = snapshot(("mtgo",))
+    finally:
+        controller.invalidate()
+        db.close()
+
+    return {
+        "no platform restriction lists every observed value": (
+            unrestricted == (
+                ["Creature", "Sorcery"], ["Legendary", "Snow"],
+                ["Angel", "Goblin"], ["Flying", "Haste"],
+                ["common", "mythic", "uncommon"])),
+        "Arena alone offers only what Arena prints": (
+            arena == (["Creature"], ["Legendary"], ["Angel"], ["Flying"],
+                      ["mythic"])),
+        "MTGO alone offers only what MTGO prints": (
+            mtgo == (["Sorcery"], [], [], [], ["uncommon"])),
+        "several platforms offer the union of what they print": (
+            paper_arena == (
+                ["Creature"], ["Legendary", "Snow"], ["Angel", "Goblin"],
+                ["Flying", "Haste"], ["common", "mythic"])),
+        "selecting every platform is no restriction": all_three == unrestricted,
+        "the trusted-catalog snapshot follows the platform for all five": (
+            arena_snapshot is not None and mtgo_snapshot is not None
+            and tuple(arena_snapshot.card_types) == ("Creature",)
+            and tuple(arena_snapshot.supertypes) == ("Legendary",)
+            and [v for v, _c in arena_snapshot.subtypes] == ["Angel"]
+            and [v for v, _c in arena_snapshot.keywords] == ["Flying"]
+            and tuple(arena_snapshot.rarities) == ("mythic",)
+            and tuple(mtgo_snapshot.card_types) == ("Sorcery",)
+            and tuple(mtgo_snapshot.rarities) == ("uncommon",)),
+    }
+
+
 def main():
     db = build()
     complete = _BFM_COMPLETE_TYPE_LINE
@@ -182,6 +280,8 @@ def main():
         "1 B.F.M. (Big Furry Monster) [UGL]\n", db)
     checks["legacy set-only deck tag remains compatible"] = (
         not missing and len(legacy.entries()) == 1)
+
+    checks.update(_platform_scoped_vocabulary_checks())
 
     ok = True
     for label, passed in checks.items():

@@ -705,11 +705,13 @@ def cost_symbol_groups(mana_cost):
             parts = [p for p in t.split("/") if p]
             if "P" in parts:
                 groups.add("phyrexian")
-            elif "2" in parts:
+            # Two or more real choices besides the life payment: {W/U}, {2/W},
+            # and a compleated {G/W/P} (a W-or-G hybrid with a life option).
+            # The same rule as Search's Hybrid mana; {W/P} alone is not one.
+            if len([p for p in parts if p != "P"]) >= 2:
                 groups.add("hybrid")
+            if "2" in parts:
                 groups.add("generic")
-            else:
-                groups.add("hybrid")
             for part in parts:
                 if part in ("W", "U", "B", "R", "G"):
                     groups.add(part)

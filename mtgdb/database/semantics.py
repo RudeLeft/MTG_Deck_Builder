@@ -317,11 +317,13 @@ def pip_minimum_threshold(minimum):
     Empty, non-numeric, or below-one values all mean one -- colour presence alone
     -- so the Minimum box's untouched default (``1``) is the same query as no
     minimum at all.  Shared by the SQL matcher, the SQLite context worker and
-    the bitset index, so all three read Minimum identically.
+    the bitset index, so all three read Minimum identically.  It never raises:
+    infinity (which ``int()`` cannot convert) reads as one, like NaN.  Rejecting
+    a non-finite Minimum is the query builder's job (SRCH-015), not this reader's.
     """
     try:
         return max(1, int(float(minimum if minimum is not None else 1)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 1
 
 

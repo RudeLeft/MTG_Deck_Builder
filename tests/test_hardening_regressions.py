@@ -372,8 +372,60 @@ def _numeric_search_checks():
         ValueError,
         lambda: SearchQueryBuilder().add_numeric_filters(
             float("nan"), None, None, None, None, None))
+    # SRCH-015 covers the Mana Symbols Minimum too: it used to be the one numeric
+    # filter with no builder-boundary guard, so infinity escaped as a bare
+    # OverflowError ("cannot convert float infinity to integer").  Rejected with
+    # or without colours chosen (the context worker reads it either way), while
+    # ordinary values still pass.
+    builder_rejects_non_finite_pip_minimum = all(
+        _raises(
+            ValueError,
+            lambda value=value, pips=pips: SearchQueryBuilder().add_pip_filters(
+                pips, value))
+        for value in (float("inf"), float("-inf"), float("nan"))
+        for pips in (("G",), ()))
+    builder_accepts_ordinary_pip_minimum = True
+    for value in (None, 1, 1.0, 2, 3.5):
+        try:
+            SearchQueryBuilder().add_pip_filters(("G",), value)
+        except Exception:
+            builder_accepts_ordinary_pip_minimum = False
+    # Every numeric Search box names itself in its error; it used to say
+    # "filter value must be a finite number" for all of them.
+    class _Box:
+        def __init__(self, text):
+            self.text = text
+
+        def get(self):
+            return self.text
+
+    class _Search(SearchFeatureMixin):
+        pass
+
+    def _numeric_error(name, text):
+        owner = _Search()
+        setattr(owner, name, _Box(text))
+        try:
+            owner._numeric_field_value(name)
+        except ValueError as exc:
+            return str(exc)
+        return ""
+
+    every_field_names_itself = all(
+        label in _numeric_error(name, "abc")
+        and label in _numeric_error(name, "inf")
+        for name, label in SearchFeatureMixin.NUMERIC_FIELD_LABELS.items())
+    numeric_field_values = (
+        every_field_names_itself
+        and "filter value" not in _numeric_error("q_power_min", "abc")
+        and _Search()._numeric_field_value("q_power_min") is None
+        and _numeric_error("q_power_min", "  ") == ""
+        and _numeric_error("q_power_min", "2.5") == "")
     return (bad_number and non_finite and valid and bad_range
-            and builder_rejects_non_finite)
+            and numeric_field_values
+            and builder_rejects_non_finite
+            and builder_rejects_non_finite_pip_minimum
+            and builder_accepts_ordinary_pip_minimum)
 
 
 

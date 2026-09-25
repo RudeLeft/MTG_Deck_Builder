@@ -22,6 +22,7 @@ multi-second SQLite rescan.  Coverage is verified byte-identical against
 
 from __future__ import annotations
 
+import math
 import re
 
 from mtgdb.database.constants import (
@@ -41,6 +42,15 @@ from mtgdb.search.context import (
 )
 
 _NUMERIC_FIELDS = ("cmc", "power", "toughness", "loyalty", "defense")
+
+# Every numeric SearchCriteria field.  The SQL builder rejects a non-finite value
+# in any of them (SRCH-015), so the index declines those requests rather than
+# answering (or, for an infinite release year, raising) on its own.
+_NUMERIC_CRITERIA = (
+    "pip_min", "cmc_min", "cmc_max", "power_min", "power_max",
+    "toughness_min", "toughness_max", "loyalty_min", "loyalty_max",
+    "defense_min", "defense_max", "released_from", "released_to",
+)
 
 _ART_LAYOUT_KEYS = frozenset(str(v).casefold() for v in ART_LAYOUTS)
 _PRODUCED_MEMBERS = (*COLORS, "C")
@@ -352,11 +362,19 @@ class FacetIndex:
         explicit minimum sent every request the real UI ever made down the slow
         SQLite path, so the index was built and never used.
         """
-        try:
-            return pip_minimum_threshold(q.pip_min) == 1
-        except OverflowError:
-            # An infinite Minimum has no threshold; the SQLite path owns that.
-            return False
+        for name in _NUMERIC_CRITERIA:
+            value = getattr(q, name, None)
+            if value in (None, ""):
+                continue
+            try:
+                finite = math.isfinite(float(value))
+            except (TypeError, ValueError):
+                finite = False
+            if not finite:
+                # The SQL builder rejects it (SRCH-015), so the index must not
+                # answer a request the search would refuse.
+                return False
+        return pip_minimum_threshold(q.pip_min) == 1
 
     def _fragments(self, q):
         """Per-facet clause bitsets, or None if not bitset-representable.

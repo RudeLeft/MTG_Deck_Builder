@@ -656,7 +656,9 @@ every feature together and is exempt.
   validation errors through a Tk callback. Every pair of bounds is validated,
   including the optional ones: Loyalty, Defense and Released went unchecked
   for a while, so a backwards range ran and returned nothing, which a user
-  cannot tell apart from a search that genuinely matches no card.
+  cannot tell apart from a search that genuinely matches no card. Every numeric
+  box's error MUST name that box ("Power minimum", say), not a generic
+  "filter value".
   _Verification:_ **AUTO**.
 - **SRCH-016 — MUST:** Treat Scryfall legality statuses `legal` and `restricted`
   as playable for format Search, retain the restricted distinction in card-detail
@@ -808,7 +810,13 @@ every feature together and is exempt.
   real UI ever made down the slow SQLite path (1.5–4 s per filter click) while the
   index was built and never used. The differential battery MUST carry the default
   Minimum, and a spy on the SQLite count MUST show the UI's default criteria being
-  served by the index. _Verification:_ **AUTO**.
+  served by the index. The shared reader MUST NOT raise: a non-finite Minimum reads
+  as one there, is rejected by the SQL builder at its boundary like every other
+  numeric filter (SRCH-015), and is declined by the index so the builder answers it.
+  The index MUST decline a non-finite value in ANY numeric criterion (Mana Value,
+  Power, Toughness, Loyalty, Defense, release year, and the Minimum) rather than
+  answer or raise for it: an infinite release year made it raise `OverflowError`.
+  _Verification:_ **AUTO**.
 - **SRCH-049 — MUST:** Start background work in the order the user is waiting on it.
   `_start_post_paint_initialization` MUST start only the trusted-catalog request,
   workspace restore, and the update check. The facet-index warm-up starts when the
@@ -818,6 +826,20 @@ every feature together and is exempt.
   stages are CPU-bound Python sharing one interpreter lock, so launching them beside
   the catalog load stretched that load from about two seconds to five and kept the
   filters disabled for all of it. _Verification:_ **AUTO**.
+- **SRCH-050 — MUST:** Keep the count on a property option equal to what selecting
+  it returns, by reading the same predicate the filter stores. `_trait_keys` (the
+  count) and `derive_trait_flags` (the filter) MUST agree on every property key.
+  Hybrid mana is any brace symbol with two or more non-Phyrexian choices
+  (`mana_cost_has_hybrid_symbol`): a split or adventure cost's `//` is not a hybrid
+  symbol, and a compleated `{G/W/P}` is one. The Results Cost column's Hybrid and
+  Phyrexian groups MUST classify a single-face cost the same way. The count once
+  read a looser rule and showed 2,287 for an option whose selection returned 1,493.
+  _Verification:_ **AUTO**.
+- **SRCH-051 — MUST:** Never publish a facet index built from rows that a database
+  refresh has since replaced. A refresh's reset MUST invalidate an in-flight build
+  (an epoch checked before publishing), and the discarded build MUST be followed by
+  a rebuild, so the index never keeps serving pre-refresh counts until restart.
+  _Verification:_ **AUTO**.
 
 ## Database internals architecture
 
@@ -1477,7 +1499,10 @@ every feature together and is exempt.
   action MUST remove every column filter for that owning Results/Mainboard/Sideboard
   view. The main Search-row `Clear` action MUST also clear every Results column filter
   and dismiss any open Results filter editor so no hidden column text/value filter survives
-  a visible Search-form reset. _Verification:_ **AUTO**.
+  a visible Search-form reset. A numeric column filter MUST refuse a reversed range
+  (Minimum above Maximum) and a non-finite bound with a message inside the popup,
+  leaving it open; applying a reversed range silently emptied the table.
+  _Verification:_ **AUTO**.
 - **TBL-011 — MUST:** Position every Edit Columns popup inside the visible work
   area of the physical monitor containing its anchor control. Clamp both positive
   and negative virtual-desktop coordinates and prefer opening above the anchor when
@@ -1892,6 +1917,9 @@ every feature together and is exempt.
   single boolean could only say "paper" or "everything" and could never name
   Arena or MTGO. The selected platforms MUST also form part of the trusted
   taxonomy cache key and be passed to the scoped vocabulary queries behind it.
+  Every scoped vocabulary query takes it: sets, set types, layouts, formats and
+  release years, and also Card Types, Supertypes, Subtypes, Mechanics and Rarities
+  (which once ignored it, so Arena-only still listed paper-only types).
   Paper, Arena and MTGO print different sets, so a snapshot loaded for one
   platform describes vocabulary the others do not have; leaving platform out
   of the key let a paper snapshot arrive after an Arena toggle and silently

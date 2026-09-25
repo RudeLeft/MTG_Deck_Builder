@@ -78,14 +78,14 @@ class SearchRepository:
              games=None):
         return self._db.sets(allowed_types, content_types, paper_only, games=games)
 
-    def card_types(self, content_types=None, paper_only=False):
-        return self._db.card_types(content_types, paper_only)
+    def card_types(self, content_types=None, paper_only=False, games=None):
+        return self._db.card_types(content_types, paper_only, games=games)
 
     def card_type_taxonomy_status(self):
         return self._db.card_type_taxonomy_status()
 
-    def supertypes(self, content_types=None, paper_only=False):
-        return self._db.supertypes(content_types, paper_only)
+    def supertypes(self, content_types=None, paper_only=False, games=None):
+        return self._db.supertypes(content_types, paper_only, games=games)
 
     def supertype_taxonomy_status(self):
         return self._db.supertype_taxonomy_status()
@@ -100,8 +100,8 @@ class SearchRepository:
     def layouts(self, content_types=None, paper_only=False, games=None):
         return self._db.layouts(content_types, paper_only, games=games)
 
-    def rarities(self, content_types=None, paper_only=False):
-        return self._db.rarities(content_types, paper_only)
+    def rarities(self, content_types=None, paper_only=False, games=None):
+        return self._db.rarities(content_types, paper_only, games=games)
 
     def release_years(self, content_types=None, paper_only=False, games=None):
         return self._db.release_years(content_types, paper_only, games=games)
@@ -111,8 +111,8 @@ class SearchRepository:
         return self._db.equivalent_layouts(
             content_types, paper_only, games=games, **catalogs)
 
-    def keyword_catalog(self, content_types=None, paper_only=False):
-        return self._db.keyword_catalog(content_types, paper_only)
+    def keyword_catalog(self, content_types=None, paper_only=False, games=None):
+        return self._db.keyword_catalog(content_types, paper_only, games=games)
 
-    def subtype_catalog(self, content_types=None, paper_only=False):
-        return self._db.subtype_catalog(content_types, paper_only)
+    def subtype_catalog(self, content_types=None, paper_only=False, games=None):
+        return self._db.subtype_catalog(content_types, paper_only, games=games)

@@ -171,7 +171,7 @@ class _TaxonomyRepository:
         self.release = threading.Event()
         self.block_once = True
 
-    def card_types(self, _content, _paper):
+    def card_types(self, _content, _paper, games=None):
         version = self.version
         if self.block_once:
             self.block_once = False
@@ -182,7 +182,7 @@ class _TaxonomyRepository:
     def card_type_taxonomy_status(self):
         return (True, "")
 
-    def supertypes(self, _content, _paper):
+    def supertypes(self, _content, _paper, games=None):
         return [(f"{self.version}-super", "Legendary")]
 
     def supertype_taxonomy_status(self):
@@ -191,13 +191,13 @@ class _TaxonomyRepository:
     def formats(self, _content, _paper):
         return [f"{self.version}-format"]
 
-    def rarities(self, _content, _paper):
+    def rarities(self, _content, _paper, games=None):
         return [f"{self.version}-rarity"]
 
-    def keyword_catalog(self, _content, _paper):
+    def keyword_catalog(self, _content, _paper, games=None):
         return [(f"{self.version}-keyword", "keyword")]
 
-    def subtype_catalog(self, _content, _paper):
+    def subtype_catalog(self, _content, _paper, games=None):
         return [(f"{self.version}-subtype", "Creature")]
 
     def set_types(self, _content, _paper, games=None):
@@ -207,8 +207,8 @@ class _TaxonomyRepository:
              games=None):
         return [(f"{self.version}-set", f"{self.version} Set")]
 
-    # Platform scoping, the per-legality format lists and card shapes joined
-    # the repository later. Without them here the loader caught an
+    # Platform scoping (DATA-010 reaches every vocabulary query), the
+    # per-legality format lists and card shapes joined the repository later. Without them here the loader caught an
     # AttributeError per scope and fell back to empty vocabulary, so this test
     # stopped exercising the path it is about.
     def formats_by_status(self, _content, _paper, games=None):

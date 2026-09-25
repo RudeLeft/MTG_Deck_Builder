@@ -171,22 +171,32 @@ class SearchCatalogController:
                 content, paper_only, games=platforms or None), {})
         base = {
             "card_types": safe(
-                "card-type", lambda: self.repository.card_types(content, paper_only), []),
+                "card-type",
+                lambda: self.repository.card_types(
+                    content, paper_only, games=platforms or None), []),
             "card_type_status": safe(
                 "card-type authority status",
                 self.repository.card_type_taxonomy_status, (False, "")),
             "supertypes": safe(
-                "supertype", lambda: self.repository.supertypes(content, paper_only), []),
+                "supertype",
+                lambda: self.repository.supertypes(
+                    content, paper_only, games=platforms or None), []),
             "supertype_status": safe(
                 "supertype authority status",
                 self.repository.supertype_taxonomy_status, (False, "")),
             "formats": list(by_status.get("playable") or ()),
             "rarities": safe(
-                "rarity", lambda: self.repository.rarities(content, paper_only), []),
+                "rarity",
+                lambda: self.repository.rarities(
+                    content, paper_only, games=platforms or None), []),
             "keywords": safe(
-                "mechanic", lambda: self.repository.keyword_catalog(content, paper_only), []),
+                "mechanic",
+                lambda: self.repository.keyword_catalog(
+                    content, paper_only, games=platforms or None), []),
             "subtypes": safe(
-                "subtype", lambda: self.repository.subtype_catalog(content, paper_only), []),
+                "subtype",
+                lambda: self.repository.subtype_catalog(
+                    content, paper_only, games=platforms or None), []),
             "set_types": safe(
                 "set-type",
                 lambda: self.repository.set_types(

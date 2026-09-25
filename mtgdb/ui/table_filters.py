@@ -257,14 +257,29 @@ class TableFilterMixin:
         self._bind_editable_focus_behavior(max_entry)
         editor.columnconfigure(0, weight=1)
         editor.columnconfigure(1, weight=1)
+        # A reserved line, so a message never resizes the popup after it is
+        # mapped.  The popup stays open on a refusal with the input visible.
+        message = tk.Label(
+            editor, text=" ", bg=p["surface2"], fg=p["deck_bad"],
+            font=FONT_HELPER, anchor="w", justify="left", wraplength=280)
+        message.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        for var in (min_var, max_var):
+            var.trace_add("write", lambda *_a: message.configure(text=" "))
 
         def apply_filter():
             try:
                 low = _finite_bound(min_var.get())
+            except ValueError:
+                message.configure(text="Minimum must be a finite number.")
+                return
+            try:
                 high = _finite_bound(max_var.get())
             except ValueError:
-                # Same treatment as unparseable text: leave the popup open with
-                # the rejected input visible rather than applying it.
+                message.configure(text="Maximum must be a finite number.")
+                return
+            if low is not None and high is not None and low > high:
+                # Applied as-is this silently emptied the table.
+                message.configure(text="Minimum cannot be greater than Maximum.")
                 return
             if low is None and high is None:
                 self._table_filters[view].pop(key, None)
