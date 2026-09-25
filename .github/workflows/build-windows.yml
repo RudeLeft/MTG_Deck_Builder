@@ -210,6 +210,8 @@ jobs:
 
           Verify your download against SHA256SUMS.txt (e.g. ``sha256sum -c``).
           On first launch the app downloads current card data from Scryfall.
+          Upgrading from an earlier version rebuilds the local card database once
+          when its storage format changed (a one-time re-download of card data).
           "@
           gh release create "$tag" `
             "release_dist/MTG_Deck_Builder-$tag-windows.zip" `
