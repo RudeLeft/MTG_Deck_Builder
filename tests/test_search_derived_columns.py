@@ -154,6 +154,28 @@ def main():
                 "('idx_card_types_term','idx_card_subtypes_term',"
                 "'idx_card_keywords_term')")}
 
+        # An in-place (replace=False) load INSERT-OR-REPLACEs the card row, so
+        # it must also drop the card's old membership or a changed type would
+        # keep matching its stale terms alongside the new ones.
+        from mtgdb.database.db import CardDB
+        incremental = CardDB(str(Path(harness.workspace) / "incremental.db"))
+        try:
+            printing = dict(set_code="tst", set_type="core", rarity="common",
+                            released="2020-01-01")
+            incremental.load_cards([
+                H._card("inc-1", "Shape Shifter", "Creature — Bear", **printing)])
+            incremental.load_cards([
+                H._card("inc-1", "Shape Shifter", "Artifact", **printing)],
+                replace=False)
+            inc_reader = incremental.open_reader()
+            try:
+                inc_terms = {row[0] for row in inc_reader.execute(
+                    "SELECT term FROM card_types WHERE card_id = 'inc-1'")}
+            finally:
+                inc_reader.close()
+        finally:
+            incremental.close()
+
         checks = {
             "corpus built with rows": total > 0,
             "content_kind is populated for every row": populated == total,
@@ -175,6 +197,8 @@ def main():
             "membership tables are populated": (
                 type_rows > 0 and subtype_rows > 0 and keyword_rows > 0),
             "membership term indexes exist": len(membership_indexes) == 3,
+            "an in-place load drops a card's stale membership terms": (
+                "artifact" in inc_terms and "creature" not in inc_terms),
         }
 
         ok = True

@@ -135,7 +135,7 @@ class SearchQueryBuilder:
             joiner = " OR " if normalized in ("any", "none") else " AND "
             group = "(" + joiner.join(
                 "EXISTS (SELECT 1 FROM card_keywords m "
-                "WHERE m.card_id = id AND m.term = ?)"
+                "WHERE m.card_id = cards.id AND m.term = ?)"
                 for _ in keyword_terms) + ")"
             self.clauses.append(
                 f"NOT {group}" if normalized == "none" else group)
@@ -163,7 +163,7 @@ class SearchQueryBuilder:
             return
         normalized = str(mode).casefold()
         expr = (f"EXISTS (SELECT 1 FROM {table} m "
-                f"WHERE m.card_id = id AND m.term = ?)")
+                f"WHERE m.card_id = cards.id AND m.term = ?)")
         group = "(" + (" OR " if normalized in ("any", "none") else " AND ").join(
             expr for _ in terms) + ")"
         # "none" excludes every card matching any selected value, which is the

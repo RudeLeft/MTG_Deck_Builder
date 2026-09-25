@@ -266,6 +266,13 @@ def verify_is_recent(data_dir, max_age_seconds=120):
     still be running. The whole swap lifecycle is well under a minute, so an
     older marker is an orphan the app may safely clean up rather than a live
     apply it must leave alone.
+
+    The marker carries a wall-clock timestamp (a monotonic clock cannot be
+    shared across processes), so a clock adjustment between staging and this
+    launch can skew the elapsed time. A backward jump makes it negative; that
+    is treated as *recent* rather than orphaned, because the safe failure is to
+    leave a possibly-live apply alone, never to clear the scratch its helper is
+    still using. A forward jump only delays orphan cleanup, which is harmless.
     """
     marker = read_verify(data_dir)
     if not marker:
@@ -274,7 +281,7 @@ def verify_is_recent(data_dir, max_age_seconds=120):
         started_at = float(marker.get("started_at", 0))
     except (TypeError, ValueError):
         return False
-    return 0 <= (time.time() - started_at) < max_age_seconds
+    return (time.time() - started_at) < max_age_seconds
 
 
 def note_started(data_dir):
@@ -330,8 +337,12 @@ def build_swap_script(data_dir):
         # robocopy retries below absorb any remaining lock.
         "ping 127.0.0.1 -n 3 >nul",
         f'robocopy "{program}" "{backup}" /E /XD "{data}" /R:3 /W:1 >nul',
-        f'robocopy "{staged}" "{program}" /E /XD "{data}" /R:30 /W:1 >nul',
         # robocopy uses exit codes 0-7 for success; 8 and above is a real error.
+        # Check the backup's own code before the swap overwrites ERRORLEVEL: a
+        # failed backup leaves nothing safe to roll back to, so never touch the
+        # install in that case -- relaunch the untouched app instead.
+        "if %ERRORLEVEL% GEQ 8 goto backupfail",
+        f'robocopy "{staged}" "{program}" /E /XD "{data}" /R:30 /W:1 >nul',
         "if %ERRORLEVEL% GEQ 8 goto rollback",
         f'del /q "{started}" >nul 2>&1',
         f'start "" "{executable}"',
@@ -345,6 +356,12 @@ def build_swap_script(data_dir):
         ":ok",
         f'rmdir /s /q "{scratch}" >nul 2>&1',
         "exit /b 0",
+        # The backup could not be taken, so nothing was swapped: the install is
+        # exactly as it was. Discard the scratch and relaunch the current build.
+        ":backupfail",
+        f'rmdir /s /q "{scratch}" >nul 2>&1',
+        f'start "" "{executable}"',
+        "exit /b 1",
         ":rollback",
         f'taskkill /IM "{PROGRAM_EXE}" /F >nul 2>&1',
         f'robocopy "{backup}" "{program}" /E /XD "{data}" /R:10 /W:1 >nul',

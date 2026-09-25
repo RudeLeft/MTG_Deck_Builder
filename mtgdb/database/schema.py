@@ -9,7 +9,7 @@ import sqlite3
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 16
+_SCHEMA_VERSION = 17
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS cards (
     related_parts     TEXT,   -- json array copied from Scryfall all_parts
     card_faces        TEXT,   -- json array; preserves future multi-face structure
     layout            TEXT,
-    content_kind      TEXT,   -- precomputed CARD_CONTENT_KIND(layout, type_line)
+    content_kind      TEXT NOT NULL, -- precomputed CARD_CONTENT_KIND -- NOT NULL so an unpopulated row fails loudly rather than vanishing from every search
     colors_mask       INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of colors
     identity_mask     INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of color_identity
     produced_mask     INTEGER NOT NULL DEFAULT 0, -- WUBRGC bitmask of produced_mana
@@ -144,9 +144,12 @@ MEMBERSHIP_TABLES = ("card_types", "card_subtypes", "card_keywords")
 
 # Only the ``cards`` table's own columns: the schema now defines other tables
 # (meta, the membership tables) whose columns must not leak into the card
-# projection contract, so scan just the cards CREATE TABLE block.
+# projection contract, so scan just the cards CREATE TABLE block. The block
+# ends at the closing paren on its own line ("\n);"), never at a ");" that
+# happens to appear inside a column comment -- matching a bare ");" once
+# truncated the contract at a comment and silently dropped every later column.
 _CARDS_TABLE_SQL = _SCHEMA.split(
-    "CREATE TABLE IF NOT EXISTS cards (", 1)[1].split(");", 1)[0]
+    "CREATE TABLE IF NOT EXISTS cards (", 1)[1].split("\n);", 1)[0]
 _CARD_COLUMN_NAMES = frozenset(
     re.findall(r"^\s{4}([a-z][a-z0-9_]*)\s+", _CARDS_TABLE_SQL, flags=re.MULTILINE))
 

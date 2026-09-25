@@ -7,10 +7,12 @@ keeps the swap frozen-only. No network and no process spawning happen here.
 
 import atexit
 import hashlib
+import json
 import os
 import shutil
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -133,6 +135,13 @@ def main():
         # the rollback copies backup -> program (source precedes dest)
         and script.rfind(su.backup_dir(data_dir))
         < script.rfind(su.program_dir_for(data_dir)))
+    # The backup's own exit code is checked BEFORE the swap robocopy runs (and
+    # overwrites ERRORLEVEL); a failed backup aborts without touching the
+    # install, since there would be nothing safe to roll back to.
+    checks["swap script aborts before swapping when the backup itself fails"] = (
+        ":backupfail" in script
+        and script.index("goto backupfail")
+        < script.index(su.staged_program_dir(data_dir)))
 
     # checksums (A2): SHA256SUMS asset selection + parsing
     checks["select_checksums_url finds the SHA256SUMS asset"] = (
@@ -154,6 +163,13 @@ def main():
         su.verify_is_recent(data_dir) is True
         and su.verify_is_recent(data_dir, max_age_seconds=0) is False
         and (su.read_verify(data_dir) or {}).get("version") == "v1.2.0")
+    # A backward wall-clock jump leaves the marker timestamp in the future
+    # (negative elapsed). That must read as recent, never orphaned: the safe
+    # failure is to leave a possibly-live apply alone.
+    with open(su.verify_marker_path(data_dir), "w", encoding="utf-8") as handle:
+        json.dump({"version": "v1.2.0", "started_at": time.time() + 3600}, handle)
+    checks["verify_is_recent treats a backward clock jump as recent"] = (
+        su.verify_is_recent(data_dir) is True)
     # note_started drops the health flag only on a post-update launch
     checks["note_started signals a healthy launch when an apply is pending"] = (
         su.note_started(data_dir) is True

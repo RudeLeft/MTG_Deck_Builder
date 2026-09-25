@@ -5,7 +5,8 @@ import json
 import re
 import os
 
-from mtgdb.database.schema import _INDEX_DEFINITIONS, open_writer_connection
+from mtgdb.database.schema import (
+    _INDEX_DEFINITIONS, MEMBERSHIP_TABLES, open_writer_connection)
 from mtgdb.database.semantics import (
     _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
     _raw_type_line, _type_line_search_parts, color_mask, derive_trait_flags,
@@ -51,8 +52,12 @@ def _mana_pips(mana_cost):
     return counts
 
 
-def _extract_row(card):
-    """Turn a Scryfall card object into the tuple our schema expects."""
+def _extract_row(card, type_line=None):
+    """Turn a Scryfall card object into the tuple our schema expects.
+
+    ``type_line`` is the completed type line when the caller already computed
+    it (the import loop shares one computation with the membership rows).
+    """
     face = _face0(card)
     img = card.get("image_uris") or face.get("image_uris") or {}
 
@@ -94,7 +99,8 @@ def _extract_row(card):
     # instead of the per-row CARD_CONTENT_KIND SQL function.  Computed from the
     # exact stored values (layout and the completed type line) so it stays
     # identical to the function it replaces.
-    type_line = _complete_type_line(card)
+    if type_line is None:
+        type_line = _complete_type_line(card)
     content_kind = _card_content_kind(card.get("layout"), type_line)
 
     # Precomputed colour bitmasks and packed trait flags, from the exact stored
@@ -173,7 +179,7 @@ def _contiguous_ngrams(tokens):
     return grams
 
 
-def _membership_terms(card):
+def _membership_terms(card, type_line=None):
     """Return (type, subtype, keyword) membership rows for one card.
 
     Type/subtype rows are every contiguous n-gram of the card's normalized left
@@ -183,8 +189,9 @@ def _membership_terms(card):
     the current filter matches with ``COLLATE NOCASE`` equality.
     """
     card_id = card["id"]
-    left_sequences, subtype_texts = _type_line_search_parts(
-        _complete_type_line(card))
+    if type_line is None:
+        type_line = _complete_type_line(card)
+    left_sequences, subtype_texts = _type_line_search_parts(type_line)
     type_terms = set()
     for sequence in left_sequences:
         type_terms |= _contiguous_ngrams(sequence)
@@ -474,8 +481,20 @@ class ScryfallBulkImporter:
                     if not card.get("id") or not card.get("name"):
                         raise ValueError(
                             f"Bulk record {record_number} is missing card id or name")
-                    batch.append(_extract_row(card))
-                    types, subtypes, keywords = _membership_terms(card)
+                    # Complete the type line once and share it between the
+                    # card row and its membership rows.
+                    type_line = _complete_type_line(card)
+                    batch.append(_extract_row(card, type_line))
+                    if not replace:
+                        # An in-place load replaces the card row (INSERT OR
+                        # REPLACE), so drop the card's old membership too or a
+                        # changed type/subtype/keyword would keep matching its
+                        # stale terms alongside the new ones.
+                        for table in MEMBERSHIP_TABLES:
+                            cur.execute(
+                                f"DELETE FROM {table} WHERE card_id = ?",
+                                (card["id"],))
+                    types, subtypes, keywords = _membership_terms(card, type_line)
                     type_rows.extend(types)
                     subtype_rows.extend(subtypes)
                     keyword_rows.extend(keywords)
