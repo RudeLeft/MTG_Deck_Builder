@@ -2,8 +2,7 @@
 
 A fast, portable desktop deck builder for **Magic: The Gathering**. Search the
 full card pool with rich live filters, build and analyze decks, compare printings
-side by side at full art, and print proxy sheets — all offline after the first
-data sync.
+side by side at full art, and print proxy sheets.
 
 Windows desktop app (Python + Tkinter). No account, no telemetry; your decks and
 settings stay on your machine.
@@ -15,12 +14,12 @@ settings stay on your machine.
 2. Unzip it and keep the `MTGDeckBuilder` folder together.
 3. Run `MTGDeckBuilder.exe`.
 
-**First-run Windows warning:** the app isn't code-signed yet, so Windows
+**First-run Windows warning:** the app isn't code-signed, so Windows
 SmartScreen may show *"Windows protected your PC."* This is expected for a new
 independent app. Click **More info → Run anyway** to start it. (SmartScreen
 stops warning once the app has been run a few times, or once signing is added.)
 
-No Python required. The app is fully portable — it keeps its card database and
+No Python required. The app is fully portable. It keeps its card database and
 your saved decks in its own folder and writes nothing to AppData or the registry,
 so you can copy the folder between PCs or run it from a USB stick.
 
@@ -93,35 +92,6 @@ python tests/run_tests.py
 It prints a PASS/FAIL summary and the full output of any failure. (The build
 script and CI run the same tests one at a time for deterministic, early-exit
 per-file attribution.)
-
-### Code signing (optional, removes the SmartScreen warning)
-
-Signed builds skip the SmartScreen prompt above and build download reputation
-faster. You need a code-signing certificate: an OV certificate is inexpensive
-but earns reputation gradually, while an EV certificate clears SmartScreen
-immediately and costs more. Since 2023, CAs must keep the private key on
-hardware (a USB token or a cloud HSM/signing service such as Azure Trusted
-Signing), so a plain `.pfx` on disk is only possible with certain OV issuers;
-open-source projects can also sign for free through SignPath's foundation
-program.
-
-**CI signing is already wired up.** The Windows build workflow has a signing
-step that activates automatically when two repository secrets are present, and
-is skipped (building unsigned, as today) when they are not:
-
-- `WINDOWS_CERT_BASE64` — your signing certificate `.pfx`, base64-encoded.
-- `WINDOWS_CERT_PASSWORD` — its password.
-
-With those set, every tagged release build signs `MTGDeckBuilder.exe` before it
-is packaged and published. To sign a local build instead, use the Windows SDK
-`signtool` (always time-stamp with `/tr` so signatures outlive the certificate):
-
-```
-signtool sign /f cert.pfx /p <password> /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\MTGDeckBuilder\MTGDeckBuilder.exe
-```
-
-Every release also publishes `SHA256SUMS.txt` so downloads (and the in-app
-updater) can be verified against a known hash.
 
 ## Card data & legal
 
