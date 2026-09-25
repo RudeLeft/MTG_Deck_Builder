@@ -17,6 +17,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from mtgdb.comparison.models import ComparisonCollection
+from mtgdb.core.version import app_version
 from mtgdb.database.sync import DatabaseSyncController, DatabaseSyncService
 from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession, DeckSessionManager
@@ -132,7 +133,9 @@ class DeckBuilderApp(
         self._initialize_table_infrastructure(
             os.path.join(self.data_dir, "ui_preferences.json"))
 
-        self.title("MTG Deck Builder")
+        # The running version in the title bar, so a user (or a bug report)
+        # can see at a glance which build this is.
+        self.title(f"MTG Deck Builder v{app_version()}")
         self.geometry("1380x860")
         self.minsize(1170, 700)
 

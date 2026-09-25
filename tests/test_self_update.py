@@ -142,6 +142,16 @@ def main():
         ":backupfail" in script
         and script.index("goto backupfail")
         < script.index(su.staged_program_dir(data_dir)))
+    # The helper runs from %TEMP% and must remove itself as its final action so
+    # no stray mtgupdate-*.bat accumulates per update. Every exit path funnels
+    # to :done, whose (goto) idiom ends the batch context so the file can be
+    # deleted; the delete must come after every scratch rmdir.
+    checks["swap script deletes itself as its final action on every path"] = (
+        script.rstrip().endswith('& exit %RC%')
+        and 'del "%~f0"' in script
+        and "(goto) 2>nul" in script
+        and script.index('del "%~f0"') > script.rindex("rmdir")
+        and script.count("goto done") == 3)
 
     # checksums (A2): SHA256SUMS asset selection + parsing
     checks["select_checksums_url finds the SHA256SUMS asset"] = (

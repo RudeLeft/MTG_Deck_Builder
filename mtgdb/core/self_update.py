@@ -355,18 +355,29 @@ def build_swap_script(data_dir):
         "goto wait",
         ":ok",
         f'rmdir /s /q "{scratch}" >nul 2>&1',
-        "exit /b 0",
+        "set RC=0",
+        "goto done",
         # The backup could not be taken, so nothing was swapped: the install is
         # exactly as it was. Discard the scratch and relaunch the current build.
         ":backupfail",
         f'rmdir /s /q "{scratch}" >nul 2>&1',
         f'start "" "{executable}"',
-        "exit /b 1",
+        "set RC=1",
+        "goto done",
         ":rollback",
         f'taskkill /IM "{PROGRAM_EXE}" /F >nul 2>&1',
         f'robocopy "{backup}" "{program}" /E /XD "{data}" /R:10 /W:1 >nul',
         f'rmdir /s /q "{scratch}" >nul 2>&1',
         f'start "" "{executable}"',
-        "exit /b 1",
+        "set RC=1",
+        "goto done",
+        # Every path ends here. The helper lives in %TEMP% (it cannot run from
+        # the scratch folder it deletes), so remove it as the very last action
+        # rather than leaving a stray mtgupdate-*.bat behind per update. The
+        # "(goto) 2>nul" idiom ends the batch context so the file can be deleted
+        # while the rest of the line still runs; %RC% is expanded when the line
+        # is parsed, before that happens.
+        ":done",
+        '(goto) 2>nul & del "%~f0" & exit %RC%',
     ]
     return "\r\n".join(lines) + "\r\n"
