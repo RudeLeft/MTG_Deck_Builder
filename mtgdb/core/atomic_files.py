@@ -46,21 +46,41 @@ def sweep_abandoned_writes(directory, *prefixes):
 
     A prefix is matched as a prefix, not as a whole name, so a caller can name
     one exact file ("session.json") or a family of them ("session_" for the
-    timestamped recovery snapshots).
+    timestamped recovery snapshots). Those two need different boundaries. A
+    family prefix already ends in its own separator ("_") and is deliberately
+    matched raw, so one sweep catches every differently-timestamped snapshot's
+    own uniquely-suffixed temp name. An exact file name has no such built-in
+    boundary: it needs the trailing-dot boundary ``temp_prefix()`` gives that
+    file's own temp name, *and* a check that nothing but ``tempfile``'s own
+    random suffix (never containing a dot) follows that boundary -- the
+    boundary alone still can't tell "session.json"'s temp from
+    "session.json.bak"'s own temp, since "session.json.bak" is a different
+    file whose name simply continues right where the boundary dot is; only the
+    dot-free random suffix constraint tells them apart.
     """
     try:
         folder = Path(directory)
         names = os.listdir(folder)
     except (OSError, TypeError, ValueError):
         return 0
-    wanted = tuple(f".{prefix}" for prefix in prefixes if str(prefix))
-    if not wanted:
+    clean = [str(prefix) for prefix in prefixes if str(prefix)]
+    if not clean:
         return 0
+    family = tuple(f".{prefix}" for prefix in clean if prefix.endswith("_"))
+    exact = tuple(temp_prefix(prefix) for prefix in clean if not prefix.endswith("_"))
     removed = 0
     for name in names:
         if not name.endswith(TEMP_SUFFIX):
             continue
-        if not any(name.startswith(prefix) for prefix in wanted):
+        stem = name[:-len(TEMP_SUFFIX)]
+        matched = any(stem.startswith(prefix) for prefix in family)
+        if not matched:
+            for boundary in exact:
+                if (stem.startswith(boundary)
+                        and "." not in stem[len(boundary):]):
+                    matched = True
+                    break
+        if not matched:
             continue
         try:
             (folder / name).unlink()

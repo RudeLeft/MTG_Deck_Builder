@@ -145,11 +145,25 @@ class WorkspaceRepository:
                     fresh = card_lookup(card.get("id"))
                 except Exception:
                     fresh = None
-            deck.add(
-                fresh or card,
-                board if board in ("main", "side") else "main",
-                quantity,
-            )
+            try:
+                deck.add(
+                    fresh or card,
+                    board if board in ("main", "side") else "main",
+                    quantity,
+                )
+            except ValueError:
+                # A lookup can hand back a dict that is truthy but malformed
+                # (missing its own id, for a stale/edge-case printing), which
+                # Deck.add rejects. That must cost only this one entry, not the
+                # whole deck: an uncaught ValueError here used to propagate out
+                # of session_from_data into WorkspaceLoadWorker's single broad
+                # except, discarding every other deck/session in the same
+                # workspace and leaving the user with a blank default session.
+                log.warning(
+                    "Skipping unreadable deck entry while restoring %r "
+                    "(card id=%r)", data.get("name"),
+                    (fresh or card).get("id") if isinstance(fresh or card, dict)
+                    else None)
         return deck
 
     @classmethod
@@ -279,17 +293,28 @@ class WorkspaceRepository:
 
     def _recovery_paths(self):
         try:
-            return sorted(
-                (
-                    path for path in self.recovery_dir.iterdir()
-                    if path.name.startswith("session_")
-                    and path.suffix.casefold() == ".json"
-                ),
-                key=lambda path: path.stat().st_mtime,
-                reverse=True,
-            )
+            candidates = [
+                path for path in self.recovery_dir.iterdir()
+                if path.name.startswith("session_")
+                and path.suffix.casefold() == ".json"
+            ]
         except OSError:
             return []
+        # Stat each file individually so one that becomes momentarily unreadable
+        # (deleted mid-listing by pruning, or locked by antivirus/cloud sync on
+        # this portable app's data folder) only drops that file, not the whole
+        # snapshot list -- a single failure inside sorted()'s key function used
+        # to propagate out and discard every valid candidate, which could leave
+        # a corrupt/missing primary session.json with no recovery at all even
+        # though good snapshots existed.
+        timestamped = []
+        for path in candidates:
+            try:
+                timestamped.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+        timestamped.sort(key=lambda pair: pair[0], reverse=True)
+        return [path for _mtime, path in timestamped]
 
     def _write_recovery_snapshot(self, payload, force=False):
         now = self._clock()

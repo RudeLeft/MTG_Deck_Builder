@@ -110,6 +110,17 @@ def cache_path(card, cache_dir, extension, legacy_path=None):
                 # name, set, and collector number or whose index was lost.
                 short_id = _clean(card_key, "card")[:8]
                 chosen = os.path.join(cache_dir, f"{stem}{suffix} - {short_id}{ext}")
+                if not available(chosen):
+                    # The 8-character id prefix itself collided, or this slot
+                    # is already owned by a different card -- unlike the two
+                    # tiers above, there is no further fallback tier, so this
+                    # must not unconditionally overwrite that card's index
+                    # entry. The full card_key (a whole Scryfall id) is unique
+                    # to this printing by construction, so falling back to it
+                    # can never collide with a different card's own entry.
+                    full_id = _clean(card_key, "card")
+                    chosen = os.path.join(
+                        cache_dir, f"{stem}{suffix} - {full_id}{ext}")
 
         basename = os.path.basename(chosen)
         if index.get(basename) != card_key:

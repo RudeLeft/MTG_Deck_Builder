@@ -14,7 +14,8 @@ from mtgdb.deck.model import Deck
 from mtgdb.core.atomic_files import TEMP_SUFFIX, sweep_abandoned_writes
 from mtgdb.deck.io import save_deck_text
 from mtgdb.preferences.repository import UIPreferencesRepository
-from mtgdb.workspace.repository import WORKSPACE_VERSION, WorkspaceRepository
+from mtgdb.workspace.repository import (
+    WORKSPACE_VERSION, WorkspaceRepository)
 
 
 def _card(card_id, *, collector="1"):
@@ -142,6 +143,129 @@ def _cache_identity_check(tmp):
     return result
 
 
+def _recovery_paths_resilience_check(tmp):
+    """One recovery snapshot that fails .stat() must not discard the rest.
+
+    _recovery_paths() used to compute the sort key (path.stat().st_mtime)
+    inside sorted()'s own call, so one OSError there -- a file deleted mid-
+    listing by pruning, or momentarily locked by antivirus/cloud sync on this
+    portable app's data folder -- propagated out and discarded every valid
+    candidate via the surrounding except OSError, not just the failing one.
+    """
+    import pathlib
+
+    repository = WorkspaceRepository(
+        tmp / "recovery-resilience", recovery_interval=0, recovery_keep=8,
+        clock=lambda: 1_800_000_000.0)
+    repository._write_recovery_snapshot({"version": WORKSPACE_VERSION, "decks": [],
+                                         "marker": "good-1"}, force=True)
+    repository._write_recovery_snapshot({"version": WORKSPACE_VERSION, "decks": [],
+                                         "marker": "good-2"}, force=True)
+    good_names = {path.name for path in repository.recovery_dir.glob("session_*.json")}
+
+    bad_path = repository.recovery_dir / "session_unreadable.json"
+    bad_path.write_text("{}", encoding="utf-8")
+
+    original_stat = pathlib.Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self.name == bad_path.name:
+            raise OSError("simulated stat failure")
+        return original_stat(self, *args, **kwargs)
+
+    pathlib.Path.stat = flaky_stat
+    try:
+        found = repository._recovery_paths()
+    finally:
+        pathlib.Path.stat = original_stat
+
+    found_names = {path.name for path in found}
+    return (
+        found_names == good_names
+        and bad_path.name not in found_names
+        and len(found) == 2)
+
+
+def _deck_from_data_skips_bad_entry_check():
+    """One malformed deck entry must not discard an entire restored workspace.
+
+    Deck.add raises ValueError when a card dict has no id -- which can happen
+    when card_lookup hands back a truthy but malformed dict for a stale/edge-
+    case printing. Before the fix, that propagated straight out of
+    deck_from_data uncaught, which WorkspaceLoadWorker's single broad
+    except Exception turned into losing every deck/session in the whole
+    workspace, not just the one bad entry.
+    """
+    payload = {
+        "name": "Mixed Deck",
+        "format": "commander",
+        "entries": [
+            {"card": {"id": "good-1"}, "qty": 2, "board": "main"},
+            {"card": {"id": "missing-lookup"}, "qty": 1, "board": "main"},
+            {"card": {"id": "good-2"}, "qty": 3, "board": "side"},
+        ],
+    }
+
+    def flaky_lookup(card_id):
+        if card_id == "missing-lookup":
+            # A dict that IS truthy but lacks its own id -- exactly the shape
+            # that used to make Deck.add raise ValueError uncaught.
+            return {"name": "Corrupted Lookup Result"}
+        return {"id": card_id, "name": card_id}
+
+    deck = WorkspaceRepository.deck_from_data(payload, card_lookup=flaky_lookup)
+    ids_present = {entry["card"]["id"] for entry in deck.iter_entries("main")}
+    ids_present |= {entry["card"]["id"] for entry in deck.iter_entries("side")}
+    return (
+        "good-1" in ids_present and "good-2" in ids_present
+        and "missing-lookup" not in ids_present
+        and deck.total("main") == 2 and deck.total("side") == 3)
+
+
+def _cache_last_resort_check(tmp):
+    """The last-resort cache-filename tier must never clobber a different card.
+
+    Pre-populates the index so the preferred and collector-qualified tiers are
+    both already owned by other cards (forcing the request down to the 8-char
+    short-id tier) AND the short-id slot itself is already owned by yet
+    another card (a genuine short-id collision, or a lost/reused index entry).
+    The fallback must not silently overwrite that entry; it must fall back to
+    a filename that is unique to this card by construction (its full id). Uses
+    the card's real id (no monkeypatching) so the 8-char short id and the full
+    id are naturally different strings, exactly as in production.
+    """
+    import json as _json
+
+    cache_dir = tmp / "cache-last-resort"
+    cache_dir.mkdir()
+    cache_names._INDEX_CACHE.clear()
+    card = _card("bbbbbbbb-1111-shared", collector="1")
+    card_key = cache_names._card_key(card)
+    short_id = cache_names._clean(card_key, "card")[:8]
+    full_id = cache_names._clean(card_key, "card")
+
+    preferred_name = "Same Card [TST].jpg"
+    qualified_name = "Same Card [TST] - 1.jpg"
+    short_id_name = f"Same Card [TST] - 1 - {short_id}.jpg"
+    full_id_name = f"Same Card [TST] - 1 - {full_id}.jpg"
+    index_path = cache_dir / ".cache_index.json"
+    index_path.write_text(_json.dumps({
+        preferred_name: "owner-preferred",
+        qualified_name: "owner-qualified",
+        short_id_name: "owner-shortid",
+    }), encoding="utf-8")
+
+    chosen = Path(cache_names.cache_path(card, cache_dir, ".jpg"))
+    cache_names._INDEX_CACHE.clear()
+
+    index = _json.loads(index_path.read_text(encoding="utf-8"))
+    return (
+        chosen.name == full_id_name
+        # The pre-existing owner's entry must survive untouched.
+        and index.get(short_id_name) == "owner-shortid"
+        and index.get(full_id_name) == card_key)
+
+
 def _abandoned_temporary_checks(root):
     """Every durable writer cleans up after a process killed mid-write.
 
@@ -196,31 +320,79 @@ def _abandoned_temporary_checks(root):
         and sweep_abandoned_writes(narrow_dir) == 0
         and sweep_abandoned_writes(narrow_dir / "missing", "session.json") == 0)
 
-    return (workspace_clean and preferences_clean and deck_clean), narrow
+    # A prefix naming one exact file ("session.json") must not match a
+    # DIFFERENT file's own abandoned temp just because that file's name starts
+    # with the same characters ("session.json2", "session.json.bak"): the
+    # sweep must honour the same trailing-dot boundary temp_prefix() gives the
+    # named file's own temp name, or it silently deletes another file's
+    # still-needed recovery data.
+    boundary_dir = Path(root) / "swept-boundary"
+    boundary_dir.mkdir()
+    (boundary_dir / ".session.json.aaa.tmp").write_text("ours", encoding="utf-8")
+    (boundary_dir / ".session.json2.bbb.tmp").write_text(
+        "a different file's recovery data", encoding="utf-8")
+    (boundary_dir / ".session.json.bak.ccc.tmp").write_text(
+        "also a different file's recovery data", encoding="utf-8")
+    boundary_removed = sweep_abandoned_writes(boundary_dir, "session.json")
+    boundary_remaining = set(temporaries(boundary_dir))
+    boundary_safe = (
+        boundary_removed == 1
+        and boundary_remaining
+        == {".session.json2.bbb.tmp", ".session.json.bak.ccc.tmp"})
+
+    # A family prefix ("session_") is deliberately matched raw: many
+    # differently-timestamped recovery snapshots each get their own unique
+    # temp_prefix, and one sweep call must still catch all of them.
+    family_dir = Path(root) / "swept-family"
+    family_dir.mkdir()
+    (family_dir / ".session_20260101_000000_000.json.aaa.tmp").write_text(
+        "half", encoding="utf-8")
+    (family_dir / ".session_20260102_000000_000.json.bbb.tmp").write_text(
+        "half", encoding="utf-8")
+    family_removed = sweep_abandoned_writes(family_dir, "session_")
+    family_safe = family_removed == 2 and not temporaries(family_dir)
+
+    return (
+        (workspace_clean and preferences_clean and deck_clean), narrow,
+        boundary_safe, family_safe)
 
 
 def main():
     (invalid_move_safe, invalid_quantity_safe, quantity_integer,
      invalid_board_safe, same_board_noop) = _deck_mutation_checks()
     schema_atomic = _schema_rollback_check()
+    deck_from_data_resilient = _deck_from_data_skips_bad_entry_check()
     with tempfile.TemporaryDirectory() as directory:
         tmp = Path(directory)
         workspace_version_safe, snapshot_collision_safe = _workspace_checks(tmp)
         cache_identity_safe = _cache_identity_check(tmp)
-        abandoned_swept, sweep_is_narrow = _abandoned_temporary_checks(tmp)
+        cache_last_resort_safe = _cache_last_resort_check(tmp)
+        recovery_paths_resilient = _recovery_paths_resilience_check(tmp)
+        (abandoned_swept, sweep_is_narrow, sweep_boundary_safe,
+         sweep_family_intact) = _abandoned_temporary_checks(tmp)
 
     checks = {
         "an interrupted write leaves nothing behind for good": abandoned_swept,
         "a sweep only removes this application's own temporaries": sweep_is_narrow,
+        "a sweep for one exact file does not match a different file's temp":
+            sweep_boundary_safe,
+        "a family-prefix sweep still catches every differently-named match":
+            sweep_family_intact,
         "invalid deck move preserves source state": invalid_move_safe,
         "deck rejects non-positive additions": invalid_quantity_safe,
         "deck stores quantities as integers": quantity_integer,
         "deck mutation API rejects invalid boards": invalid_board_safe,
         "same-board deck move is a no-op": same_board_noop,
+        "one malformed deck entry does not discard the whole restored deck":
+            deck_from_data_resilient,
         "failed schema migration rolls back every DDL change": schema_atomic,
         "workspace rejects unsupported future schema versions": workspace_version_safe,
         "same-timestamp recovery snapshots do not overwrite": snapshot_collision_safe,
+        "one unreadable recovery snapshot does not discard the others":
+            recovery_paths_resilient,
         "missing cache index cannot reuse an unknown printing": cache_identity_safe,
+        "the last-resort cache tier cannot clobber a different card's entry":
+            cache_last_resort_safe,
     }
     ok = True
     for label, passed in checks.items():
