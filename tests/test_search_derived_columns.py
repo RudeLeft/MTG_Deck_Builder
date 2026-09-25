@@ -104,6 +104,34 @@ def main():
                 flags_ok = False
             flags_seen += 1 if stored else 0
 
+        # A "compleated" hybrid-Phyrexian symbol ({G/U/P}) is both a genuine
+        # hybrid colour choice AND a Phyrexian life-payment option in one
+        # symbol. A prior substring check ("/P" present => not hybrid) wrongly
+        # excluded it from hybrid_mana; this asserts the fix directly against
+        # the live SQL query and the stored trait_flags, not just that the two
+        # independent implementations agree with each other (which they could
+        # do on the same wrong answer).
+        from mtgdb.database.semantics import TRAIT_HYBRID_MANA, TRAIT_PHYREXIAN_MANA
+        from mtgdb.search.models import SearchCriteria
+        compleated_flags = reader.execute(
+            "SELECT trait_flags FROM cards WHERE id = 'compleated-0'"
+        ).fetchone()[0]
+        compleated_flags_correct = (
+            bool(compleated_flags & TRAIT_HYBRID_MANA)
+            and bool(compleated_flags & TRAIT_PHYREXIAN_MANA))
+        hybrid_ids = {
+            card_id for (card_id,) in reader.execute(
+                "SELECT id FROM cards WHERE (trait_flags & ?) != 0",
+                (TRAIT_HYBRID_MANA,))}
+        compleated_in_hybrid_column = "compleated-0" in hybrid_ids
+        hybrid_search_ids = {
+            row[0] for row in harness.db.search_projection(
+                connection=reader, columns=("id",),
+                **SearchCriteria(
+                    content_types=("card",), mana_features=("hybrid_mana",),
+                ).query_arguments())[1]}
+        compleated_in_hybrid_search = "compleated-0" in hybrid_search_ids
+
         # M1c: type/subtype/keyword membership tables reproduce the per-row
         # CARD_HAS_TYPE / CARD_HAS_SUBTYPE functions and the keyword filter,
         # checked as a full cross-product of every card against every vocab term.
@@ -188,6 +216,12 @@ def main():
                 colors_seen > 0 and identity_seen > 0 and produced_seen > 0),
             "trait_flags match the filter classifier for every row": flags_ok,
             "trait_flags are actually populated (not all zero)": flags_seen > 0,
+            "a compleated hybrid-Phyrexian symbol sets both trait_flags bits":
+                compleated_flags_correct,
+            "the hybrid_mana trait_flags bit includes a compleated symbol":
+                compleated_in_hybrid_column,
+            "a live Mana Features=Hybrid search includes a compleated symbol":
+                compleated_in_hybrid_search,
             "card_types membership matches CARD_HAS_TYPE for every card/term":
                 types_ok,
             "card_subtypes membership matches CARD_HAS_SUBTYPE for every card/term":

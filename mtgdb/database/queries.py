@@ -3,6 +3,7 @@
 import re
 
 from mtgdb.database.constants import ART_LAYOUTS, NON_CARD_LAYOUTS
+from mtgdb.database.semantics import _escape_like
 
 
 # --- decklist name normalization -------------------------------------------
@@ -255,11 +256,17 @@ class CardQueryMixin:
                 front = _SLASH_RE.split(cand)[0].strip()
                 if not front:
                     continue
+                # front comes from an imported decklist line, so it is
+                # untrusted text: escape LIKE metacharacters (% and _) the
+                # same way every other LIKE-based query in this codebase does,
+                # or a literal "%"/"_" in a mis-copied name acts as a wildcard
+                # instead of a literal character and can match an unrelated
+                # printing.
                 row = self.conn.execute(
-                    f"SELECT * FROM cards WHERE name LIKE ? COLLATE NOCASE "
+                    f"SELECT * FROM cards WHERE name LIKE ? ESCAPE '\\' COLLATE NOCASE "
                     f"AND {importable} "
                     f"ORDER BY {newest_order}, length(name) LIMIT 1",
-                    (front + " //%", *import_params),
+                    (_escape_like(front) + " //%", *import_params),
                 ).fetchone()
                 if row:
                     return dict(row)

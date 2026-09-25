@@ -309,6 +309,12 @@ class SearchCatalogController:
         with self._condition:
             self._closed = True
             self._pending = None
+            # Without this, _run()'s exit guard (which requires both _pending
+            # and _warm_queue empty) never fires while a startup warm-load is
+            # still queued: it pops and processes each queued scope's full
+            # DB scan during/after the rest of app teardown instead of exiting
+            # once _closed is set, exactly like invalidate() already prevents.
+            self._warm_queue.clear()
             self._generation += 1
             self._condition.notify_all()
         self._thread.join(max(0.0, float(timeout)))

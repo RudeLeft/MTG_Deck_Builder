@@ -88,11 +88,20 @@ class SearchCriteria:
             "layouts", "pips", "content_types",
         }
         optional_tuple_fields = {"set_codes", "set_types"}
+        # Only normalize a field the caller actually supplied. Normalizing
+        # every field unconditionally turned an absent key into an explicit
+        # () (via _tuple(None)), which then overrode the dataclass's own
+        # default when passed to the constructor below -- content_types is
+        # the field this bites: its default is ("card",), and from_mapping({})
+        # silently produced content_types=() instead, which
+        # add_content_filter(()) short-circuits to zero results, not "Cards".
         for name in tuple_fields:
-            data[name] = _tuple(data.get(name))
+            if name in data:
+                data[name] = _tuple(data.get(name))
         for name in optional_tuple_fields:
-            value = data.get(name)
-            data[name] = None if value is None else _tuple(value)
+            if name in data:
+                value = data.get(name)
+                data[name] = None if value is None else _tuple(value)
         allowed = {field.name for field in fields(cls)}
         return cls(**{key: value for key, value in data.items() if key in allowed})
 

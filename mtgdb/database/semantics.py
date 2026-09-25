@@ -266,6 +266,32 @@ _MANA_COST_SYMBOL = re.compile(r"\{([^}]+)\}")
 _MANA_FILTER_COLORS = frozenset(("W", "U", "B", "R", "G", "C"))
 
 
+def mana_cost_has_hybrid_symbol(mana_cost):
+    """True if any brace symbol offers 2+ non-Phyrexian choices.
+
+    A symbol like ``{W/U}`` or ``{2/W}`` is a genuine hybrid choice. ``{W/P}``
+    pairs one colour with a life payment and is not a hybrid choice on its
+    own, but a "compleated" three-part symbol like ``{W/U/P}`` (March of the
+    Machine) still offers a real W-or-U hybrid choice alongside the life
+    option, so it counts too -- excluding every symbol that merely contains
+    "P" wrongly excluded those.
+    """
+    for raw_symbol in _MANA_COST_SYMBOL.findall(str(mana_cost or "")):
+        parts = [part for part in str(raw_symbol).upper().split("/")
+                 if part != "P"]
+        if len(parts) >= 2:
+            return True
+    return False
+
+
+def mana_cost_has_phyrexian_symbol(mana_cost):
+    """True if any brace symbol includes a Phyrexian ("pay life") option."""
+    for raw_symbol in _MANA_COST_SYMBOL.findall(str(mana_cost or "")):
+        if "P" in str(raw_symbol).upper().split("/"):
+            return True
+    return False
+
+
 @lru_cache(maxsize=65536)
 def _mana_cost_symbol_colors(mana_cost):
     """Return represented filter colors for each physical mana symbol.
@@ -394,12 +420,12 @@ def derive_trait_flags(mana_cost, power, toughness, card_faces, color_indicator)
     flags = 0
     if card_faces is not None and str(card_faces) not in ("", "[]", "null"):
         flags |= TRAIT_MULTI_FACED
-    mana = str(mana_cost or "").upper()
-    if "/" in mana and "/P" not in mana:
+    mana = str(mana_cost or "")
+    if mana_cost_has_hybrid_symbol(mana):
         flags |= TRAIT_HYBRID_MANA
-    if "/P" in mana:
+    if mana_cost_has_phyrexian_symbol(mana):
         flags |= TRAIT_PHYREXIAN_MANA
-    if "{X}" in mana:
+    if "{X}" in mana.upper():
         flags |= TRAIT_HAS_X_COST
     power_text = str(power or "")
     toughness_text = str(toughness or "")

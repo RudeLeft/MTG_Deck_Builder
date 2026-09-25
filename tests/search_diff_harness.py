@@ -154,6 +154,18 @@ def build_corpus():
         cmc=1.0, mana_cost="{R/P}", colors=["R"], color_identity=["R"],
         oracle_text="Gut Shot deals 1 damage to any target."))
 
+    # A "compleated" hybrid-Phyrexian symbol ({W/U/P}, from March of the
+    # Machine) is both a genuine hybrid choice between two colours AND a
+    # Phyrexian life-payment option in one symbol -- distinct from a plain
+    # Phyrexian symbol like Gut Shot's {R/P} above, which pairs one colour
+    # with life and is not itself a hybrid choice.
+    add(_printings("compleated", "Tyvar, Jubilant Brawler",
+                   "Legendary Planeswalker — Tyvar", [
+        ("mom", "expansion", "mythic", "2023-04-21", "en")],
+        cmc=3.0, mana_cost="{1}{G/U/P}{G/U/P}", colors=["G", "U"],
+        color_identity=["G", "U"], loyalty="3",
+        oracle_text="Compleated. Creatures you control get +1/+1."))
+
     add(_printings("xspell", "Fireball", "Sorcery", [
         ("lea", "core", "common", "2015-01-01", "en"),
         ("ema", "masters", "rare", "2016-06-10", "en")],

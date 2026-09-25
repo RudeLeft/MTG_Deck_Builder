@@ -29,6 +29,7 @@ from mtgdb.database.constants import (
 from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _normalize_rules_text, _type_line_search_parts,
+    mana_cost_has_hybrid_symbol, mana_cost_has_phyrexian_symbol,
 )
 from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
@@ -73,12 +74,12 @@ def _trait_filter_keys(row):
     faces = row.get("card_faces")
     has_faces = faces is not None and str(faces) not in ("", "[]", "null")
     keys.add("multi_faced" if has_faces else "single_faced")
-    mana = str(row.get("mana_cost") or "").upper()   # LIKE is case-insensitive
-    if "/" in mana and "/P" not in mana:
+    mana = str(row.get("mana_cost") or "")
+    if mana_cost_has_hybrid_symbol(mana):
         keys.add("hybrid_mana")
-    if "/P" in mana:
+    if mana_cost_has_phyrexian_symbol(mana):
         keys.add("phyrexian_mana")
-    if "{X}" in mana:
+    if "{X}" in mana.upper():
         keys.add("has_x_cost")
     indicator = row.get("color_indicator")
     if indicator is not None and str(indicator) != "":

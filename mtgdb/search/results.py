@@ -847,11 +847,20 @@ def filter_signature(filters):
     for key in sorted(filters):
         rule = filters[key]
         values = rule.get("values")
+        # Cost/Colors filter rules carry their picked symbol groups under
+        # "groups" (a set), not "values". Omitting it from the signature made
+        # two different Cost/Colors selections that only differ by group hash
+        # to the same cache key, so opening a second picker after changing
+        # Cost/Colors reused the first selection's stale cached vocabulary
+        # instead of recomputing it.
+        groups = rule.get("groups")
         parts.append((
             key, rule.get("kind"), rule.get("min"), rule.get("max"),
             rule.get("mode"), rule.get("value"),
             tuple(sorted((str(value) for value in values), key=str.casefold))
             if values is not None else (),
+            tuple(sorted((str(value) for value in groups), key=str.casefold))
+            if groups is not None else (),
         ))
     return tuple(parts)
 

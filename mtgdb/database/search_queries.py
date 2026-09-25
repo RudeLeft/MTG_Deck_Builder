@@ -10,7 +10,9 @@ from mtgdb.database.constants import (
 )
 from mtgdb.database.schema import _CARD_COLUMN_NAMES
 from mtgdb.database.semantics import (
-    COLOR_BITS, _escape_like, _normalize_rules_text, _type_key)
+    COLOR_BITS, TRAIT_COLOR_INDICATOR, TRAIT_HAS_X_COST, TRAIT_HYBRID_MANA,
+    TRAIT_PHYREXIAN_MANA, TRAIT_TOP_HEAVY, TRAIT_VARIABLE_STATS,
+    _escape_like, _normalize_rules_text, _type_key)
 
 
 class SearchQueryBuilder:
@@ -296,6 +298,12 @@ class SearchQueryBuilder:
     # self-correcting for the next layout Scryfall invents.
     HAS_FACES_CLAUSE = (
         "card_faces IS NOT NULL AND card_faces NOT IN ('', '[]', 'null')")
+    # The six mana/stat/indicator traits below are precomputed once at import
+    # into the trait_flags bitmask (mtgdb.database.semantics.derive_trait_flags)
+    # and tested here with an indexed integer AND instead of a per-row LIKE/GLOB
+    # scan. universes_beyond/reserved/game_changer are already plain indexed
+    # columns and multi_faced/single_faced already read card_faces directly, so
+    # none of those five need (or use) trait_flags.
     TRAIT_CLAUSES = {
         "universes_beyond": "universes_beyond = 1",
         "not_universes_beyond": "COALESCE(universes_beyond, 0) = 0",
@@ -303,16 +311,12 @@ class SearchQueryBuilder:
         "game_changer": "game_changer = 1",
         "multi_faced": HAS_FACES_CLAUSE,
         "single_faced": f"NOT ({HAS_FACES_CLAUSE})",
-        "hybrid_mana": "mana_cost LIKE '%/%' AND mana_cost NOT LIKE '%/P%'",
-        "phyrexian_mana": "mana_cost LIKE '%/P%'",
-        "has_x_cost": "mana_cost LIKE '%{X}%'",
-        "color_indicator": "color_indicator IS NOT NULL AND color_indicator <> ''",
-        "variable_stats": (
-            "power LIKE '%*%' OR toughness LIKE '%*%'"),
-        "top_heavy": (
-            "power NOT GLOB '*[^0-9.-]*' AND toughness NOT GLOB '*[^0-9.-]*' "
-            "AND power <> '' AND toughness <> '' "
-            "AND CAST(power AS REAL) > CAST(toughness AS REAL)"),
+        "hybrid_mana": f"(trait_flags & {TRAIT_HYBRID_MANA}) != 0",
+        "phyrexian_mana": f"(trait_flags & {TRAIT_PHYREXIAN_MANA}) != 0",
+        "has_x_cost": f"(trait_flags & {TRAIT_HAS_X_COST}) != 0",
+        "color_indicator": f"(trait_flags & {TRAIT_COLOR_INDICATOR}) != 0",
+        "variable_stats": f"(trait_flags & {TRAIT_VARIABLE_STATS}) != 0",
+        "top_heavy": f"(trait_flags & {TRAIT_TOP_HEAVY}) != 0",
     }
 
     def add_property_filters(self, properties, mode="any"):
