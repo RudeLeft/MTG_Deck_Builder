@@ -34,15 +34,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from mtgdb.ui.components import (
-    AppButton, AppCombobox, AppEntry, AppMenubutton, AppSpinbox,
-    ClassicCheckbutton,
+    ActivityIndicator, AppButton, AppCombobox, AppEntry, AppMenubutton,
+    AppSpinbox, ClassicCheckbutton,
 )
 from mtgdb.ui.comparison import comparison_layout_metrics
 from mtgdb.ui.comparison_controls import comparison_action_columns
 from mtgdb.ui.search_checklist import VirtualChecklistView
 from mtgdb.ui.styles import install_ui_styles
 from mtgdb.ui.tokens import (
-    COMPARISON_WINDOW_SIZE, FONT_BODY, MAIN_CENTER_COLUMN_WIDTH,
+    COMPARISON_WINDOW_SIZE, FONT_ACTIVITY, FONT_BODY, MAIN_CENTER_COLUMN_WIDTH,
     MAIN_SIDE_MIN_WIDTH, PANEL_PADDING, PALETTE,
 )
 
@@ -114,6 +114,15 @@ def _run_scale(root, percent, scaling):
         comparison_holder, text="Clear", role="standard")
     protected_compare = AppButton(
         shell, text="Compare", role="primary", width=5)
+    # The centered activity cue lives in the Search / Add action row, so it must
+    # never be taller than the buttons that set that row's height -- otherwise
+    # showing a busy cue (or just having the label) would grow the whole row.
+    activity_label = ttk.Label(
+        shell, text="Loading filters…", width=1, anchor="center",
+        style="ActivityWorking.TLabel")
+    ActivityIndicator(
+        activity_label,
+        working_styles=("ActivityWorking.TLabel", "ActivityWorkingDim.TLabel"))
 
     entry = AppEntry(shell)
     combo = AppCombobox(shell, values=("Any format",), state="readonly")
@@ -192,6 +201,7 @@ def _run_scale(root, percent, scaling):
     for widget in widgets:
         widget.pack()
     advanced_holder.pack(fill="x")
+    activity_label.pack(fill="x")
     comparison_holder.pack()
     compare_add.pack(side="left")
     compare_menu.pack(side="left", padx=(6, 0))
@@ -273,6 +283,11 @@ def _run_scale(root, percent, scaling):
                 comparison_remove_sideboard.winfo_reqwidth(),
             ) <= seven_layout["meta_width"]),
         "form field and picker heights": form_ok,
+        "activity cue is no taller than the Search/Add buttons beside it": (
+            activity_label.winfo_reqheight() <= primary.winfo_reqheight()),
+        "activity cue text is not clipped by its own request height": (
+            activity_label.winfo_reqheight() >= tkfont.Font(
+                root=root, font=FONT_ACTIVITY).metrics("linespace")),
         "every tested text label fits": all(result[0] for result in text_results),
         "undersized Compare width is expanded": (
             int(protected_compare.cget("width")) >= len("Compare")),
@@ -310,6 +325,8 @@ def _run_scale(root, percent, scaling):
             compare_add.winfo_width(), compare_menu.winfo_width(),
             compare_primary.winfo_width(), compare_clear.winfo_width()),
         "form": form_heights,
+        "activity_vs_primary": (
+            activity_label.winfo_reqheight(), primary.winfo_reqheight()),
         "content_row_width": content_row_width,
         "treeview_row": (row_linespace, row_height, row_headroom),
         "text": [detail for passed, detail in text_results if not passed],

@@ -385,6 +385,10 @@ def generate_criteria(harness, seed=1234, n=240):
         lambda c: c.update(name=rng.choice(("bear", "bolt", "a", "e", "of"))),
         lambda c: c.update(pips=pick(list(_COLORS), 1, 2),
                            pip_mode=rng.choice(("any", "all", "none"))),
+        # The Minimum box's own default (1) and the values the SQL clamps to it.
+        lambda c: c.update(pips=pick(list(_COLORS), 1, 2),
+                           pip_mode=rng.choice(("any", "all", "none")),
+                           pip_min=rng.choice((1.0, 0.0, 1.5))),
         lambda c: c.update(pips=pick(list(_COLORS), 1, 2), pip_min=2),  # fallback
         lambda c: c.update(set_types=pick(vocab["set_types"], 1, 2)),
         lambda c: c.update(set_codes=pick(vocab["sets"], 1, 2)),
@@ -398,8 +402,16 @@ def generate_criteria(harness, seed=1234, n=240):
     contents = [("card",), ("card", "token"), ("card", "token", "emblem", "art"),
                 ("token",), ("card",), ("card",)]
 
+    # The real UI carries pip_min=1.0 on every request (the Minimum box's
+    # default), so a share of the battery starts from it -- drawn from its own
+    # stream so the rest of the battery is unchanged.  Dimensions applied later
+    # may still override it (the pip_min=2 fallback case does).
+    ui_default_rng = random.Random(seed + 1)
+
     for _ in range(n):
         data = {"content_types": rng.choice(contents)}
+        if ui_default_rng.random() < 0.5:
+            data["pip_min"] = 1.0
         for mutate in rng.sample(dimensions, rng.randint(1, 4)):
             mutate(data)
         battery.append(SearchCriteria.from_mapping(data))

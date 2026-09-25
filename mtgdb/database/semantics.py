@@ -311,6 +311,20 @@ def _mana_cost_symbol_colors(mana_cost):
     return tuple(output)
 
 
+def pip_minimum_threshold(minimum):
+    """Total-symbol threshold implied by the Mana Symbols in Cost Minimum.
+
+    Empty, non-numeric, or below-one values all mean one -- colour presence alone
+    -- so the Minimum box's untouched default (``1``) is the same query as no
+    minimum at all.  Shared by the SQL matcher, the SQLite context worker and
+    the bitset index, so all three read Minimum identically.
+    """
+    try:
+        return max(1, int(float(minimum if minimum is not None else 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _mana_cost_symbol_match(mana_cost, selected, mode="all", minimum=1):
     """Match the interactive Mana Symbols in Cost semantics.
 
@@ -338,10 +352,7 @@ def _mana_cost_symbol_match(mana_cost, selected, mode="all", minimum=1):
     if normalized == "none":
         return int(not bool(wanted & represented))
 
-    try:
-        threshold = max(1, int(float(minimum if minimum is not None else 1)))
-    except (TypeError, ValueError):
-        threshold = 1
+    threshold = pip_minimum_threshold(minimum)
 
     qualifying_symbols = sum(1 for colors in symbols if colors & wanted)
     if normalized == "any":

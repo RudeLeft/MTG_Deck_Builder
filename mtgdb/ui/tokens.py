@@ -53,6 +53,10 @@ PALETTE = {
 STATUS_THRESHOLD_MS = 300
 STATUS_MIN_DWELL_MS = 2500
 STATUS_PULSE_MS = 550
+# The centered activity cue (ui.components.ActivityIndicator) is large and
+# prominent, so it lingers for a shorter minimum than the small inline lines: long
+# enough to read, short enough not to look like the app is still working.
+ACTIVITY_MIN_DWELL_MS = 1000
 
 MANA_NAMES = {
     "W": "White", "U": "Blue", "B": "Black", "R": "Red",
@@ -79,6 +83,9 @@ FONT_HELPER_BOLD = (FONT_FAMILY, 9, "bold")
 FONT_MICRO = (FONT_FAMILY, 8)
 FONT_MICRO_BOLD = (FONT_FAMILY, 8, "bold")
 FONT_PANE_TITLE = (FONT_FAMILY, 15, "bold")
+# Prominent "the app is busy" cue.  Sized to fit the Search/Add action row without
+# growing it (the row is as tall as its buttons), so showing it never reflows.
+FONT_ACTIVITY = (FONT_FAMILY, 14, "bold")
 FONT_DIALOG_TITLE = (FONT_FAMILY, 15, "bold")
 FONT_PROGRESS_TITLE = (FONT_FAMILY, 15, "bold")
 FONT_CONTROL_GLYPH = (FONT_FAMILY, 11, "bold")

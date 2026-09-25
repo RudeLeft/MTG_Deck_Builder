@@ -12,8 +12,10 @@ This M0 test asserts three invariants over the whole battery:
      agree for every criteria).
   2. Where the fast path is representable, its count equals count_search.
   3. Where the fast path is representable, its contextual counts equal the
-     SQLite worker field by field; where it is not (a pip-minimum filter), it
-     declines rather than guessing.
+     SQLite worker field by field; where it is not (a mana-symbol Minimum above
+     one), it declines rather than guessing.  The Minimum box's default of 1 is
+     plain colour presence and MUST be represented: the real UI sends it on every
+     request, and declining it silently routed every live request to SQLite.
 """
 
 from pathlib import Path
@@ -24,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import search_diff_harness as H
+from mtgdb.database.semantics import pip_minimum_threshold
 
 
 def main():
@@ -38,6 +41,7 @@ def main():
         representable_declines = True
         representable_seen = 0
         fallback_seen = 0
+        default_minimum_seen = 0
 
         for crit in battery:
             reference = H.reference_capture(harness, crit)
@@ -49,13 +53,16 @@ def main():
             fast = H.fast_capture(harness, crit)
             if fast is None:
                 fallback_seen += 1
-                # Only a pip-minimum filter should decline today.
-                if crit.pip_min is None:
+                # Only a Minimum above one may decline; the default of 1 is
+                # colour presence and must never fall back.
+                if pip_minimum_threshold(crit.pip_min) == 1:
                     representable_declines = False
-                    print("    unexpected fallback (no pip_min): %r" % (crit,))
+                    print("    unexpected fallback (Minimum is 1): %r" % (crit,))
                 continue
 
             representable_seen += 1
+            if crit.pip_min is not None:
+                default_minimum_seen += 1
             if fast["count"] != reference["count"]:
                 fast_count_matches = False
                 print("    fast count mismatch: %d != %d :: %r"
@@ -80,8 +87,10 @@ def main():
                 fast_ids_match,
             "fast-path context equals the SQLite worker where representable":
                 fast_context_matches,
-            "only pip-minimum criteria decline the fast path":
+            "only a pip Minimum above one declines the fast path":
                 representable_declines,
+            "the battery proves the Minimum default of 1 against SQLite": (
+                default_minimum_seen >= 40),
         }
 
         ok = True

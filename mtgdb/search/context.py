@@ -23,6 +23,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _mana_cost_symbol_match, _type_key, _type_line_search_parts,
+    pip_minimum_threshold,
 )
 from mtgdb.search.models import SearchCriteria
 
@@ -387,10 +388,7 @@ def _predict_pips(rows, selected, minimum, mode="all"):
     normalized = str(mode or "all").casefold()
     if normalized not in {"any", "all", "none"}:
         normalized = "all"
-    try:
-        threshold = max(1, int(float(minimum if minimum is not None else 1)))
-    except (TypeError, ValueError):
-        threshold = 1
+    threshold = pip_minimum_threshold(minimum)
     targets = {candidate: (selected | {candidate}) for candidate in _PIP_KEYS}
     result = {candidate: 0 for candidate in _PIP_KEYS}
     for row in rows:

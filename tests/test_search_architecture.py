@@ -230,18 +230,20 @@ class _FakeBoolVar:
 
 
 class _FakeStatus:
-    """Stand-in for ui.components.PulseStatus: start() paints the label at once."""
-    def __init__(self, label):
-        self._label = label
+    """Stand-in for a PulseStatus / ActivitySource: records what was asked of it."""
+    def __init__(self):
+        self.starts = []
+        self.stops = 0
+        self.cancels = 0
 
     def start(self, text):
-        self._label.configure(text=text)
+        self.starts.append(text)
 
     def stop(self):
-        pass
+        self.stops += 1
 
     def cancel(self):
-        pass
+        self.cancels += 1
 
 
 class _LoadingSearchOwner:
@@ -249,7 +251,9 @@ class _LoadingSearchOwner:
         self._search_catalog_loading = True
         self._pending_search_request = False
         self.results_count_lbl = _FakeLabel()
-        self._results_status = _FakeStatus(self.results_count_lbl)
+        self.results_count_lbl.text = "RESULTS | 0 CARDS"
+        self._results_status = _FakeStatus()
+        self._search_status = _FakeStatus()
         self.status = ""
 
     def _update_search_filter_summary(self):
@@ -384,6 +388,140 @@ def _progressive_delivery_check():
     small.start(SearchCriteria(content_types=("card",)))
     small_ok = [e.kind for e in drain(small)] == ["done"]
     return big_ok and small_ok
+
+
+def _activity_indicator_behaviour():
+    """Drive the real ActivityIndicator on a hidden Tk root with short timings.
+
+    The centered busy cue is shared by three independent activities, so what it
+    shows when they overlap, and that it never flashes or sticks, is behaviour to
+    execute rather than to grep for.  Returns one bool per behaviour.
+    """
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import ttk
+    from mtgdb.ui.components import ActivityIndicator
+    from mtgdb.ui.tokens import FONT_ACTIVITY
+
+    threshold, dwell, pulse = 40, 160, 50
+    root = tk.Tk()
+    root.withdraw()
+    # A ttk label rejects a style whose layout does not exist, which would end
+    # the pulse before it starts.
+    for style_name in ("A.TLabel", "B.TLabel"):
+        ttk.Style(root).configure(style_name, foreground="#ffffff")
+
+    def pump(ms):
+        end = time.perf_counter() + ms / 1000.0
+        while time.perf_counter() < end:
+            root.update()
+            time.sleep(0.004)
+
+    def make():
+        label = ttk.Label(root, text="")
+        indicator = ActivityIndicator(
+            label, working_styles=("A.TLabel", "B.TLabel"),
+            threshold_ms=threshold, dwell_ms=dwell, pulse_ms=pulse)
+        return (label, indicator, indicator.source("search", priority=3),
+                indicator.source("filters", priority=2),
+                indicator.source("context", priority=1))
+
+    def text(label):
+        return str(label.cget("text"))
+
+    try:
+        results = {}
+
+        label, _ind, _search, _filters, context = make()
+        starts_empty = text(label) == ""
+        context.start("Updating…")
+        pump(threshold // 4)
+        context.stop()
+        pump(threshold * 4)
+        results["work that finishes inside the threshold never flashes"] = (
+            starts_empty and text(label) == "")
+
+        label, _ind, _search, filters, _context = make()
+        filters.start("Loading filters…")
+        pump(threshold * 3)
+        shown_font = tkfont.Font(root=root, font=label.cget("font")).actual()
+        results["a cue that outlives the threshold appears at the activity size"] = (
+            text(label) == "Loading filters…"
+            and str(label.cget("style")) in ("A.TLabel", "B.TLabel")
+            and shown_font["size"] == FONT_ACTIVITY[1]
+            and shown_font["weight"] == FONT_ACTIVITY[2])
+
+        label, _ind, search, filters, context = make()
+        context.start("Updating…")
+        filters.start("Loading filters…")
+        pump(threshold * 3)
+        names = [text(label)]
+        search.start("Searching…")
+        names.append(text(label))
+        search.stop()
+        names.append(text(label))
+        filters.stop()
+        names.append(text(label))
+        results["overlapping activities name the highest priority, then fall back"] = (
+            names == ["Loading filters…", "Searching…", "Loading filters…",
+                      "Updating…"])
+
+        label, indicator, _s, _f, _c = make()
+        first = indicator.source("first", priority=1)
+        second = indicator.source("second", priority=1)
+        first.start("First")
+        second.start("Second")
+        pump(threshold * 3)
+        tie_names = [text(label)]
+        first.start("First again")
+        tie_names.append(text(label))
+        results["equal priorities show the most recently started"] = (
+            tie_names == ["Second", "First again"])
+
+        label, _ind, _search, _filters, context = make()
+        context.start("Updating…")
+        pump(threshold * 3)
+        context.stop()
+        still_up = text(label) == "Updating…"
+        pump(dwell * 3)
+        results["a shown cue keeps its minimum dwell, then clears"] = (
+            still_up and text(label) == "")
+
+        label, _ind, _search, _filters, context = make()
+        context.start("Updating…")
+        pump(threshold * 3)
+        context.stop()
+        context.start("Updating…")
+        pump(dwell * 3)
+        results["restarting during the dwell keeps the cue up"] = (
+            text(label) == "Updating…")
+
+        label, _ind, _search, _filters, context = make()
+        context.start("Updating…")
+        pump(threshold * 3)
+        context.cancel()
+        cleared_at_once = text(label) == ""
+        pump(dwell * 2)
+        results["cancel clears a shown cue at once, without the dwell"] = (
+            cleared_at_once and text(label) == "")
+
+        label, _ind, _search, _filters, context = make()
+        context.start("Updating…")
+        context.cancel()
+        pump(threshold * 4)
+        results["cancel before the threshold means it never appears"] = (
+            text(label) == "")
+
+        label, _ind, _search, filters, context = make()
+        context.start("Updating…")
+        filters.start("Loading filters…")
+        pump(threshold * 3)
+        filters.cancel()
+        results["cancelling one activity falls back to the next"] = (
+            text(label) == "Updating…")
+        return results
+    finally:
+        root.destroy()
 
 
 def main():
@@ -1165,30 +1303,213 @@ def main():
     components_source = (ROOT / "mtgdb/ui/components.py").read_text(encoding="utf-8")
     styles_source = (ROOT / "mtgdb/ui/styles.py").read_text(encoding="utf-8")
     tokens_source = (ROOT / "mtgdb/ui/tokens.py").read_text(encoding="utf-8")
+
+    activity_behaviour = _activity_indicator_behaviour()
+
+    # The owner-side wiring of the centered cue, driven through the real methods
+    # on minimal duck-typed owners.
+    class _ContextEndOwner:
+        def __init__(self):
+            self.events = []
+            events = self.events
+            self._context_status = type(
+                "Status", (), {"stop": lambda _self: events.append("stop")})()
+
+        def _render_context_notice(self):
+            self.events.append("render")
+
+    context_end_owner = _ContextEndOwner()
+    SearchFeatureMixin._end_context_update(context_end_owner)
+    context_end_events = context_end_owner.events
+
+    class _FiltersOwner:
+        def __init__(self):
+            self._filters_status = _FakeStatus()
+
+    filters_end_owner = _FiltersOwner()
+    SearchFeatureMixin._end_filters_loading(filters_end_owner)
+    filters_cancel_owner = _FiltersOwner()
+    SearchFeatureMixin._end_filters_loading(filters_cancel_owner, cancel=True)
+    try:
+        # Before the Search pane has built its cue there is nothing to lower.
+        SearchFeatureMixin._end_filters_loading(object())
+        filters_missing_ok = True
+    except AttributeError:
+        filters_missing_ok = False
+
+    class _InvalidateOwner:
+        def __init__(self, *, running):
+            self.search_controller = type(
+                "Controller", (), {"running": running,
+                                   "invalidate": lambda _self: None})()
+            self._search_btn = type("Button", (), {"state": lambda _s, _v: None})()
+            self._active_search_signature = "old"
+            self._search_status = _FakeStatus()
+
+    invalidate_running_owner = _InvalidateOwner(running=True)
+    SearchFeatureMixin._invalidate_search_cache(invalidate_running_owner)
+    invalidate_idle_owner = _InvalidateOwner(running=False)
+    SearchFeatureMixin._invalidate_search_cache(invalidate_idle_owner)
+
+    class _ResultCountOwner:
+        def __init__(self):
+            self._results_status = _FakeStatus()
+            self._search_status = _FakeStatus()
+
+    result_count_owner = _ResultCountOwner()
+    SearchResultsMixin._set_result_count(result_count_owner)
+
+    class _BareResultCountOwner:
+        renders = 0
+
+        def _render_results_count(self):
+            self.renders += 1
+
+    bare_count_owner = _BareResultCountOwner()
+    SearchResultsMixin._set_result_count(bare_count_owner)
+
+    # Staged startup warm-ups: the facet index only after the trusted catalogs
+    # have landed, the other-scope catalogs only after the first live count.
+    class _WarmupOwner:
+        def __init__(self, *, with_controller=True):
+            self._search_warmup_stage = 0
+            self.events = []
+            events = self.events
+            if with_controller:
+                self.search_context_controller = type(
+                    "Controller", (),
+                    {"warm_facet_index": lambda _s: events.append("index")})()
+
+        def _warm_common_search_catalogs(self):
+            self.events.append("catalogs")
+
+    warmup_owner = _WarmupOwner()
+    warmup_trace = []
+    for landed in ("context", "catalogs", "catalogs", "context", "context",
+                   "catalogs"):
+        SearchFeatureMixin._advance_search_warmups(warmup_owner, landed)
+        warmup_trace.append(list(warmup_owner.events))
+    controllerless_owner = _WarmupOwner(with_controller=False)
+    SearchFeatureMixin._advance_search_warmups(controllerless_owner, "catalogs")
+    startup_body = _method_body(
+        (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8"),
+        "_start_post_paint_initialization")
+
     checks = {
         "catalog loads off-lock give identical results and warming caches": (
             _catalog_reader_and_warm_check()),
         "inline working status is standardized through PulseStatus": (
-            # One reusable threshold + minimum-dwell + gold-pulse controller, used
-            # for both live-context "Updating…" and the RESULTS header states, so
-            # no status flashes for a frame or reads as the error red.
+            # One reusable threshold + minimum-dwell + gold-pulse controller.  The
+            # RESULTS header uses it directly for its own table-view recompute;
+            # the centered activity cue wraps it (below), so no status flashes for
+            # a frame or reads as the error red.
             "class PulseStatus" in components_source
             and "def start(self" in components_source
-            and "self._context_status = PulseStatus(" in search_source
             and "self._results_status = PulseStatus(" in search_source
-            and 'working_styles=("MutedWorking.TLabel", "MutedWorkingDim.TLabel")'
-                in search_source
             and 'working_styles=("SectionWorking.TLabel", "SectionWorkingDim.TLabel")'
                 in search_source
-            and 'status.start("Updating…")' in search_source
-            and 'self._results_status.start("RESULTS | Searching…")' in search_source
             and all(name in styles_source for name in (
                 "SectionWorking.TLabel", "SectionWorkingDim.TLabel",
-                "MutedWorking.TLabel", "MutedWorkingDim.TLabel"))
+                "ActivityWorking.TLabel", "ActivityWorkingDim.TLabel"))
             and all(name in tokens_source for name in (
-                "STATUS_THRESHOLD_MS", "STATUS_MIN_DWELL_MS", "STATUS_PULSE_MS"))
+                "STATUS_THRESHOLD_MS", "STATUS_MIN_DWELL_MS", "STATUS_PULSE_MS",
+                "ACTIVITY_MIN_DWELL_MS", "FONT_ACTIVITY"))
             # Gold, never the red reserved for errors/unavailable.
             and '"working": "#E4C36A"' in tokens_source),
+        "one large centered activity cue is shared by three prioritized sources": (
+            "class ActivityIndicator" in components_source
+            and "class ActivitySource" in components_source
+            and "self._pulse = PulseStatus(" in components_source
+            and "label.configure(font=FONT_ACTIVITY)" in components_source
+            and "self._activity = ActivityIndicator(" in search_source
+            and 'working_styles=("ActivityWorking.TLabel", "ActivityWorkingDim.TLabel")'
+                in search_source
+            and 'self._search_status = self._activity.source("search", priority=3)'
+                in search_source
+            and 'self._filters_status = self._activity.source("filters", priority=2)'
+                in search_source
+            and 'self._context_status = self._activity.source("context", priority=1)'
+                in search_source
+            # Nothing else may still own a second, competing copy of the cue.
+            and "self._context_status = PulseStatus(" not in search_source),
+        "activity cue sits between the Search and deck-add groups and yields first": (
+            _method_body(search_source, "_build_search_actions").index(
+                'deck_actions.pack(side="right")')
+            < _method_body(search_source, "_build_search_actions").index(
+                'search_actions.pack(side="left")')
+            < _method_body(search_source, "_build_search_actions").index(
+                "self._activity_label.pack(")
+            # Packed last with expand so it takes only leftover space, and a
+            # constant one-character request so showing text cannot resize the row.
+            and 'text="", width=1, anchor="center"'
+                in _method_body(search_source, "_build_search_actions")
+            and 'side="left", fill="x", expand=True'
+                in _method_body(search_source, "_build_search_actions")),
+        "trusted-filter loading raises the cue and every exit path lowers it": (
+            'status.start("Loading filters…")' in _method_body(
+                search_source, "_mark_search_catalogs_loading")
+            and "self._end_filters_loading()" in _method_body(
+                search_source, "_apply_search_catalog_snapshot")
+            and "self._end_filters_loading(cancel=True)" in _method_body(
+                search_source, "_poll_search_catalogs")),
+        "Search and live-context work use the centered cue, not the header or notice": (
+            'self._search_status.start("Searching…")' in _method_body(
+                search_source, "_do_search")
+            and 'self._search_status.start("Searching…")' in _method_body(
+                search_source, "_poll_search_events")
+            and 'status.start("Updating…")' in _method_body(
+                search_source, "_schedule_live_search_context")
+            and "RESULTS | Searching…" not in search_source
+            and "Trusted filters are loading…" not in search_source
+            and "_show_context_notice_working" not in search_source
+            and "MutedWorking" not in search_source + styles_source),
+        "the cue no longer hides while trusted filters load": (
+            # This early return used to stop the "Updating…" cue during startup,
+            # the one window where the filters are disabled and the app most
+            # needs to look busy.
+            "self._end_context_update()" in _method_body(
+                search_source, "_prepare_live_search_context")
+            and "status.stop()" not in _method_body(
+                search_source, "_prepare_live_search_context")),
+        "abandoned or failed Search lowers the cue": (
+            "search_status.cancel()" in _method_body(
+                search_source, "_invalidate_search_cache")
+            and "self._search_status.cancel()" in _method_body(
+                search_source, "_poll_search_events")
+            and "search_status.stop()" in _method_body(
+                (ROOT / "mtgdb/ui/results.py").read_text(encoding="utf-8"),
+                "_set_result_count")),
+        **activity_behaviour,
+        "startup warm-ups run in order: filters, then the index, then other scopes": (
+            # Before the first catalog lands nothing starts; then only the index;
+            # only after the first live count do the other-scope catalogs load;
+            # and each stage runs once.
+            warmup_trace == [
+                [], ["index"], ["index"], ["index", "catalogs"],
+                ["index", "catalogs"], ["index", "catalogs"]]
+            and warmup_owner._search_warmup_stage == 2
+            and controllerless_owner._search_warmup_stage == 1),
+        "startup no longer launches the CPU-bound warm-ups beside the catalog load": (
+            "warm_facet_index" not in startup_body
+            and "_warm_common_search_catalogs" not in startup_body
+            and "self._refresh_search_catalogs()" in startup_body
+            and "self._search_warmup_stage = 0" in (
+                ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
+            and 'self._advance_search_warmups("catalogs")' in _method_body(
+                search_source, "_apply_search_catalog_snapshot")
+            and 'self._advance_search_warmups("context")' in _method_body(
+                search_source, "_poll_search_context")),
+        "context recompute ends by painting the notice before lowering the cue": (
+            context_end_events == ["render", "stop"]
+            and filters_end_owner._filters_status.stops == 1
+            and filters_end_owner._filters_status.cancels == 0
+            and filters_cancel_owner._filters_status.cancels == 1
+            and filters_missing_ok
+            and invalidate_running_owner._search_status.cancels == 1
+            and invalidate_idle_owner._search_status.cancels == 0
+            and result_count_owner._results_status.stops == 1
+            and result_count_owner._search_status.stops == 1
+            and bare_count_owner.renders == 1),
         "Clear coalesces catalog refresh and skips it when scope is unchanged": (
             # Clearing filters must not rebuild the trusted catalog (and its
             # chips) when the scope did not change -- that redundant rebuild was
@@ -1839,7 +2160,12 @@ def main():
             and 'self._clear_table_filter("results")' in search_source),
         "Search requested during trusted-filter loading is queued and resumes": (
             loading_owner._pending_search_request
-            and loading_owner.results_count_lbl.text == "RESULTS | Trusted filters are loading…"
+            # The centered "Loading filters…" cue already names the wait: the
+            # queued click neither rewrites the RESULTS header nor fabricates a
+            # "Searching…" cue for a query that has not started.
+            and loading_owner.results_count_lbl.text == "RESULTS | 0 CARDS"
+            and not loading_owner._results_status.starts
+            and not loading_owner._search_status.starts
             and "automatically" in loading_owner.status
             and resumed and ready_owner.calls == 1
             and ready_owner.count_restores == 1

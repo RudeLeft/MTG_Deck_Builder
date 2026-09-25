@@ -30,6 +30,7 @@ from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _normalize_rules_text, _type_line_search_parts,
     mana_cost_has_hybrid_symbol, mana_cost_has_phyrexian_symbol,
+    pip_minimum_threshold,
 )
 from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
@@ -341,13 +342,21 @@ class FacetIndex:
         Free-text name/rules search is represented by scanning the stored name /
         oracle corpora once per query into a bitset (see ``_free_text_bitset``),
         so it no longer forces the SQLite fallback.  Only a mana-symbol *minimum*
-        count (its hybrid-counts-once rule is per-query) still falls back;
+        above one (its hybrid-counts-once rule is per-query) still falls back;
         everything else -- format legality, numeric ranges, mana-symbol color
-        presence (the default, no-minimum pip filter) -- is represented.
+        presence -- is represented.
+
+        The Minimum box always holds a value: its untouched default is ``1``,
+        which the SQL builder and the worker both read as plain colour presence
+        (see ``pip_minimum_threshold``).  Treating any non-None value as an
+        explicit minimum sent every request the real UI ever made down the slow
+        SQLite path, so the index was built and never used.
         """
-        if q.pip_min is not None:
+        try:
+            return pip_minimum_threshold(q.pip_min) == 1
+        except OverflowError:
+            # An infinite Minimum has no threshold; the SQLite path owns that.
             return False
-        return True
 
     def _fragments(self, q):
         """Per-facet clause bitsets, or None if not bitset-representable.

@@ -114,6 +114,8 @@ class DeckBuilderApp(
         self._search_poll_after = None
         self._search_catalog_poll_after = None
         self._search_catalog_loading = False
+        # Which background warm-up has been started (see _advance_search_warmups).
+        self._search_warmup_stage = 0
         self._search_catalog_scope = None
         self._pending_catalog_filter_state = None
         self._pending_search_request = False
@@ -525,13 +527,13 @@ class DeckBuilderApp(
     # ======================================================================
     def _start_post_paint_initialization(self):
         self._refresh_search_catalogs()
-        # Pre-load the other content/platform scopes in the background so the
-        # first switch to Tokens/Emblems/Art (or paper-only) is instant.
-        self._warm_common_search_catalogs()
         self._restore_workspace_session_async()
-        # Build the bitset facet index in the background now, so the first live
-        # filter pick is instant instead of paying the one-time build cost.
-        self.search_context_controller.warm_facet_index()
+        # The facet-index build and the other-scope catalog warm-ups are NOT
+        # started here.  They are CPU-bound Python that shares the interpreter
+        # lock with the trusted-catalog load the filters are waiting on, and
+        # launching them all at once stretched that load from ~2 s to ~5 s.
+        # SearchFeatureMixin._advance_search_warmups starts them, in order, as
+        # each earlier stage lands.
         # Ask GitHub whether a newer release exists; a banner appears only if so.
         self._start_update_check()
 

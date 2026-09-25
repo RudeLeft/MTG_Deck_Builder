@@ -10,7 +10,9 @@ from mtgdb.core.format_names import (
     FORMAT_WORD_LABELS, format_display_name)
 
 from mtgdb.ui.tokens import (
+    ACTIVITY_MIN_DWELL_MS,
     CLASSIC_ENTRY_IPADY,
+    FONT_ACTIVITY,
     FONT_BODY,
     FONT_BODY_BOLD,
     FONT_CONTROL_GLYPH,
@@ -163,6 +165,108 @@ class PulseStatus:
         for name in ("_appear_after", "_pulse_after", "_hide_after"):
             self._cancel(getattr(self, name))
             setattr(self, name, None)
+
+
+class ActivitySource:
+    """One named reason the app is busy, feeding a shared ActivityIndicator.
+
+    Mirrors the ``start(text)`` / ``stop()`` / ``cancel()`` surface of
+    PulseStatus so an owner can drive it exactly the same way.
+    """
+
+    def __init__(self, indicator, name, priority):
+        self._indicator = indicator
+        self.name = name
+        self.priority = int(priority)
+        self.text = ""
+        self.active = False
+        self.order = 0
+
+    def start(self, text):
+        self._indicator._start(self, text)
+
+    def stop(self):
+        self._indicator._stop(self)
+
+    def cancel(self):
+        self._indicator._cancel_source(self)
+
+
+class ActivityIndicator:
+    """The single large busy cue several independent activities share.
+
+    Loading trusted filters, recomputing the live filter context and running a
+    Search can overlap, but the user only needs one clear answer to "is the app
+    working, and on what?".  Each activity registers as an ``ActivitySource``; the
+    label shows the highest-priority active source's text (the most recently
+    started wins a tie) through one PulseStatus, so it keeps the shared
+    threshold, minimum dwell and gold pulse.  With nothing active the label is
+    empty.
+    """
+
+    def __init__(self, label, *, working_styles, threshold_ms=STATUS_THRESHOLD_MS,
+                 dwell_ms=ACTIVITY_MIN_DWELL_MS, pulse_ms=STATUS_PULSE_MS,
+                 clock=None):
+        self._label = label
+        # The app-wide "*Font" option gives every ttk label FONT_BODY at widget
+        # level, which beats the font declared on a style -- so the cue's size is
+        # set on the label itself (the styles still carry the gold pulse colours).
+        label.configure(font=FONT_ACTIVITY)
+        self._sources = []
+        self._sequence = 0
+        self._pulse = PulseStatus(
+            label, set_working=self._paint, restore_idle=self._clear,
+            working_styles=working_styles, threshold_ms=threshold_ms,
+            dwell_ms=dwell_ms, pulse_ms=pulse_ms, clock=clock)
+
+    def source(self, name, *, priority):
+        """Register a new activity; higher ``priority`` is shown in preference."""
+        source = ActivitySource(self, name, priority)
+        self._sources.append(source)
+        return source
+
+    def _top(self):
+        active = [source for source in self._sources if source.active]
+        if not active:
+            return None
+        return max(active, key=lambda source: (source.priority, source.order))
+
+    def _sync(self):
+        top = self._top()
+        if top is None:
+            self._pulse.stop()
+        else:
+            self._pulse.start(top.text)
+
+    def _start(self, source, text):
+        self._sequence += 1
+        source.text = str(text)
+        source.active = True
+        source.order = self._sequence
+        self._sync()
+
+    def _stop(self, source):
+        source.active = False
+        self._sync()
+
+    def _cancel_source(self, source):
+        source.active = False
+        if self._top() is None:
+            # Nothing else is busy: drop the cue at once, skipping the dwell,
+            # because whoever cancelled is about to paint its own final state.
+            self._pulse.cancel()
+            self._clear()
+        else:
+            self._sync()
+
+    def _paint(self, text):
+        self._label.configure(text=text)
+
+    def _clear(self):
+        try:
+            self._label.configure(text="")
+        except tk.TclError:
+            pass
 
 
 def deck_board_label(board):

@@ -12,7 +12,7 @@ from mtgdb.database.schema import _CARD_COLUMN_NAMES
 from mtgdb.database.semantics import (
     COLOR_BITS, TRAIT_COLOR_INDICATOR, TRAIT_HAS_X_COST, TRAIT_HYBRID_MANA,
     TRAIT_PHYREXIAN_MANA, TRAIT_TOP_HEAVY, TRAIT_VARIABLE_STATS,
-    _escape_like, _normalize_rules_text, _type_key)
+    _escape_like, _normalize_rules_text, _type_key, pip_minimum_threshold)
 
 
 class SearchQueryBuilder:
@@ -385,11 +385,7 @@ class SearchQueryBuilder:
         normalized = str(pip_mode or "all").casefold()
         if normalized not in {"any", "all", "none"}:
             normalized = "all"
-        try:
-            minimum = int(pip_min) if pip_min is not None else 1
-        except (TypeError, ValueError):
-            minimum = 1
-        minimum = max(1, minimum)
+        minimum = pip_minimum_threshold(pip_min)
 
         presence = [f"pips_{color.casefold()} > 0" for color in selected]
         if normalized == "all":

@@ -234,7 +234,7 @@ only in the module that owns X.
 | `mtgdb/ui/tokens.py` | Palette, typography, spacing, control metrics, comparison metrics, icon sizes |
 | `mtgdb/ui/styles.py` | Global ttk theme registration and ttk state appearance |
 | `mtgdb/ui/assets.py` | Bundled-asset path resolution (source and frozen) and shared PIL availability |
-| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, the Search-filter tooltip primitive, shared display vocabulary such as the Mainboard/Sideboard board label and format display names |
+| `mtgdb/ui/components.py` | Reusable behavior-neutral controls, classic Tk wrappers, token fields, the Search-filter tooltip primitive, the shared busy-status controllers (`PulseStatus`, `ActivityIndicator`), shared display vocabulary such as the Mainboard/Sideboard board label and format display names |
 | `mtgdb/ui/autocomplete.py` | Hidden-first autocomplete-popup lifecycle/navigation plus the current `AutocompleteEntry` control |
 | `mtgdb/ui/tables.py` | Shared table schema, headings, column visibility/menus/reordering, monitor-clamped column-popup placement, and delegation to Tk-free value/sort semantics |
 | `mtgdb/ui/card_detail.py` | Main card-preview layout/actions, manual rotation, modeless zoom viewer, virtualized Results Gallery image presentation, compact legality popup/text fallback via the deck-legality normalization API, selection generations, latest-preview request channel, Tk-side polling/deferred image completion |
@@ -773,8 +773,51 @@ every feature together and is exempt.
   that one intent MUST remain queued until the query also reaches a terminal event.
   Repeated clicks MUST NOT queue duplicate searches, Search Clear MUST cancel that
   pending intent, and taxonomy failure MUST leave the Results header in a stable
-  non-loading state rather than stranded on `Trusted filters are loading…`.
+  non-loading state and lower the `Loading filters…` activity cue (SRCH-047)
+  rather than leave either stranded. Queuing the intent MUST NOT rewrite the
+  Results header: the activity cue already names the wait. _Verification:_ **AUTO**.
+- **SRCH-047 — MUST:** Announce every wait the user can feel through one large
+  centered activity cue, not through small inline text. The cue is the
+  `ui/components.py` `ActivityIndicator`: a single label packed last, expanding, in
+  the Search action row between the Search/Clear group and the Add
+  Mainboard/Add Sideboard group (LAY-003), empty and so zero-footprint when idle.
+  It MUST use the shared `FONT_ACTIVITY` role in the gold `working`/`working_dim`
+  pulse (never the error red), MUST request a constant one-character width so
+  showing text never resizes the row or pane, MUST be no taller than the buttons
+  beside it at every supported display scale, and MUST yield to those buttons on a
+  narrow pane. The app-wide `*Font` option gives every ttk label `FONT_BODY` at
+  widget level, which beats a style's font, so the cue's size is set on the label
+  itself. By priority it MUST show `Searching…` (a running Search), then
+  `Loading filters…` (a trusted-catalog request in flight: raised when it starts,
+  lowered when its snapshot is applied or it fails, and so covering the startup
+  window in which the filters are disabled), then `Updating…` (a live context
+  recompute); equal priorities show the most recently started. Every source MUST
+  go through the shared threshold (`STATUS_THRESHOLD_MS`, so instant work never
+  flashes) and `ACTIVITY_MIN_DWELL_MS` minimum dwell, and `cancel()` MUST clear the
+  cue at once. Trusted-filter loading MUST NOT suppress the cue. The
+  `Current filters match N cards…` line stays under the Results header and carries
+  only its idle text, painted the moment a snapshot lands rather than waiting
+  behind the cue; the Results header keeps its count while a Search runs.
   _Verification:_ **AUTO**.
+- **SRCH-048 — MUST:** Read the Mana Symbols in Cost Minimum through the one
+  shared `database/semantics.pip_minimum_threshold`, in the SQL builder, the SQLite
+  context worker, and the bitset index alike. The Minimum box always holds a value
+  and its untouched default of `1` is plain colour presence, so the bitset index
+  MUST represent it; only a Minimum that resolves above one MAY decline to the
+  SQLite worker. Treating any non-empty Minimum as explicit sent every request the
+  real UI ever made down the slow SQLite path (1.5–4 s per filter click) while the
+  index was built and never used. The differential battery MUST carry the default
+  Minimum, and a spy on the SQLite count MUST show the UI's default criteria being
+  served by the index. _Verification:_ **AUTO**.
+- **SRCH-049 — MUST:** Start background work in the order the user is waiting on it.
+  `_start_post_paint_initialization` MUST start only the trusted-catalog request,
+  workspace restore, and the update check. The facet-index warm-up starts when the
+  first trusted-catalog snapshot is applied, and the other-scope catalog warm-ups
+  when the first live context snapshot is applied (`_advance_search_warmups`, each
+  stage once); after a database sync the index is rebuilt by `database_sync`. These
+  stages are CPU-bound Python sharing one interpreter lock, so launching them beside
+  the catalog load stretched that load from about two seconds to five and kept the
+  filters disabled for all of it. _Verification:_ **AUTO**.
 
 ## Database internals architecture
 
@@ -1630,7 +1673,8 @@ every feature together and is exempt.
   during a presentation-only task without user approval. _Verification:_ **USER**.
 - **LAY-003 — MUST:** Keep Search/Clear and Add Mainboard/Add Sideboard on the
   established Search action row, reserving the right-side deck-add group before the
-  left Search/Clear group. Comparison controls MUST NOT live on this row.
+  left Search/Clear group. The SRCH-047 activity cue MUST be packed after both,
+  filling the space between them. Comparison controls MUST NOT live on this row.
   _Verification:_ **AUTO**.
 - **LAY-004 — MUST:** Place one dedicated default dark `surface` comparison bar, with no gold
   outline/box, in the deck workspace below deck name/Format and above

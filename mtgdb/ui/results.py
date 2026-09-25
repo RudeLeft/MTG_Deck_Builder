@@ -234,6 +234,11 @@ class SearchResultsMixin:
             status.stop()
         else:
             self._render_results_count()
+        # ...and the centered "Searching…" cue ends with it: the results this
+        # Search was producing are now on screen.
+        search_status = getattr(self, "_search_status", None)
+        if search_status is not None:
+            search_status.stop()
 
     def _result_gallery_count(self):
         return self._result_store.visible_count

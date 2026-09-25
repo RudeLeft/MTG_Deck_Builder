@@ -140,6 +140,28 @@ def main():
             pips=("W", "U"), pip_mode="all"),
         "pips_none_g": SearchCriteria(content_types=("card",),
             pips=("G",), pip_mode="none"),
+        # The Mana Symbols Minimum box always carries a value, and its untouched
+        # default of 1 is the same query as no minimum.  The real UI sends
+        # pip_min=1.0 on EVERY request, so these must be represented and agree
+        # with count_search and the worker exactly.
+        "pips_any_wu_min1": SearchCriteria(content_types=("card",),
+            pips=("W", "U"), pip_mode="any", pip_min=1.0),
+        "pips_all_wu_min1": SearchCriteria(content_types=("card",),
+            pips=("W", "U"), pip_mode="all", pip_min=1.0),
+        "pips_none_g_min1": SearchCriteria(content_types=("card",),
+            pips=("G",), pip_mode="none", pip_min=1.0),
+        "pips_min_zero": SearchCriteria(content_types=("card",),
+            pips=("W",), pip_mode="all", pip_min=0.0),
+        "pips_min_fraction": SearchCriteria(content_types=("card",),
+            pips=("W", "U"), pip_mode="all", pip_min=1.5),
+        "min1_no_pips": SearchCriteria(content_types=("card",), pip_min=1.0),
+        "ui_defaults": SearchCriteria(
+            content_types=("card",), pip_min=1.0, lang="en", paper_only=False,
+            games=("paper", "arena", "mtgo")),
+        "ui_defaults_plus_filters": SearchCriteria(
+            content_types=("card",), pip_min=1.0, lang="en", paper_only=False,
+            games=("paper", "arena", "mtgo"), card_types=("Creature",),
+            colors=("G",), color_mode="within"),
         # Free-text name/rules search is now bitset-representable (scanned per
         # query), so every text draft must match count_search and the worker
         # exactly rather than falling back.
@@ -218,14 +240,51 @@ def main():
     checks["subtype match is whitespace-bounded (Urza != Urza's Saga)"] = (
         urza_partial == 0 and saga_full == 1 and saga_word == 1)
 
-    # 5. Only an explicit mana-symbol minimum still declines (its hybrid
+    # 5. Only a mana-symbol minimum ABOVE ONE still declines (its hybrid
     #    counts-once rule is per-query) so the caller keeps the SQLite worker;
-    #    free text, format, numeric ranges, and default mana-symbol presence are
-    #    all represented.
-    checks["pip-minimum criteria fall back (None)"] = all(
+    #    free text, format, numeric ranges, and mana-symbol presence -- including
+    #    the Minimum box's default of 1 -- are all represented.  The worker
+    #    predicts colour counts with the threshold even when no colour is chosen
+    #    yet, so a Minimum above one declines with or without a selection.
+    checks["a pip Minimum above one falls back (None)"] = all(
         index.filter_bitset(c) is None and index.context_counts(c, vocab) is None
         for c in (
-            SearchCriteria(content_types=("card",), pips=("G",), pip_min=2),))
+            SearchCriteria(content_types=("card",), pips=("G",), pip_min=2),
+            SearchCriteria(content_types=("card",), pip_min=2),
+            SearchCriteria(content_types=("card",), pips=("W", "U"), pip_min=3.5),
+            SearchCriteria(content_types=("card",), pips=("G",),
+                           pip_min=float("inf"))))
+    checks["the Minimum box's default of 1 is represented, so the UI never falls back"] = all(
+        index.filter_bitset(drafts[name]) is not None
+        and index.context_counts(drafts[name], vocab) is not None
+        for name in (
+            "pips_any_wu_min1", "pips_all_wu_min1", "pips_none_g_min1",
+            "pips_min_zero", "pips_min_fraction", "min1_no_pips",
+            "ui_defaults", "ui_defaults_plus_filters"))
+
+    # The controller must actually take that path: an index that is built but
+    # bypassed answers nothing.  The SQLite fallback is the only route that
+    # calls repository.count, so a spy on it shows which path served the request.
+    count_calls = []
+    real_count = repo.count
+    repo.count = lambda *a, **k: (count_calls.append(1), real_count(*a, **k))[1]
+    try:
+        ctrl._facet_index = index
+        ctrl._facet_index_disabled = False
+        ctrl._generation += 1
+        ui_default_snapshot = ctrl._prepare(
+            ctrl._generation, drafts["ui_defaults"], vocab)
+        ctrl._generation += 1
+        pip_two_snapshot = ctrl._prepare(
+            ctrl._generation,
+            SearchCriteria(content_types=("card",), pip_min=2), vocab)
+    finally:
+        repo.count = real_count
+        ctrl._facet_index = None
+        ctrl._facet_index_disabled = True
+    checks["UI-default criteria are served by the index; a Minimum of 2 by SQLite"] = (
+        ui_default_snapshot is not None and pip_two_snapshot is not None
+        and len(count_calls) == 1)
     checks["text, format, numeric, and pip presence are represented (no fallback)"] = all(
         index.filter_bitset(c) is not None and index.context_counts(c, vocab) is not None
         for c in (
@@ -250,10 +309,10 @@ def main():
         warm_ctrl._facet_index is not None)
     warm_ctrl.shutdown()
 
-    app_src = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
+    search_src = (ROOT / "mtgdb/ui/search.py").read_text(encoding="utf-8")
     sync_src = (ROOT / "mtgdb/ui/database_sync.py").read_text(encoding="utf-8")
-    checks["warm-up is wired at startup and after a database sync"] = (
-        "search_context_controller.warm_facet_index()" in app_src
+    checks["warm-up is wired after the first catalog load and after a database sync"] = (
+        "controller.warm_facet_index()" in search_src
         and "search_context_controller.warm_facet_index()" in sync_src)
 
     ok = True

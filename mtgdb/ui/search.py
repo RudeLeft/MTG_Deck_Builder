@@ -12,7 +12,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
-    AppButton, AppCombobox, AppSpinbox, ClassicCheckbutton,
+    ActivityIndicator, AppButton, AppCombobox, AppSpinbox, ClassicCheckbutton,
     PulseStatus, TokenBubbleEntry, format_display_name,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
@@ -1945,6 +1945,26 @@ class SearchFeatureMixin:
             command=self._clear_search)
         clear_btn.pack(side="left", padx=(4, 0))
 
+        # The activity cue fills whatever is left between the two button groups
+        # and is packed last, so on a narrow pane it is the first thing to yield
+        # -- never the buttons.  ``width=1`` keeps its requested size constant
+        # whether it is empty or showing text, so a busy cue can never resize the
+        # row or the pane; the text is centred in the space the packer gives it.
+        self._activity_label = ttk.Label(
+            btns, text="", width=1, anchor="center",
+            style="ActivityWorking.TLabel")
+        self._activity_label.pack(side="left", fill="x", expand=True, padx=(10, 10))
+        # One prominent "the app is busy" cue for every activity the user is
+        # waiting on.  Priority decides which is named when several overlap:
+        # a Search the user asked for, then trusted-filter loading, then the
+        # live filter-context recompute.
+        self._activity = ActivityIndicator(
+            self._activity_label,
+            working_styles=("ActivityWorking.TLabel", "ActivityWorkingDim.TLabel"))
+        self._search_status = self._activity.source("search", priority=3)
+        self._filters_status = self._activity.source("filters", priority=2)
+        self._context_status = self._activity.source("context", priority=1)
+
 
     def _build_results_table(self, parent):
         # Results are the main purpose of this pane, so they receive all of the
@@ -1954,8 +1974,9 @@ class SearchFeatureMixin:
         self.results_count_lbl = ttk.Label(
             result_head, text="RESULTS | 0 CARDS", style="Section.TLabel")
         self.results_count_lbl.pack(side="left")
-        # Standardized working cue for the RESULTS header (Updating…/Searching…/
-        # trusted-filter load): threshold-gated so a fast search never flashes.
+        # Working cue for the RESULTS header's own table-view recompute (sorting
+        # or filtering the loaded rows): threshold-gated so it never flashes.
+        # Search / filter-load / context activity uses the centered indicator.
         self._results_status = PulseStatus(
             self.results_count_lbl,
             set_working=lambda text: self.results_count_lbl.configure(text=text),
@@ -1974,14 +1995,6 @@ class SearchFeatureMixin:
             parent, text="", style="Muted.TLabel", justify="left", wraplength=620)
         self._search_context_notice.pack(fill="x", pady=(0, 3))
         self._search_context_notice.pack_forget()
-        # Standardized "Updating…" cue for the live contextual recompute: it only
-        # appears when the recompute actually runs long (the worker fallback),
-        # never for the ~1 ms bitset path, and then stays readable.
-        self._context_status = PulseStatus(
-            self._search_context_notice,
-            set_working=self._show_context_notice_working,
-            restore_idle=self._render_context_notice,
-            working_styles=("MutedWorking.TLabel", "MutedWorkingDim.TLabel"))
 
         table = ttk.Frame(parent)
         self._results_table_frame = table
@@ -2489,13 +2502,21 @@ class SearchFeatureMixin:
         if printings is not None and hasattr(printings, "apply_context_snapshot"):
             printings.apply_context_snapshot(snapshot)
 
-        # The context notice is rendered through the "Updating…" status: if that
-        # cue was showing it stays up for its minimum dwell, then this snapshot's
-        # summary replaces it; otherwise the summary shows at once.
-        self._context_status.stop()
+        self._end_context_update()
+
+    def _end_context_update(self):
+        """Finish one live-context recompute: paint the notice, end the cue.
+
+        The match-count line is painted at once -- it never waits behind the
+        centered "Updating…" cue, which keeps its own minimum dwell.
+        """
+        self._render_context_notice()
+        status = getattr(self, "_context_status", None)
+        if status is not None:
+            status.stop()
 
     def _render_context_notice(self):
-        """Idle content of the context notice line (match count / suggestions)."""
+        """Content of the context notice line (match count / suggestions)."""
         notice = getattr(self, "_search_context_notice", None)
         if notice is None:
             return
@@ -2529,18 +2550,6 @@ class SearchFeatureMixin:
                 notice.pack(fill="x", pady=(0, 3))
         else:
             notice.pack_forget()
-
-    def _show_context_notice_working(self, text):
-        """Working state of the context notice line (styled by PulseStatus)."""
-        notice = getattr(self, "_search_context_notice", None)
-        if notice is None:
-            return
-        notice.configure(text=text)
-        table = getattr(self, "_results_table_frame", None)
-        if table is not None and table.winfo_exists():
-            notice.pack(fill="x", pady=(0, 3), before=table)
-        else:
-            notice.pack(fill="x", pady=(0, 3))
 
     def _request_search_context(self, criteria):
         controller = getattr(self, "search_context_controller", None)
@@ -2577,11 +2586,12 @@ class SearchFeatureMixin:
             return
         if event.kind == "error":
             log.warning("Search context analysis failed: %s", event.payload)
-            self._context_status.stop()
+            self._end_context_update()
             return
         self._context_snapshot = event.payload
         self._context_applied_criteria = requested
         self._apply_live_context_presentation()
+        self._advance_search_warmups("context")
         log.debug(
             "Live Search context prepared for %s rows in %.3f seconds",
             event.payload.result_count, float(event.elapsed or 0.0))
@@ -2753,6 +2763,11 @@ class SearchFeatureMixin:
 
     def _mark_search_catalogs_loading(self, *, full_scope):
         self._search_catalog_loading = True
+        # Filters may be disabled (or Search queued) until this finishes, so say
+        # so prominently instead of letting the app look frozen.
+        status = getattr(self, "_filters_status", None)
+        if status is not None:
+            status.start("Loading filters…")
         if self._pending_catalog_filter_state is None:
             self._pending_catalog_filter_state = self._capture_catalog_filter_state()
         if not full_scope:
@@ -2763,6 +2778,16 @@ class SearchFeatureMixin:
         # state caused a layout collapse/flash even though discovery was async.
         self._set_search_catalog_controls_enabled(False)
         self._search_printings.begin_scope_loading()
+
+    def _end_filters_loading(self, *, cancel=False):
+        """End the "Loading filters…" cue (``cancel`` skips its minimum dwell)."""
+        status = getattr(self, "_filters_status", None)
+        if status is None:
+            return
+        if cancel:
+            status.cancel()
+        else:
+            status.stop()
 
     def _refresh_search_catalogs(self, selected_set_types=None):
         """Request trusted vocabulary for the current scope without blocking Tk."""
@@ -2797,6 +2822,26 @@ class SearchFeatureMixin:
                 pass
         self._search_catalog_poll_after = self.after(
             18, self._poll_search_catalogs)
+
+    def _advance_search_warmups(self, landed):
+        """Start the next background warm-up once the stage before it has landed.
+
+        The facet-index build and the other-scope catalog loads are all CPU-bound
+        Python sharing one interpreter lock with the trusted-catalog load that the
+        filters wait on; launched together at startup they stretched that load
+        from ~2 s to ~5 s.  So they run in the order the user is waiting on
+        them: the filters themselves, then instant live counts (the index), then
+        instant scope switching (the other catalogs).
+        """
+        stage = self._search_warmup_stage
+        if landed == "catalogs" and stage == 0:
+            self._search_warmup_stage = 1
+            controller = getattr(self, "search_context_controller", None)
+            if controller is not None:
+                controller.warm_facet_index()
+        elif landed == "context" and stage == 1:
+            self._search_warmup_stage = 2
+            self._warm_common_search_catalogs()
 
     def _warm_common_search_catalogs(self):
         """Pre-load likely next scopes so switching content/platform feels instant.
@@ -2835,6 +2880,7 @@ class SearchFeatureMixin:
         if event.kind == "error":
             log.error("Trusted Search taxonomy failed: %s", event.payload)
             self._search_catalog_loading = False
+            self._end_filters_loading(cancel=True)
             self._pending_catalog_filter_state = None
             self._pending_search_request = False
             self._set_search_catalog_controls_enabled(True)
@@ -2970,8 +3016,10 @@ class SearchFeatureMixin:
 
         self._pending_catalog_filter_state = None
         self._search_catalog_loading = False
+        self._end_filters_loading()
         self._set_search_catalog_controls_enabled(True)
         self._update_search_filter_summary()
+        self._advance_search_warmups("catalogs")
         unavailable = []
         if not card_type_authority_available:
             unavailable.append(
@@ -3043,23 +3091,21 @@ class SearchFeatureMixin:
 
     def _prepare_live_search_context(self):
         self._context_debounce_after = None
-        status = getattr(self, "_context_status", None)
         if getattr(self, "_search_catalog_loading", False):
-            if status is not None:
-                status.stop()
+            # Trusted filters are still loading: the "Loading filters…" cue
+            # already names the wait, and no context can be computed yet.
+            self._end_context_update()
             return
         repository = getattr(self, "search_repository", None)
         if repository is None or not repository.has_cards():
-            if status is not None:
-                status.stop()
+            self._end_context_update()
             return
         try:
             criteria = self._capture_search_criteria(commit_rules=False)
         except (ValueError, tk.TclError):
             # Partial numeric edits such as '-' are allowed while typing. They
             # simply have no context snapshot until the field becomes valid.
-            if status is not None:
-                status.stop()
+            self._end_context_update()
             return
         self._request_search_context(criteria)
 
@@ -3370,6 +3416,11 @@ class SearchFeatureMixin:
         self.search_controller.invalidate()
         self._active_search_signature = None
         if was_running:
+            # The abandoned query's result will be discarded, so its cue must
+            # not be left waiting for an event that never comes.
+            search_status = getattr(self, "_search_status", None)
+            if search_status is not None:
+                search_status.cancel()
             try:
                 self._search_btn.state(["!disabled"])
             except tk.TclError:
@@ -3483,8 +3534,8 @@ class SearchFeatureMixin:
         if self._search_catalog_loading:
             # Preserve one user Search intent across asynchronous trusted-catalog
             # preparation. The accepted latest snapshot resumes it exactly once.
+            # The centered "Loading filters…" cue is already naming this wait.
             self._pending_search_request = True
-            self._results_status.start("RESULTS | Trusted filters are loading…")
             self._status(
                 "Trusted Search filters are loading; Search will run automatically when ready.")
             return
@@ -3516,6 +3567,7 @@ class SearchFeatureMixin:
             criteria = self._capture_search_criteria(commit_rules=True)
         except ValueError as exc:
             self._results_status.cancel()
+            self._search_status.cancel()
             self.results_count_lbl.configure(
                 text="RESULTS | Invalid search filter", style="Section.TLabel")
             self._status(str(exc))
@@ -3536,7 +3588,7 @@ class SearchFeatureMixin:
             self._render_results()
             self._request_search_context(criteria)
             return
-        self._results_status.start("RESULTS | Searching…")
+        self._search_status.start("Searching…")
         try:
             self._search_btn.state(["disabled"])
         except tk.TclError:
@@ -3576,7 +3628,7 @@ class SearchFeatureMixin:
             if not self._sort_col and not self._table_filters.get("results"):
                 self._set_result_store(event.payload, event.signature)
                 self._render_results()
-                self._results_status.start("RESULTS | Searching…")
+                self._search_status.start("Searching…")
             if self.search_controller.running:
                 self._search_poll_after = self.after(
                     25, self._poll_search_events)
@@ -3590,6 +3642,7 @@ class SearchFeatureMixin:
         if event.kind == "error":
             log.error("Search failed: %s", event.payload)
             self._results_status.cancel()
+            self._search_status.cancel()
             self.results_count_lbl.configure(
                 text="RESULTS | Search failed", style="Section.TLabel")
             messagebox.showerror("Search error", event.payload)
