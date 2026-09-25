@@ -2059,9 +2059,6 @@ class CardDetailMixin:
             labels.append(label)
         return labels
 
-    def _legal_summary(self, card):
-        return ", ".join(CardDetailMixin._legal_format_rows(self, card))
-
     def _start_image_event_pump(self):
         if self._image_poll_after is None:
             future = getattr(self, "_preview_future", None)

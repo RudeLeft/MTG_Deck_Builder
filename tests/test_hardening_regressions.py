@@ -402,12 +402,15 @@ def _legality_search_check(tmp):
     class Owner:
         _format_catalog = ["vintage"]
 
-    restricted_summary = CardDetailMixin._legal_summary(
-        Owner(), {"legalities": json.dumps({"vintage": "restricted"})})
-    decoded_summary = CardDetailMixin._legal_summary(
-        Owner(), {"legalities": {"vintage": "restricted"}})
-    malformed_summary = CardDetailMixin._legal_summary(
-        Owner(), {"legalities": "not-json"})
+    # _legal_summary was an unused wrapper (CHG-009) removed from
+    # CardDetailMixin; _legal_format_rows is the live path the legality
+    # popup itself calls, so these join it exactly as the wrapper used to.
+    restricted_summary = ", ".join(CardDetailMixin._legal_format_rows(
+        Owner(), {"legalities": json.dumps({"vintage": "restricted"})}))
+    decoded_summary = ", ".join(CardDetailMixin._legal_format_rows(
+        Owner(), {"legalities": {"vintage": "restricted"}}))
+    malformed_summary = ", ".join(CardDetailMixin._legal_format_rows(
+        Owner(), {"legalities": "not-json"}))
     return (
         ids == {"legal", "restricted"}
         and restricted_summary == "Vintage (Restricted)"

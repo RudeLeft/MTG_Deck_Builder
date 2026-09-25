@@ -237,98 +237,73 @@ def _protect_explicit_text_width(options):
             options.get("text"), options.get("width"))
 
 
-class AppButton(ttk.Button):
+class _TtkClickPulseMixin:
+    """Shared bounded click-pulse feedback (CLR-005) for a ttk state widget.
+
+    ``AppButton`` and ``AppMenubutton`` each carried their own identical copy
+    of this: both are plain ttk state widgets (``instate``/``state`` work the
+    same way on either), so one mixin serves both instead of two copies that
+    could drift out of sync on the next tweak to pulse timing or bounds/
+    disabled handling.
+    """
+
     CLICK_PULSE_MS = 140
 
+    def _init_click_pulse(self):
+        self._ui_click_pulse_after = None
+        self.bind("<ButtonRelease-1>", self._pulse_click_feedback, add="+")
+        self.bind("<Destroy>", self._release_click_feedback, add="+")
+
+    def _pulse_click_feedback(self, event=None):
+        try:
+            if self.instate(["disabled"]):
+                return
+            if event is not None and not (
+                    0 <= int(event.x) < self.winfo_width()
+                    and 0 <= int(event.y) < self.winfo_height()):
+                return
+            pending = self._ui_click_pulse_after
+            if pending is not None:
+                self.after_cancel(pending)
+            self.state(["alternate"])
+            self._ui_click_pulse_after = self.after(
+                self.CLICK_PULSE_MS, self._clear_click_feedback)
+        except tk.TclError:
+            self._ui_click_pulse_after = None
+
+    def _clear_click_feedback(self):
+        self._ui_click_pulse_after = None
+        try:
+            self.state(["!alternate"])
+        except tk.TclError:
+            pass
+
+    def _release_click_feedback(self, event=None):
+        if event is not None and event.widget is not self:
+            return
+        pending = self._ui_click_pulse_after
+        self._ui_click_pulse_after = None
+        if pending is not None:
+            try:
+                self.after_cancel(pending)
+            except tk.TclError:
+                pass
+
+
+class AppButton(_TtkClickPulseMixin, ttk.Button):
     def __init__(self, master=None, *, role="standard", **kwargs):
         kwargs.setdefault("style", _BUTTON_STYLES[role])
         _protect_explicit_text_width(kwargs)
         super().__init__(master, **kwargs)
-        self._ui_click_pulse_after = None
-        self.bind("<ButtonRelease-1>", self._pulse_click_feedback, add="+")
-        self.bind("<Destroy>", self._release_click_feedback, add="+")
-
-    def _pulse_click_feedback(self, event=None):
-        try:
-            if self.instate(["disabled"]):
-                return
-            if event is not None and not (
-                    0 <= int(event.x) < self.winfo_width()
-                    and 0 <= int(event.y) < self.winfo_height()):
-                return
-            pending = self._ui_click_pulse_after
-            if pending is not None:
-                self.after_cancel(pending)
-            self.state(["alternate"])
-            self._ui_click_pulse_after = self.after(
-                self.CLICK_PULSE_MS, self._clear_click_feedback)
-        except tk.TclError:
-            self._ui_click_pulse_after = None
-
-    def _clear_click_feedback(self):
-        self._ui_click_pulse_after = None
-        try:
-            self.state(["!alternate"])
-        except tk.TclError:
-            pass
-
-    def _release_click_feedback(self, event=None):
-        if event is not None and event.widget is not self:
-            return
-        pending = self._ui_click_pulse_after
-        self._ui_click_pulse_after = None
-        if pending is not None:
-            try:
-                self.after_cancel(pending)
-            except tk.TclError:
-                pass
+        self._init_click_pulse()
 
 
-class AppMenubutton(ttk.Menubutton):
-    CLICK_PULSE_MS = 140
-
+class AppMenubutton(_TtkClickPulseMixin, ttk.Menubutton):
     def __init__(self, master=None, *, role="menu", **kwargs):
         kwargs.setdefault("style", _MENUBUTTON_STYLES[role])
         _protect_explicit_text_width(kwargs)
         super().__init__(master, **kwargs)
-        self._ui_click_pulse_after = None
-        self.bind("<ButtonRelease-1>", self._pulse_click_feedback, add="+")
-        self.bind("<Destroy>", self._release_click_feedback, add="+")
-
-    def _pulse_click_feedback(self, event=None):
-        try:
-            if self.instate(["disabled"]):
-                return
-            if event is not None and not (
-                    0 <= int(event.x) < self.winfo_width()
-                    and 0 <= int(event.y) < self.winfo_height()):
-                return
-            pending = self._ui_click_pulse_after
-            if pending is not None:
-                self.after_cancel(pending)
-            self.state(["alternate"])
-            self._ui_click_pulse_after = self.after(
-                self.CLICK_PULSE_MS, self._clear_click_feedback)
-        except tk.TclError:
-            self._ui_click_pulse_after = None
-
-    def _clear_click_feedback(self):
-        self._ui_click_pulse_after = None
-        try:
-            self.state(["!alternate"])
-        except tk.TclError:
-            pass
-
-    def _release_click_feedback(self, event=None):
-        if event is not None and event.widget is not self:
-            return
-        pending = self._ui_click_pulse_after
-        self._ui_click_pulse_after = None
-        if pending is not None:
-            try:
-                self.after_cancel(pending)
-            except tk.TclError:
-                pass
+        self._init_click_pulse()
 
 
 class AppEntry(ttk.Entry):
@@ -487,7 +462,11 @@ class ClassicButton(tk.Frame):
                 relief="sunken", background=self._ui_click_pulse_background,
                 activebackground=self._ui_click_pulse_background)
             if self._ui_outlined:
-                self.configure(bg=PALETTE["accent"])
+                # tk.Frame.configure, not self.configure: the border frame's
+                # own background is an implementation detail, not part of the
+                # public button API that configure()/cget() below forward to
+                # the inner button.
+                tk.Frame.configure(self, bg=PALETTE["accent"])
             self._ui_click_pulse_after = self.after(
                 self.CLICK_PULSE_MS, self._clear_click_feedback)
         except tk.TclError:
@@ -500,7 +479,7 @@ class ClassicButton(tk.Frame):
                 relief="flat", background=self._ui_click_background,
                 activebackground=self._ui_click_activebackground)
             if self._ui_outlined:
-                self.configure(bg=self._ui_border_color)
+                tk.Frame.configure(self, bg=self._ui_border_color)
         except tk.TclError:
             pass
 
@@ -514,6 +493,44 @@ class ClassicButton(tk.Frame):
                 self.after_cancel(pending)
             except tk.TclError:
                 pass
+
+    # -- public button API, forwarded to the inner tk.Button ----------------
+    # ClassicButton wraps its button in a border frame (see the class
+    # docstring), but a caller reasonably expects it to behave like the
+    # tk.Button it replaced: btn.configure(state="disabled"), btn.cget("text"),
+    # btn["text"], etc. tk.Frame has none of those options itself and would
+    # raise TclError on them, so every option not specific to the frame's own
+    # rarely-touched geometry is delegated to the inner button instead.
+
+    def configure(self, cnf=None, **kwargs):
+        return self._ui_button.configure(cnf, **kwargs)
+
+    config = configure
+
+    def cget(self, key):
+        return self._ui_button.cget(key)
+
+    def __getitem__(self, key):
+        return self._ui_button[key]
+
+    def __setitem__(self, key, value):
+        self._ui_button[key] = value
+
+    def bind(self, sequence=None, func=None, add=None):
+        """Forward pointer-hover sequences to the inner button too.
+
+        The inner button fills nearly the whole frame (only the 1px border
+        sliver belongs to the frame itself), so Enter/Leave/Motion bound only
+        on this outer widget -- as a tooltip attached via ``_add_tooltip``
+        would -- almost never fire: those events do not propagate to an
+        ancestor while the pointer is over a child. Everything else (the
+        ``<Destroy>``/``<ButtonRelease-1>`` bindings this class uses
+        internally) is unaffected, since only the hover sequences are mirrored.
+        """
+        result = super().bind(sequence, func, add)
+        if sequence in ("<Enter>", "<Leave>", "<Motion>"):
+            self._ui_button.bind(sequence, func, add=True)
+        return result
 
 
 _CLASSIC_ENTRY_ROLES = {

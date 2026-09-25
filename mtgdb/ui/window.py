@@ -257,6 +257,18 @@ class WindowServicesMixin:
                         scrollbar.state(["disabled"])
                     else:
                         scrollbar.state(["!disabled"])
+                else:  # horizontal: the same logic, mirrored onto the X axis.
+                    viewport = max(1, canvas.winfo_width())
+                    content = max(1, inner.winfo_reqwidth())
+                    height = max(1, canvas.winfo_height())
+                    canvas.itemconfigure(window, height=height)
+                    canvas.configure(
+                        scrollregion=(0, 0, max(viewport, content), height))
+                    if content <= viewport:
+                        canvas.xview_moveto(0)
+                        scrollbar.state(["disabled"])
+                    else:
+                        scrollbar.state(["!disabled"])
             except tk.TclError:
                 pass
 

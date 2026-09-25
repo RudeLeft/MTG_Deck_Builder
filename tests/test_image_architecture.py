@@ -248,11 +248,14 @@ def main():
         _format_catalog = ["modern", "future_format"]
 
     summary = CardDetailMixin._card_summary_text(card)
-    legality = CardDetailMixin._legal_summary(DetailOwner(), card)
+    # _legal_summary was an unused wrapper (CHG-009) removed from
+    # CardDetailMixin; _legal_format_rows is the live path the legality
+    # popup itself calls.
+    legality = ", ".join(CardDetailMixin._legal_format_rows(DetailOwner(), card))
     extracted = {
         "_build_card_pane", "_show_card",
         "_rotate_card_preview", "_open_card_zoom", "_sync_preview_zoom",
-        "_card_summary_text", "_legal_summary", "_start_image_event_pump",
+        "_card_summary_text", "_legal_format_rows", "_start_image_event_pump",
         "_poll_image_events", "_cancel_image_ready_retry",
         "_defer_image_ready", "_image_ready", "_image_failed",
     }

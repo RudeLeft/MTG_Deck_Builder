@@ -84,12 +84,7 @@ def analyze_deck(deck):
             colorless += quantity
     side_total = deck.total("side")
     average = total_mana_value / spell_count if spell_count else 0.0
-    if main_total:
-        draws = min(7, main_total)
-        land_average = draws * lands / main_total
-        land_probability = hyper_between(main_total, lands, draws, 2, 4)
-    else:
-        land_average = land_probability = 0.0
+    land_average, land_probability = _land_odds(main_total, lands)
     stats = {
         "curve": curve, "colors": colors, "colorless": colorless,
         "types": types, "main_total": main_total, "side_total": side_total,
@@ -266,6 +261,23 @@ def hyper_between(deck_size, copies, draws, lower, upper):
     return favorable / total
 
 
+def _land_odds(deck_size, lands):
+    """Return (average lands in an opening 7, P(two to four lands)).
+
+    The one shared formula behind both analyze_deck's inline opening-hand
+    figures (computed from its own single mainboard traversal) and
+    opening_land_stats below (which does its own separate traversal) --
+    kept in one place so a future change to the draw-count clamp or
+    probability bounds cannot land in one copy and not the other.
+    """
+    if deck_size <= 0:
+        return 0.0, 0.0
+    draws = min(7, deck_size)
+    average = draws * lands / deck_size
+    probability = hyper_between(deck_size, lands, draws, 2, 4)
+    return average, probability
+
+
 def opening_land_stats(deck):
     """Return size, lands, average lands in seven, and P(two to four lands)."""
     deck_size = deck.total("main")
@@ -274,9 +286,7 @@ def opening_land_stats(deck):
         if is_land(entry["card"]))
     if deck_size == 0:
         return 0, 0, 0.0, 0.0
-    draws = min(7, deck_size)
-    average = draws * lands / deck_size
-    probability = hyper_between(deck_size, lands, draws, 2, 4)
+    average, probability = _land_odds(deck_size, lands)
     return deck_size, lands, average, probability
 
 

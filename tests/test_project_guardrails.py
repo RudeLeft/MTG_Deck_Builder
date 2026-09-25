@@ -733,7 +733,7 @@ def main():
                 "_build_card_pane", "_show_card",
                 "_rotate_card_preview", "_open_card_zoom",
                 "_sync_preview_zoom", "_set_card_preview_actions",
-                "_card_summary_text", "_legal_summary",
+                "_card_summary_text", "_legal_format_rows",
                 "_start_image_event_pump", "_poll_image_events",
                 "_cancel_image_ready_retry", "_defer_image_ready",
                 "_image_ready", "_image_failed",
