@@ -977,6 +977,47 @@ def main():
     blocked_owner = _PendingSearchOwner(catalog_loading=True)
     blocked = SearchFeatureMixin._resume_pending_search_request(blocked_owner)
 
+    # Searching before the card database has anything in it must tell the
+    # truth about WHY: a first-launch/refresh sync already populating it
+    # right now (has_cards() is False only because it hasn't finished) is a
+    # different, temporary situation from a genuinely empty, no-sync-running
+    # database -- telling the user to go trigger an update while one is
+    # already in flight is actively wrong advice.
+    from mtgdb.ui import search as search_module
+
+    class _RecordingMessagebox:
+        def __init__(self):
+            self.infos = []
+
+        def showinfo(self, title, message):
+            self.infos.append((title, message))
+
+    class _EmptyDatabaseSearchOwner:
+        def __init__(self, *, syncing):
+            self._search_catalog_loading = False
+            self._pending_search_request = False
+            self.search_controller = type("Controller", (), {"running": False})()
+            self.search_repository = type(
+                "Repo", (), {"has_cards": staticmethod(lambda: False)})()
+            self._syncing = syncing
+
+        def _update_search_filter_summary(self):
+            pass
+
+        def _database_sync_is_running(self):
+            return self._syncing
+
+    original_messagebox = search_module.messagebox
+    syncing_recorder = _RecordingMessagebox()
+    idle_recorder = _RecordingMessagebox()
+    try:
+        search_module.messagebox = syncing_recorder
+        SearchFeatureMixin._do_search(_EmptyDatabaseSearchOwner(syncing=True))
+        search_module.messagebox = idle_recorder
+        SearchFeatureMixin._do_search(_EmptyDatabaseSearchOwner(syncing=False))
+    finally:
+        search_module.messagebox = original_messagebox
+
     # A multi-name batch ("Search for these cards") pins the Name filter to a
     # generated display string. Editing that box must drop the batch, or the
     # visible Name text and the actual search scope silently disagree.
@@ -1808,6 +1849,14 @@ def main():
             and 'self._resume_pending_search_request()' in search_source
             and 'if start.kind == "unchanged":\n            self._set_result_count()'
                 in search_source),
+        "empty-database Search message tells the truth about an in-flight sync": (
+            len(syncing_recorder.infos) == 1
+            and syncing_recorder.infos[0][0] == "Card database is being prepared"
+            and "already" not in syncing_recorder.infos[0][1].casefold()
+            and "update database" not in syncing_recorder.infos[0][1].casefold()
+            and len(idle_recorder.infos) == 1
+            and idle_recorder.infos[0][0] == "No cards yet"
+            and "update database" in idle_recorder.infos[0][1].casefold()),
         "Search Clear cancels a queued trusted-filter Search": (
             search_source.index('def _clear_search(self):')
             < search_source.index('self._pending_search_request = False',

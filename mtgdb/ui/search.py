@@ -3495,9 +3495,22 @@ class SearchFeatureMixin:
             self._pending_search_request = True
             return
         if not self.search_repository.has_cards():
-            messagebox.showinfo(
-                "No cards yet",
-                "The card database is empty.\n\nUse Database -> Update Database first.")
+            if self._database_sync_is_running():
+                # A sync is already populating the database right now (first
+                # launch, or a schema/catalog refresh) -- telling the user to
+                # go trigger one themselves is actively wrong advice while
+                # one is already in flight, and "the database is empty" reads
+                # as a failure rather than the normal, temporary state it is.
+                messagebox.showinfo(
+                    "Card database is being prepared",
+                    "The card database is still being set up (this can take "
+                    "a minute on first launch or after an update).\n\n"
+                    "Search will work as soon as it finishes.")
+            else:
+                messagebox.showinfo(
+                    "No cards yet",
+                    "The card database is empty.\n\n"
+                    "Use Database -> Update Database first.")
             return
         try:
             criteria = self._capture_search_criteria(commit_rules=True)
