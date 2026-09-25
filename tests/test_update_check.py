@@ -43,6 +43,43 @@ def _version_with_stale_metadata():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _version_with_one_corrupt_dist_info():
+    """Resolve app_version() with a good folder beside a corrupt one.
+
+    The additive swap can leave several dist-info folders bundled (see
+    ``_version_with_stale_metadata``); one whose METADATA file is truncated or
+    otherwise unreadable must not take the good ones down with it. Building the
+    candidate list in a single comprehension let one bad ``.version`` access
+    (a raised exception, not a missing/falsy value) discard every candidate,
+    including the current version, falling all the way back to "0.0.0" -- both
+    mis-displaying the version and making the app perpetually claim an update
+    is available right after it just updated.
+    """
+    import os
+    import sys
+    import tempfile
+    root = tempfile.mkdtemp(prefix="mtg-corrupt-meta-")
+    try:
+        good = os.path.join(root, "mtg_deck_builder-9.3.0.dist-info")
+        os.makedirs(good)
+        with open(os.path.join(good, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Metadata-Version: 2.1\nName: mtg-deck-builder\nVersion: 9.3.0\n")
+        bad = os.path.join(root, "mtg_deck_builder-9.0.0.dist-info")
+        os.makedirs(bad)
+        # Malformed bytes (not merely missing) so reading .version raises
+        # rather than returning a falsy/None value.
+        with open(os.path.join(bad, "METADATA"), "wb") as f:
+            f.write(b"\x00\x01\xff\xfe not valid utf-8 \x80\x81")
+        sys.path.insert(0, root)
+        try:
+            return app_version()
+        finally:
+            sys.path.remove(root)
+    finally:
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
     updates_source = (ROOT / "mtgdb/ui/updates.py").read_text(encoding="utf-8")
@@ -81,6 +118,8 @@ def main():
             and "self._start_update_check()" in app_source),
         "app_version picks the newest of several bundled dist-info folders": (
             _version_with_stale_metadata() == "9.2.0"),
+        "app_version survives one corrupt dist-info among several": (
+            _version_with_one_corrupt_dist_info() == "9.3.0"),
         "the update banner tells the user which version they are on": (
             "you have {app_version()}" in updates_source),
         "the check runs on a background thread and never blocks the UI": (

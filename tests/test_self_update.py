@@ -142,6 +142,39 @@ def main():
         ":backupfail" in script
         and script.index("goto backupfail")
         < script.index(su.staged_program_dir(data_dir)))
+    # The backup runs right after the just-exited process releases its files --
+    # exactly when a slow save-on-close or an AV/indexer lock is most likely
+    # still settling -- so it must not be given a stingier retry budget than
+    # the swap copy moments later gets.
+    backup_line = next(
+        line for line in script.splitlines() if su.backup_dir(data_dir) in line
+        and "robocopy" in line)
+    swap_line = next(
+        line for line in script.splitlines()
+        if su.staged_program_dir(data_dir) in line and "robocopy" in line)
+    checks["backup copy gets the same retry budget as the swap copy"] = (
+        "/R:30" in backup_line and "/R:30" in swap_line)
+    # Rollback restores from a known-clean backup snapshot, so it must remove
+    # any file the failed new build added that the backup does not have --
+    # /MIR (mirror), not the additive /E used for the backup/swap copies. /MIR
+    # is unique to the rollback line; the backup/swap lines both use /E and
+    # both mention the backup/program paths, so filtering on /MIR itself (not
+    # the paths, which appear in more than one line) is what actually isolates
+    # the rollback's own robocopy call.
+    mir_lines = [line for line in script.splitlines() if "/MIR" in line]
+    # program_dir_for(data_dir) is a path-prefix of backup_dir(data_dir) (the
+    # backup lives under data\_update\backup), so an unquoted substring search
+    # for program_dir_for matches inside backup_dir's own text at the same
+    # position -- anchor on the quoted robocopy arguments instead, which
+    # exactly bound where each path argument starts and ends.
+    quoted_backup = f'"{su.backup_dir(data_dir)}"'
+    quoted_program = f'"{su.program_dir_for(data_dir)}"'
+    checks["rollback restore mirrors the backup instead of only adding to it"] = (
+        len(mir_lines) == 1
+        and quoted_backup in mir_lines[0]
+        and quoted_program in mir_lines[0]
+        # source (backup) precedes dest (program) in the robocopy argument order
+        and mir_lines[0].index(quoted_backup) < mir_lines[0].index(quoted_program))
     # The helper runs from %TEMP% and must remove itself as its final action so
     # no stray mtgupdate-*.bat accumulates per update. Every exit path funnels
     # to :done, whose (goto) idiom ends the batch context so the file can be
@@ -189,6 +222,25 @@ def main():
         su.note_started(data_dir) is False
         and not os.path.exists(su.started_flag_path(data_dir)))
 
+    # A persistent (non-transient) write failure must be reported honestly as
+    # False rather than silently claimed as success: the swap helper's health
+    # gate only sees the flag file on disk, so a caller that gets True back
+    # without a real write on disk has no way to tell a signal was lost.
+    su.write_verify(data_dir, "v1.2.0")
+    blocked_flag = su.started_flag_path(data_dir)
+    os.makedirs(blocked_flag, exist_ok=True)  # a directory where the flag file
+    # would go: writing to it as a file raises OSError on every attempt, unlike
+    # a transient lock that would clear within the retry window.
+    started = time.perf_counter()
+    result = su.note_started(data_dir)
+    elapsed = time.perf_counter() - started
+    checks["note_started reports False (not True) when the flag write always fails"] = (
+        result is False)
+    checks["note_started retries a failing write before giving up"] = (
+        elapsed >= 0.5)  # 4 retries * 0.2s between attempts
+    os.rmdir(blocked_flag)
+    su.clear_update(data_dir)
+
     checks["clear_update removes the staging scratch"] = (
         not os.path.exists(su.update_dir(data_dir)))
 
@@ -212,6 +264,25 @@ def main():
             "self_update.verify_is_recent(",
             "self_update.clear_update(",
         ))
+    # write_verify must be written only once the helper script/temp file exist
+    # and launch is imminent -- not before build_swap_script/mkstemp, which can
+    # still fail -- and cleared if launching the helper itself then fails, so a
+    # dead marker can never make a later launch believe an apply is in flight.
+    checks["write_verify runs only right before launching the helper, and is undone on failure"] = (
+        updates_source.index("build_swap_script(")
+        < updates_source.index("tempfile.mkstemp(")
+        < updates_source.index("self_update.write_verify(")
+        < updates_source.index("subprocess.Popen(")
+        and "self_update.clear_verify(" in updates_source)
+    # write_pending must record the tag of the release actually downloaded and
+    # verified (re-fetched fresh in _download_and_stage), not the stale tag
+    # captured by the earlier background check -- a newer release publishing
+    # between the check and the click must not mislabel what got installed.
+    checks["write_pending records the freshly fetched tag, not a stale one"] = (
+        'fresh_tag = data.get("tag_name")' in updates_source
+        and "self._update_tag = str(fresh_tag)" in updates_source
+        and updates_source.index("self._update_tag = str(fresh_tag)")
+        < updates_source.index("self_update.write_pending("))
     checks["updates.py self-update is frozen-only and detaches the helper"] = all(
         token in updates_source for token in (
             'getattr(sys, "frozen", False)',
@@ -219,9 +290,17 @@ def main():
             "creationflags=_DETACHED_FLAGS",
             "self._on_app_close()",
         ))
-    checks["main.py signals a healthy launch early via note_started"] = (
+    # note_started must run only after DeckBuilderApp(...) is built successfully,
+    # not before CardDB(...)/DeckBuilderApp(...) are even constructed -- signalling
+    # early reported a healthy launch even when construction then raised moments
+    # later, so a build that never actually started looked "installed" to the
+    # swap helper's health gate.
+    checks["main.py signals a healthy launch only after the app window is built"] = (
         "from mtgdb.core.self_update import note_started" in main_source
-        and "note_started(str(data_dir))" in main_source)
+        and "note_started(str(data_dir))" in main_source
+        and main_source.index("DeckBuilderApp(db,")
+        < main_source.index("note_started(str(data_dir))")
+        < main_source.index("app.mainloop()"))
 
     ok = True
     for label, passed in checks.items():

@@ -36,9 +36,20 @@ def app_version():
     """
     try:
         from importlib.metadata import distributions
-        candidates = [
-            str(dist.version) for dist in distributions(name=_DISTRIBUTION)
-            if dist.version]
+        candidates = []
+        # Read each distribution's version defensively: the additive swap can
+        # leave several dist-info folders bundled, and one with a truncated or
+        # unreadable METADATA file must not take the good ones down with it --
+        # accessing .version raises on a malformed file (UnicodeDecodeError,
+        # for one), and building the list in one comprehension let that one bad
+        # folder discard every candidate, including the current version.
+        for dist in distributions(name=_DISTRIBUTION):
+            try:
+                value = dist.version
+            except Exception:
+                continue
+            if value:
+                candidates.append(str(value))
         if candidates:
             return max(candidates, key=_version_key)
     except Exception:

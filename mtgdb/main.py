@@ -177,13 +177,6 @@ def main():
         return
 
     data_dir = resolve_data_dir()
-    # Signal a healthy launch as early as possible: if the running process is a
-    # freshly swapped build, this drops the flag the update helper waits on, so
-    # it does not roll back a version that actually starts. A no-op otherwise.
-    try:
-        note_started(str(data_dir))
-    except Exception:
-        pass
     log_path = setup_logging(data_dir)
     log = logging.getLogger(LOG_NAME)
     log.info("=== MTG Deck Builder starting ===")
@@ -203,6 +196,19 @@ def main():
     try:
         app = DeckBuilderApp(db, str(data_dir / "card_images"),
                              str(data_dir), str(log_path))
+        # Signal a healthy launch only once the database and main window are
+        # both built successfully: if the running process is a freshly swapped
+        # build, this drops the flag the update helper waits on, so it does not
+        # roll back a version that actually starts. Signalling before
+        # construction reported success even when CardDB(...) or
+        # DeckBuilderApp(...) then raised moments later -- a build that never
+        # actually started looked "installed," leaving the helper no reason to
+        # roll back a genuinely broken build and no backup left once it deleted
+        # one as no longer needed.
+        try:
+            note_started(str(data_dir))
+        except Exception:
+            pass
         app.mainloop()
     except Exception:
         log.exception("Fatal error")

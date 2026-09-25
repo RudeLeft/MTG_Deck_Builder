@@ -289,19 +289,48 @@ def note_started(data_dir):
 
     Called as early as possible in startup. When an apply marker is present the
     running process is the newly swapped build proving it can start, so create
-    the flag the swap helper is waiting on; without it the helper rolls back.
-    Returns True when this was a post-update launch. On any ordinary launch
-    there is no marker and this is a cheap no-op.
+    the flag the swap helper is waiting on; without it the helper rolls back a
+    build that actually works. Returns True when the flag was written (a
+    post-update launch that got the signal down), False otherwise -- including
+    when the write itself failed, so a caller can tell a successful signal from
+    a swallowed one instead of both looking identical.
+
+    The write is retried a few times with a short pause: right after the swap
+    helper's multi-hundred-megabyte copy finishes, a transient lock (AV/indexer
+    scanning the freshly written folder) is exactly the kind of failure that
+    clears within milliseconds, and it is cheap to wait it out here rather than
+    let the helper's health-gate time out and roll back a build that is really
+    fine.
     """
     if read_verify(data_dir) is None:
         return False
+    path = started_flag_path(data_dir)
+    for attempt in range(5):
+        try:
+            os.makedirs(update_dir(data_dir), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            return True
+        except OSError:
+            if attempt == 4:
+                return False
+            time.sleep(0.2)
+    return False
+
+
+def clear_verify(data_dir):
+    """Remove only the apply-in-progress marker, leaving staging/backup intact.
+
+    Used when launching the swap helper itself failed (before or during
+    ``subprocess.Popen``): nothing is actually in flight, so the marker must not
+    linger and make the next launch's update check think an apply is running
+    for up to ``verify_is_recent``'s whole window while it silently skips both
+    the check and any cleanup.
+    """
     try:
-        os.makedirs(update_dir(data_dir), exist_ok=True)
-        with open(started_flag_path(data_dir), "w", encoding="utf-8") as handle:
-            handle.write("ok")
+        os.remove(verify_marker_path(data_dir))
     except OSError:
         pass
-    return True
 
 
 def clear_update(data_dir):
@@ -319,9 +348,17 @@ def build_swap_script(data_dir):
     scratch area (backup, staging, markers) is removed. If the new build never
     signals within the timeout -- it failed to launch -- the old files are
     restored from the backup and relaunched, so a broken build can never strand
-    the user. Every copy is ``robocopy /E`` (additive, never purges) and
-    excludes ``data\\`` with ``/XD``, so decks/database/images/prefs always
-    survive and a failed copy can never delete the working install.
+    the user. The backup and swap copies both use the same ``/R:30`` retry
+    budget (~30s): the backup runs right after the just-exited process releases
+    its own files, which is exactly when a slow save-on-close or an AV/indexer
+    lock is most likely to still be settling, so it needs the same patience the
+    swap step gets, not less. Both copies exclude ``data\\`` with ``/XD``, so
+    decks/database/images/prefs always survive and a failed copy can never
+    delete the working install. The rollback restore uses ``/MIR`` instead: the
+    backup is a known-clean snapshot of the whole program folder (``data\\`` is
+    never part of it), so restoring it should also remove any file the failed
+    new build added that the backup does not have -- an additive-only restore
+    would leave those orphaned in the reinstated install.
     """
     program = program_dir_for(data_dir)
     data = os.path.abspath(data_dir)
@@ -336,7 +373,7 @@ def build_swap_script(data_dir):
         # ~2 seconds of grace for the exiting app to unlock its files; the
         # robocopy retries below absorb any remaining lock.
         "ping 127.0.0.1 -n 3 >nul",
-        f'robocopy "{program}" "{backup}" /E /XD "{data}" /R:3 /W:1 >nul',
+        f'robocopy "{program}" "{backup}" /E /XD "{data}" /R:30 /W:1 >nul',
         # robocopy uses exit codes 0-7 for success; 8 and above is a real error.
         # Check the backup's own code before the swap overwrites ERRORLEVEL: a
         # failed backup leaves nothing safe to roll back to, so never touch the
@@ -366,7 +403,10 @@ def build_swap_script(data_dir):
         "goto done",
         ":rollback",
         f'taskkill /IM "{PROGRAM_EXE}" /F >nul 2>&1',
-        f'robocopy "{backup}" "{program}" /E /XD "{data}" /R:10 /W:1 >nul',
+        # /MIR (mirror): also removes any file the failed new build added that
+        # the backup does not have, unlike the additive /E used everywhere else.
+        # /XD still protects data\, so this can never touch user data.
+        f'robocopy "{backup}" "{program}" /MIR /XD "{data}" /R:10 /W:1 >nul',
         f'rmdir /s /q "{scratch}" >nul 2>&1',
         f'start "" "{executable}"',
         "set RC=1",

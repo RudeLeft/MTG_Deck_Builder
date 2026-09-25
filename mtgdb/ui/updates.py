@@ -216,6 +216,12 @@ class UpdateCheckMixin:
         url, _size, digest = self_update.select_release_asset(data)
         if not url:
             raise RuntimeError("latest release has no Windows asset to install")
+        # This is the tag actually being downloaded, which can be newer than
+        # self._update_tag (set from the earlier background check) if a new
+        # release published in between. Recording the stale tag would name the
+        # wrong version as staged/ready even though the newer bits were what
+        # actually got verified and installed.
+        fresh_tag = data.get("tag_name") or data.get("name") or self._update_tag
         os.makedirs(self_update.update_dir(self.data_dir), exist_ok=True)
         destination = self_update.download_path(self.data_dir)
 
@@ -232,6 +238,7 @@ class UpdateCheckMixin:
         if not self_update.verify_zip(destination, expected):
             raise RuntimeError("downloaded update failed verification")
         self_update.extract_staged(destination, self.data_dir)
+        self._update_tag = str(fresh_tag)
         self_update.write_pending(self.data_dir, self._update_tag)
 
     def _published_hash(self, release_json, asset_url):
@@ -248,21 +255,32 @@ class UpdateCheckMixin:
 
     def _apply_update(self):
         """Launch the swap helper, then close the app so it can replace files."""
+        wrote_verify = False
         try:
-            # Mark the apply as in-flight before the helper starts, so a launch
-            # during the swap leaves the scratch dir to the helper (and its
-            # rollback) instead of clearing it.
-            self_update.write_verify(self.data_dir, self._update_tag)
             script = self_update.build_swap_script(self.data_dir)
             handle, script_path = tempfile.mkstemp(
                 prefix="mtgupdate-", suffix=".bat")
             with os.fdopen(handle, "w", encoding="mbcs", newline="") as batch:
                 batch.write(script)
+            # Mark the apply as in-flight only once the helper script actually
+            # exists and launch is imminent, so a failure before this point
+            # never leaves a marker claiming an apply is running when nothing
+            # is. Still before Popen: a launch racing the app closing must see
+            # the marker and leave the scratch dir to the helper.
+            self_update.write_verify(self.data_dir, self._update_tag)
+            wrote_verify = True
             subprocess.Popen(
                 ["cmd", "/c", script_path],
                 creationflags=_DETACHED_FLAGS, close_fds=True)
         except Exception:
             log.exception("Could not launch the update helper")
+            if wrote_verify:
+                # The marker was written but the helper never actually
+                # launched (or we can't tell): clear it rather than leave the
+                # next update check believing an apply is in flight for up to
+                # verify_is_recent's whole window, silently skipping both the
+                # check and cleanup for no reason.
+                self_update.clear_verify(self.data_dir)
             self._show_update_failed()
             return
         log.info("Applying update %s on restart; closing the app", self._update_tag)
