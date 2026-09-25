@@ -8,6 +8,39 @@ sys.path.insert(0, str(ROOT))
 
 from mtgdb.core.update_check import (
     LATEST_RELEASE_URL, is_newer, latest_release, parse_version)
+from mtgdb.core.version import app_version
+
+
+def _version_with_stale_metadata():
+    """Resolve app_version() with two bundled dist-info folders on the path.
+
+    The in-app swap copies additively and never purges, so after an update the
+    old ``mtg_deck_builder-<old>.dist-info`` sits beside the new one inside
+    ``_internal``. ``importlib.metadata.version`` returns the *first* match --
+    alphabetically the older version -- which made an upgraded 1.2.0 build
+    report itself as 1.1.0 and re-offer the very update it had just installed.
+    The resolver must return the highest version present. Versions well above
+    pyproject's are used so a pyproject fallback cannot fake a pass.
+    """
+    import os
+    import sys
+    import tempfile
+    root = tempfile.mkdtemp(prefix="mtg-stale-meta-")
+    try:
+        for value in ("9.1.0", "9.2.0"):
+            folder = os.path.join(root, f"mtg_deck_builder-{value}.dist-info")
+            os.makedirs(folder)
+            with open(os.path.join(folder, "METADATA"), "w", encoding="utf-8") as f:
+                f.write(f"Metadata-Version: 2.1\nName: mtg-deck-builder\n"
+                        f"Version: {value}\n")
+        sys.path.insert(0, root)
+        try:
+            return app_version()
+        finally:
+            sys.path.remove(root)
+    finally:
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def main():
@@ -46,6 +79,10 @@ def main():
             and "UpdateCheckMixin" in app_source
             and "self._build_update_banner(self)" in app_source
             and "self._start_update_check()" in app_source),
+        "app_version picks the newest of several bundled dist-info folders": (
+            _version_with_stale_metadata() == "9.2.0"),
+        "the update banner tells the user which version they are on": (
+            "you have {app_version()}" in updates_source),
         "the check runs on a background thread and never blocks the UI": (
             "spawn_daemon(worker" in updates_source
             and "from mtgdb.core.net import get_json" in updates_source

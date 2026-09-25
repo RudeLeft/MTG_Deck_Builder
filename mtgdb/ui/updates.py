@@ -152,7 +152,8 @@ class UpdateCheckMixin:
     def _show_update_available(self, tag, page):
         self._update_tag = tag
         self._update_page_url = page or RELEASES_PAGE_URL
-        self._set_update_text(f"A new version ({tag}) is available.")
+        self._set_update_text(
+            f"A new version ({tag}) is available — you have {app_version()}.")
         # Only the frozen app can swap its own files; from source, the action
         # opens the releases page instead of attempting an impossible in-place
         # update of a checked-out tree.
@@ -170,7 +171,8 @@ class UpdateCheckMixin:
 
     def _show_update_ready(self, tag):
         self._update_tag = tag
-        self._set_update_text(f"Update {tag} is ready to install.")
+        self._set_update_text(
+            f"Update {tag} is ready to install — you have {app_version()}.")
         self._set_update_action("Restart now", self._apply_update)
         self._pack_update_banner()
 
