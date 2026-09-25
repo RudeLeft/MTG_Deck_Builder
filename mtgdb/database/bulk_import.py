@@ -9,7 +9,8 @@ from mtgdb.database.schema import (
     _INDEX_DEFINITIONS, MEMBERSHIP_TABLES, open_writer_connection)
 from mtgdb.database.semantics import (
     _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
-    _raw_type_line, _type_line_search_parts, color_mask, derive_trait_flags,
+    _raw_type_line, _type_line_search_parts, color_mask, combined_mana_cost,
+    derive_trait_flags,
 )
 
 
@@ -50,6 +51,19 @@ def _mana_pips(mana_cost):
             if part in counts:
                 counts[part] += 1
     return counts
+
+
+def _back_face(card):
+    """The second face of a two-faced card, or ``{}``.
+
+    Search matches a card when either face fits (SRCH-052), so the back face's
+    cost and stats are stored beside the front's.  Three or more faces are rare
+    and reach only the second.
+    """
+    faces = card.get("card_faces") or []
+    if len(faces) > 1 and isinstance(faces[1], dict):
+        return faces[1]
+    return {}
 
 
 def _extract_row(card, type_line=None):
@@ -93,7 +107,13 @@ def _extract_row(card, type_line=None):
     mana_cost = card.get("mana_cost") or face.get("mana_cost") or ""
     # Both halves of a split card are one printing with one cost string, so
     # counting the whole string answers "costs two green" for either half.
-    pips = _mana_pips(mana_cost)
+    # A transform or modal card's back-face cost is stored separately (its front
+    # cost stays what the tables draw) and counts here too, so the colour
+    # columns describe every face.  When the top-level cost already holds both
+    # halves ("A // B") there is nothing more to add.
+    back = _back_face(card)
+    back_mana_cost = "" if "//" in mana_cost else str(back.get("mana_cost") or "")
+    pips = _mana_pips(combined_mana_cost(mana_cost, back_mana_cost))
 
     # Precompute the content scope so searches filter on a stored, indexed column
     # instead of the per-row CARD_CONTENT_KIND SQL function.  Computed from the
@@ -110,7 +130,8 @@ def _extract_row(card, type_line=None):
     produced_mask = color_mask(",".join(sorted(card.get("produced_mana") or [])))
     trait_flags = derive_trait_flags(
         mana_cost, either("power"), either("toughness"),
-        json.dumps(card.get("card_faces") or []), ",".join(indicator))
+        json.dumps(card.get("card_faces") or []), ",".join(indicator),
+        back_mana_cost, back.get("power"), back.get("toughness"))
 
     return (
         card["id"],
@@ -165,6 +186,8 @@ def _extract_row(card, type_line=None):
         content_kind,
         colors_mask, identity_mask, produced_mask, trait_flags,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
+        back_mana_cost, back.get("power"), back.get("toughness"),
+        back.get("loyalty"), back.get("defense"),
     )
 
 
@@ -257,9 +280,10 @@ INSERT OR REPLACE INTO cards (
     image_small, image_normal, image_png, image_art_crop, legalities, keywords,
     related_parts, card_faces, layout, content_kind,
     colors_mask, identity_mask, produced_mask, trait_flags,
-    pips_w, pips_u, pips_b, pips_r, pips_g, pips_c
+    pips_w, pips_u, pips_b, pips_r, pips_g, pips_c,
+    back_mana_cost, back_power, back_toughness, back_loyalty, back_defense
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-          ?,?,?,?,?,?,?,?,?,?,?)
+          ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -427,13 +451,19 @@ class ScryfallBulkImporter:
         return changed
 
     def load_cards(self, objects, progress_cb=None, replace=True,
-                   maintenance_cb=None, minimum_count=1):
+                   maintenance_cb=None, minimum_count=1, meta=None):
         """Load Scryfall cards through an isolated SQLite writer connection.
 
         The GUI's primary connection remains available for reads while the
         refresh transaction is built. WAL mode gives readers the old committed
         snapshot until this writer commits the complete replacement atomically.
         This avoids UI stalls caused by waiting on the CardDB Python lock.
+
+        ``meta`` (a dict, or a callable returning one) is written in the SAME
+        transaction as the cards.  Recording what was downloaded in a separate
+        step afterwards left a window in which the cards were replaced but the
+        record was not -- a shutdown or error there made the next launch
+        download everything again.
         """
         writer = open_writer_connection(self.path)
         try:
@@ -524,6 +554,11 @@ class ScryfallBulkImporter:
 
                 if maintenance_cb:
                     maintenance_cb("commit", 0, 1)
+                if meta is not None:
+                    values = meta() if callable(meta) else meta
+                    cur.executemany(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                        [(str(key), str(value)) for key, value in dict(values).items()])
                 writer.commit()
                 if maintenance_cb:
                     maintenance_cb("commit", 1, 1)

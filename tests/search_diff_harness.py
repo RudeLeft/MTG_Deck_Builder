@@ -207,15 +207,111 @@ def build_corpus():
         cmc=3.0, mana_cost="{1}{W}{W}", colors=["W"], color_identity=["W"],
         reserved=True, oracle_text="At the beginning of your upkeep, gain 1 life."))
 
-    add(_printings("dfc", "Delver of Secrets", "Creature — Human Wizard", [
+    # Two-faced cards.  Scryfall gives a transform / modal card NO top-level cost
+    # or stats: the front's are on the first face, the back's on the second.
+    # Search must find a card by EITHER face (SRCH-052) while the row keeps
+    # showing the front.
+    add(_printings("dfc", "Delver of Secrets // Insectile Aberration",
+                   "Creature — Human Wizard // Creature — Human Insect", [
         ("isd", "expansion", "common", "2015-09-30", "en")],
-        cmc=1.0, mana_cost="{U}", colors=["U"], color_identity=["U"],
-        power="1", toughness="1", layout="transform",
-        card_faces=[{"name": "Delver of Secrets", "type_line": "Creature — Human Wizard",
-                     "oracle_text": "At the beginning of your upkeep, look at the top card."},
-                    {"name": "Insectile Aberration", "type_line": "Creature — Human Insect",
-                     "oracle_text": "Flying."}],
-        oracle_text="At the beginning of your upkeep, look at the top card."))
+        cmc=1.0, color_identity=["U"], layout="transform",
+        card_faces=[
+            {"name": "Delver of Secrets", "mana_cost": "{U}", "colors": ["U"],
+             "type_line": "Creature — Human Wizard", "power": "1",
+             "toughness": "1",
+             "oracle_text": "At the beginning of your upkeep, look at the top card."},
+            {"name": "Insectile Aberration", "mana_cost": "", "colors": ["U"],
+             "type_line": "Creature — Human Insect", "power": "3",
+             "toughness": "2", "oracle_text": "Flying."}],
+        oracle_text=""))
+
+    add(_printings("jace", "Jace, Vryn's Prodigy // Jace, Telepath Unbound",
+                   "Legendary Creature — Human Wizard // Legendary Planeswalker — Jace", [
+        ("ori", "core", "mythic", "2015-07-17", "en")],
+        cmc=2.0, color_identity=["U"], layout="transform",
+        card_faces=[
+            {"name": "Jace, Vryn's Prodigy", "mana_cost": "{1}{U}",
+             "colors": ["U"], "type_line": "Legendary Creature — Human Wizard",
+             "power": "0", "toughness": "2", "oracle_text": "Loot."},
+            {"name": "Jace, Telepath Unbound", "mana_cost": "", "colors": ["U"],
+             "type_line": "Legendary Planeswalker — Jace", "loyalty": "5",
+             "oracle_text": "Up to one target creature gets -2/-0."}],
+        oracle_text=""))
+
+    add(_printings("valki", "Valki, God of Lies // Tibalt, Cosmic Impostor",
+                   "Legendary Creature — God // Legendary Planeswalker — Tibalt", [
+        ("khm", "expansion", "mythic", "2021-02-05", "en")],
+        cmc=2.0, color_identity=["B", "R"], layout="modal_dfc",
+        card_faces=[
+            {"name": "Valki, God of Lies", "mana_cost": "{1}{B}",
+             "colors": ["B"], "type_line": "Legendary Creature — God Shapeshifter",
+             "power": "2", "toughness": "1", "oracle_text": "Each opponent reveals."},
+            {"name": "Tibalt, Cosmic Impostor", "mana_cost": "{5}{B}{R}",
+             "colors": ["B", "R"], "type_line": "Legendary Planeswalker — Tibalt",
+             "loyalty": "5", "oracle_text": "Exile the top card."}],
+        oracle_text=""))
+
+    add(_printings("ironsmith", "Village Ironsmith // Ironfang",
+                   "Creature — Human Werewolf // Creature — Werewolf", [
+        ("isd", "expansion", "common", "2015-09-30", "en")],
+        cmc=1.0, color_identity=["R"], layout="transform",
+        card_faces=[
+            {"name": "Village Ironsmith", "mana_cost": "{R}", "colors": ["R"],
+             "type_line": "Creature — Human Werewolf", "power": "1",
+             "toughness": "1", "oracle_text": "First strike."},
+            {"name": "Ironfang", "mana_cost": "", "colors": ["R"],
+             "type_line": "Creature — Werewolf", "power": "3", "toughness": "1",
+             "oracle_text": "First strike."}],
+        oracle_text=""))
+
+    # A hybrid symbol and a {X} cost that appear ONLY on the back face, and a
+    # variable back-face stat, so the cost/stat traits are read from every face.
+    add(_printings("hybridback", "Hybrid Back Test // Reverse Side",
+                   "Creature — Shapeshifter // Creature — Shapeshifter", [
+        ("mom", "expansion", "rare", "2023-04-21", "en")],
+        cmc=3.0, color_identity=["R", "W", "U"], layout="transform",
+        card_faces=[
+            {"name": "Hybrid Back Test", "mana_cost": "{2}{R}", "colors": ["R"],
+             "type_line": "Creature — Shapeshifter", "power": "2",
+             "toughness": "2", "oracle_text": ""},
+            {"name": "Reverse Side", "mana_cost": "{W/U}{W/U}",
+             "colors": ["W", "U"], "type_line": "Creature — Shapeshifter",
+             "power": "4", "toughness": "4", "oracle_text": ""}],
+        oracle_text=""))
+    add(_printings("starflip", "Star Flip // Star Back",
+                   "Creature — Beast // Creature — Beast", [
+        ("mom", "expansion", "rare", "2023-04-21", "en")],
+        cmc=2.0, color_identity=["G"], layout="transform",
+        card_faces=[
+            {"name": "Star Flip", "mana_cost": "{1}{G}", "colors": ["G"],
+             "type_line": "Creature — Beast", "power": "2", "toughness": "2",
+             "oracle_text": ""},
+            {"name": "Star Back", "mana_cost": "{X}{G}", "colors": ["G"],
+             "type_line": "Creature — Beast", "power": "*", "toughness": "*",
+             "oracle_text": ""}],
+        oracle_text=""))
+
+    # Split and adventure cards ship ONE top-level cost holding both halves, so
+    # their back-face cost must stay empty (or every symbol would count twice).
+    add(_printings("adventure", "Bonecrusher Giant // Stomp",
+                   "Creature — Giant // Instant — Adventure", [
+        ("eld", "expansion", "rare", "2019-10-04", "en")],
+        cmc=3.0, mana_cost="{2}{R} // {1}{R}", colors=["R"],
+        color_identity=["R"], power="4", toughness="3", layout="adventure",
+        card_faces=[
+            {"name": "Bonecrusher Giant", "mana_cost": "{2}{R}",
+             "type_line": "Creature — Giant", "power": "4", "toughness": "3"},
+            {"name": "Stomp", "mana_cost": "{1}{R}",
+             "type_line": "Instant — Adventure"}],
+        oracle_text=""))
+    add(_printings("split", "Fire // Ice", "Instant // Instant", [
+        ("apc", "expansion", "uncommon", "2015-06-04", "en")],
+        cmc=4.0, mana_cost="{1}{R} // {1}{U}", colors=["R", "U"],
+        color_identity=["R", "U"], layout="split",
+        card_faces=[
+            {"name": "Fire", "mana_cost": "{1}{R}", "type_line": "Instant"},
+            {"name": "Ice", "mana_cost": "{1}{U}", "type_line": "Instant"}],
+        oracle_text=""))
 
     add(_printings("arena", "Digital Only", "Creature — Construct", [
         ("hbg", "expansion", "rare", "2022-06-10", "en")],
@@ -380,6 +476,16 @@ def generate_criteria(harness, seed=1234, n=240):
         lambda c: c.update(power_min=float(rng.randint(0, 2)),
                            power_max=float(rng.randint(2, 6))),
         lambda c: c.update(toughness_max=float(rng.randint(1, 6))),
+        # Values only a back face carries (Delver's 3/2, Ironfang's 3/1, a
+        # planeswalker back's loyalty) plus Loyalty and Defense, which the
+        # battery never touched.
+        lambda c: c.update(power_min=float(rng.randint(3, 5))),
+        lambda c: c.update(power_min=float(rng.randint(3, 4)),
+                           toughness_max=float(rng.randint(1, 2))),
+        lambda c: c.update(loyalty_min=float(rng.randint(2, 5))),
+        lambda c: c.update(loyalty_min=float(rng.randint(3, 4)),
+                           loyalty_max=float(rng.randint(4, 6))),
+        lambda c: c.update(defense_min=float(rng.randint(1, 4))),
         lambda c: c.update(text=pick(list(_TEXT_WORDS), 1, 2),
                            text_mode=rng.choice(("all", "any", "none"))),
         lambda c: c.update(name=rng.choice(("bear", "bolt", "a", "e", "of"))),

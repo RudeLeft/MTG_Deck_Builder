@@ -94,7 +94,7 @@ mtgdb/
     authorities.py       #   declarative understood upstream taxonomy authorities + compatibility metadata
     constants.py         #   colors, content/layout/playable-legality vocabulary
     db.py                #   CardDB façade (lookup + search + taxonomy mixins)
-    schema.py            #   schema v10, columns, indexes, connections, migration
+    schema.py            #   schema version, columns, indexes, connections, migration, corruption recovery
     semantics.py         #   rules normalization, type-line repair, SQLite type functions
     bulk_import.py       #   row projection, strict streaming JSON/JSONL/gzip, verified bulk replace
     queries.py           #   exact-printing lookup, resolver ranking, name suggestions
@@ -840,6 +840,25 @@ every feature together and is exempt.
   (an epoch checked before publishing), and the discarded build MUST be followed by
   a rebuild, so the index never keeps serving pre-refresh counts until restart.
   _Verification:_ **AUTO**.
+- **SRCH-052 — MUST:** Find a two-faced card (transform, modal, flip) by EITHER
+  face's cost and stats. The back face's cost, Power, Toughness, Loyalty and
+  Defense are stored beside the front's (`back_mana_cost`, `back_power`,
+  `back_toughness`, `back_loyalty`, `back_defense`, schema version 18); the colour
+  columns (`pips_*`) and `trait_flags` are computed over both faces, and every
+  engine reads them the same way: the SQL builder (a stat range is met when either
+  face meets it; a symbol match reads every face's cost), the bitset index (a back
+  value lands in the same bitsets as the front's), and the SQLite context worker.
+  Each condition is judged independently, but a face's own Power is compared with
+  its own Toughness, so top-heavy never pairs one face's Power with the other's
+  Toughness. Symbol totals count every face once, as split cards already did;
+  `back_mana_cost` is empty when the top-level cost already holds both halves
+  ("A // B"), so no symbol is counted twice. Mana Value is the card's own and has
+  no back-face counterpart. The row, the Results and deck table columns, and the
+  Results column filters keep showing and filtering the FRONT face. A schema
+  version change rebuilds `cards`, so the first launch after such an update
+  re-syncs the card database. The differential battery MUST include two-faced
+  cards, and named expectations MUST pin which cards are found.
+  _Verification:_ **AUTO**.
 
 ## Database internals architecture
 
@@ -854,7 +873,15 @@ every feature together and is exempt.
   sidecars aside as `*.corrupt`) and let a fresh empty database be created, so a
   truncated or corrupt file recovers on the next launch instead of crashing
   startup; the probe MUST close its connection before quarantining so no handle
-  keeps the file locked on Windows. _Verification:_ **AUTO**.
+  keeps the file locked on Windows. Only an error that says the FILE is damaged
+  (`SQLITE_CORRUPT`, `SQLITE_NOTADB`) is corruption: a locked database, a disk I/O
+  error or an unopenable file (antivirus, a backup tool, OneDrive) MUST be retried
+  briefly and then left in place, never quarantined, since quarantining a healthy
+  database discards a 500 MB download. Damage below the first page passes the
+  startup probe and surfaces only when something reads the bad page, so a sync
+  that meets it MUST raise `DatabaseDamagedError` after writing a rebuild request
+  beside the database; the next launch, with nothing holding the file open, MUST
+  quarantine it and rebuild from Scryfall. _Verification:_ **AUTO**.
 - **DBI-003 — MUST:** Keep row projection, strict streaming bulk parsing,
   isolated replacement transactions, distinct committed-card threshold
   protection, and index rebuild in `database/bulk_import.py`; malformed JSONL,
@@ -897,7 +924,7 @@ every feature together and is exempt.
 - **DBI-008 — MUST NOT:** Put schema, connection construction, bulk extraction,
   canonical search construction, or taxonomy discovery directly in the façade.
   _Verification:_ **AUTO**.
-- **DBI-009 — MUST:** Preserve schema version 17, the card-column contract,
+- **DBI-009 — MUST:** Preserve schema version 18, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
   functions. Every connection opened in `database/schema.py` MUST set an
   explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;
@@ -980,6 +1007,30 @@ every feature together and is exempt.
   canonicalized to percent-encoded request URLs before transport; candidates
   containing actual C0/DEL control characters MUST be rejected. Discovery MUST
   reject ambiguous or non-Wizards candidates rather than guessing a filename.
+  _Verification:_ **AUTO**.
+- **DBS-016 — MUST:** Record what a refresh downloaded (`last_sync_updated_at`, the
+  refresh time, the classification rule) in the SAME transaction as the cards, and
+  let nothing after that commit abort the run. A shutdown, cancel or housekeeping
+  error once the replacement is durable MUST NOT report the update as cancelled or
+  failed: doing so skipped the record and forced a full re-download on the next
+  launch. A failure after the cards were replaced MUST still refresh the search
+  caches built from the old cards. _Verification:_ **AUTO**.
+- **DBS-017 — MUST:** Distinguish "could not ask Scryfall whether the card data is
+  current" from "there is something new". With a usable local library, a failed
+  bulk-metadata check (a rate limit or an outage) MUST raise
+  `DatabaseSyncUnavailable` and download nothing; the trusted catalogs are still
+  attempted. Only with no library at all is the download made without that answer.
+  _Verification:_ **AUTO**.
+- **DBS-018 — MUST:** Retry a trusted catalog source that keeps failing on a
+  schedule, not on every launch. Every catalog refresh records
+  `catalogs:last_attempt_epoch`; missing catalogs or Supertypes make a refresh
+  due only when that attempt is at least `CATALOG_RETRY_SECONDS` (24 hours) old
+  (a stamp from the future counts as old). A manual update and the 48-hour
+  refresh are unaffected. _Verification:_ **AUTO**.
+- **DBS-019 — MUST:** Word the refresh dialog for the reason it is shown: only a
+  scheduled refresh MAY say the library is more than 48 hours old, and a manual
+  update MUST NOT. A damaged-database error MUST be presented as needing a
+  restart, without the "left available, retry from Update Database" advice.
   _Verification:_ **AUTO**.
 
 ## Deck domain architecture

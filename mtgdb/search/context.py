@@ -23,7 +23,7 @@ from mtgdb.database.constants import COLORS
 from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _mana_cost_symbol_match, _type_key, _type_line_search_parts,
-    mana_cost_has_hybrid_symbol, pip_minimum_threshold,
+    combined_mana_cost, mana_cost_has_hybrid_symbol, pip_minimum_threshold,
 )
 from mtgdb.search.models import SearchCriteria
 
@@ -33,6 +33,8 @@ log = logging.getLogger("mtg")
 CONTEXT_COLUMNS = (
     "type_line", "keywords", "rarity", "layout", "cmc", "power",
     "toughness", "loyalty", "defense", "released_at", "mana_cost",
+    "back_mana_cost", "back_power", "back_toughness", "back_loyalty",
+    "back_defense",
     "produced_mana", "colors", "color_identity", "color_indicator",
     "reserved", "game_changer", "universes_beyond", "card_faces",
     "set_code", "set_name", "set_type", "games", "lang", "legalities",
@@ -194,9 +196,34 @@ def _has_faces(value):
     return isinstance(parsed, list) and bool(parsed)
 
 
+# Stats a two-faced card carries on its back face too (SRCH-052), with the
+# column each is stored in.  Only ~5% of cards have a back face, so every reader
+# below tests for "no back value" first and does no extra work for the rest.
+_BACK_FACE_STATS = ("power", "toughness", "loyalty", "defense")
+_BACK_STAT_COLUMNS = tuple((name, f"back_{name}") for name in _BACK_FACE_STATS)
+
+
+def _row_mana_cost(row):
+    """The card's cost across every face (see ``combined_mana_cost``)."""
+    mana = str(row.get("mana_cost") or "")
+    back = row.get("back_mana_cost")
+    return combined_mana_cost(mana, back) if back else mana
+
+
+def _face_stat_pairs(row):
+    """(power, toughness) text for the front face and, if any, the back face."""
+    front = (str(row.get("power") or ""), str(row.get("toughness") or ""))
+    back_power = row.get("back_power")
+    back_toughness = row.get("back_toughness")
+    if not back_power and not back_toughness:
+        return (front,)
+    return (front, (str(back_power or ""), str(back_toughness or "")))
+
+
 def _trait_keys(row):
     values = set()
-    mana_cost = str(row.get("mana_cost") or "").upper()
+    # Every face's cost: a card is found by either face (SRCH-052).
+    mana_cost = _row_mana_cost(row).upper()
     faces = _has_faces(row.get("card_faces"))
     values.add("universes_beyond" if bool(row.get("universes_beyond"))
                else "not_universes_beyond")
@@ -217,17 +244,17 @@ def _trait_keys(row):
         values.add("has_x_cost")
     if row.get("color_indicator") not in (None, "", "[]"):
         values.add("color_indicator")
-    power = str(row.get("power") or "")
-    toughness = str(row.get("toughness") or "")
-    if "*" in power or "*" in toughness:
-        values.add("variable_stats")
-    # top_heavy uses the same GLOB/CAST rule as the search filter (TRAIT_CLAUSES)
-    # rather than float(), so the predictive count equals the result of selecting
-    # it -- they disagree only on exotic stats like "1e2" that float() parses but
-    # the filter rejects.
-    if (_glob_numeric(power) and _glob_numeric(toughness)
-            and _cast_real(power) > _cast_real(toughness)):
-        values.add("top_heavy")
+    # Stat traits hold if either face has them; top_heavy compares a face's own
+    # power with its own toughness.  It uses the same GLOB/CAST rule as the
+    # search filter (TRAIT_CLAUSES) rather than float(), so the predictive count
+    # equals the result of selecting it -- they disagree only on exotic stats
+    # like "1e2" that float() parses but the filter rejects.
+    for power, toughness in _face_stat_pairs(row):
+        if "*" in power or "*" in toughness:
+            values.add("variable_stats")
+        if (_glob_numeric(power) and _glob_numeric(toughness)
+                and _cast_real(power) > _cast_real(toughness)):
+            values.add("top_heavy")
     return values
 
 
@@ -396,7 +423,7 @@ def _predict_pips(rows, selected, minimum, mode="all"):
     targets = {candidate: (selected | {candidate}) for candidate in _PIP_KEYS}
     result = {candidate: 0 for candidate in _PIP_KEYS}
     for row in rows:
-        symbols = _mana_cost_symbol_colors(str(row.get("mana_cost") or ""))
+        symbols = _mana_cost_symbol_colors(_row_mana_cost(row))
         represented = set().union(*symbols) if symbols else set()
         for candidate in _PIP_KEYS:
             wanted = targets[candidate]
@@ -473,9 +500,25 @@ def _has_meaningful_mana_cost(row):
 
 
 def _numeric_range(rows, field):
-    values = [number for row in rows for number in (_finite(row.get(field)),)
-              if number is not None]
-    applicable = len(values)
+    # A stat is read from both faces of a two-faced card (SRCH-052); "applicable"
+    # counts cards, not values, so a card with a stat on each face counts once.
+    back_name = f"back_{field}" if field in _BACK_FACE_STATS else None
+    values = []
+    applicable = 0
+    for row in rows:
+        number = _finite(row.get(field))
+        present = number is not None
+        if present:
+            values.append(number)
+        if back_name is not None:
+            raw = row.get(back_name)
+            if raw is not None and raw != "":
+                number = _finite(raw)
+                if number is not None:
+                    values.append(number)
+                    present = True
+        if present:
+            applicable += 1
     if field == "cmc":
         applicable = sum(
             1 for row in rows
@@ -651,22 +694,26 @@ _FACET_COLUMNS = {
     "colors": ("colors", "color_identity"),
     "produces": ("produced_mana",),
     "traits": (
-        "mana_cost", "card_faces", "universes_beyond", "reserved",
-        "game_changer", "color_indicator", "power", "toughness"),
-    "mana_features": ("mana_cost",),
-    "special_properties": ("card_faces", "color_indicator", "power", "toughness"),
+        "mana_cost", "back_mana_cost", "card_faces", "universes_beyond",
+        "reserved", "game_changer", "color_indicator", "power", "toughness",
+        "back_power", "back_toughness"),
+    "mana_features": ("mana_cost", "back_mana_cost"),
+    "special_properties": (
+        "card_faces", "color_indicator", "power", "toughness", "back_power",
+        "back_toughness"),
     "status_properties": ("universes_beyond", "reserved", "game_changer"),
     "layouts": ("layout",),
-    "pips": ("mana_cost", "pips_w", "pips_u", "pips_b", "pips_r", "pips_g", "pips_c"),
+    "pips": ("mana_cost", "back_mana_cost", "pips_w", "pips_u", "pips_b",
+             "pips_r", "pips_g", "pips_c"),
     # Mana Value applicability counts only rows with a meaningful mana cost, so
     # the cmc bucket must carry the cost columns _has_meaningful_mana_cost reads.
     # Without them, relaxing cmc (its own filter active) projected only "cmc" and
     # reported applicability 0 for every row.
     "cmc": ("cmc", "mana_cost", "card_faces"),
-    "power": ("power",),
-    "toughness": ("toughness",),
-    "loyalty": ("loyalty",),
-    "defense": ("defense",),
+    "power": ("power", "back_power"),
+    "toughness": ("toughness", "back_toughness"),
+    "loyalty": ("loyalty", "back_loyalty"),
+    "defense": ("defense", "back_defense"),
     "released": ("released_at",),
     "games": ("games",),
     "rarities": ("rarity",),

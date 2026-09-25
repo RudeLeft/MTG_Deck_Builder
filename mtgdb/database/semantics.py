@@ -423,30 +423,53 @@ def color_mask(comma_text):
     return mask
 
 
-def derive_trait_flags(mana_cost, power, toughness, card_faces, color_indicator):
+def combined_mana_cost(mana_cost, back_mana_cost=""):
+    """Every face's mana cost as one string, for reading cost symbols.
+
+    A two-faced card is found by either face's cost (SRCH-052).  Split and
+    adventure costs already arrive as one "A // B" string in ``mana_cost``, so
+    their ``back_mana_cost`` is empty and this is a no-op for them; for a
+    transform or modal card it appends the back face's cost.
+    """
+    front = str(mana_cost or "")
+    back = str(back_mana_cost or "")
+    if front and back:
+        return f"{front} // {back}"
+    return front or back
+
+
+def derive_trait_flags(mana_cost, power, toughness, card_faces, color_indicator,
+                       back_mana_cost="", back_power=None, back_toughness=None):
     """Pack the per-card boolean traits, computed from stored column values.
 
     ``card_faces`` and ``color_indicator`` are the stored string forms (a JSON
     array and a comma-joined string) so the multi-faced / colour-indicator bits
     match the filter, which reads those same stored strings.
+
+    Cost traits (hybrid, Phyrexian, X) read every face's cost, and stat traits
+    (variable, top-heavy) hold if EITHER face has them -- top-heavy per face, a
+    face's own power against its own toughness -- so a card is found by
+    whichever face carries the trait (SRCH-052).
     """
     flags = 0
     if card_faces is not None and str(card_faces) not in ("", "[]", "null"):
         flags |= TRAIT_MULTI_FACED
-    mana = str(mana_cost or "")
+    mana = combined_mana_cost(mana_cost, back_mana_cost)
     if mana_cost_has_hybrid_symbol(mana):
         flags |= TRAIT_HYBRID_MANA
     if mana_cost_has_phyrexian_symbol(mana):
         flags |= TRAIT_PHYREXIAN_MANA
     if "{X}" in mana.upper():
         flags |= TRAIT_HAS_X_COST
-    power_text = str(power or "")
-    toughness_text = str(toughness or "")
-    if "*" in power_text or "*" in toughness_text:
-        flags |= TRAIT_VARIABLE_STATS
-    if (_glob_numeric(power_text) and _glob_numeric(toughness_text)
-            and _cast_real(power_text) > _cast_real(toughness_text)):
-        flags |= TRAIT_TOP_HEAVY
+    for face_power, face_toughness in (
+            (power, toughness), (back_power, back_toughness)):
+        power_text = str(face_power or "")
+        toughness_text = str(face_toughness or "")
+        if "*" in power_text or "*" in toughness_text:
+            flags |= TRAIT_VARIABLE_STATS
+        if (_glob_numeric(power_text) and _glob_numeric(toughness_text)
+                and _cast_real(power_text) > _cast_real(toughness_text)):
+            flags |= TRAIT_TOP_HEAVY
     if color_indicator is not None and str(color_indicator) != "":
         flags |= TRAIT_COLOR_INDICATOR
     return flags

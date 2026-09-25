@@ -4,12 +4,13 @@ import logging
 import os
 import re
 import sqlite3
+import time
 
 
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 17
+_SCHEMA_VERSION = 18
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -35,6 +36,11 @@ UNIVERSES_BEYOND_META_KEY = "classification:universes_beyond_rule"
 
 CARD_TYPES_ERROR_META_KEY = "catalog:card-types_last_error"
 CARD_TYPES_ATTEMPT_META_KEY = "catalog:card-types_last_attempt_epoch"
+
+# When the trusted catalogs (Scryfall's and the Wizards rules) were last
+# attempted, whether or not every one arrived.  The due policy reads it so a
+# source that keeps failing is retried on a schedule instead of on every launch.
+CATALOGS_ATTEMPT_META_KEY = "catalogs:last_attempt_epoch"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -98,7 +104,18 @@ CREATE TABLE IF NOT EXISTS cards (
     pips_b            INTEGER NOT NULL DEFAULT 0,
     pips_r            INTEGER NOT NULL DEFAULT 0,
     pips_g            INTEGER NOT NULL DEFAULT 0,
-    pips_c            INTEGER NOT NULL DEFAULT 0
+    pips_c            INTEGER NOT NULL DEFAULT 0,
+    -- The other face of a two-faced card (transform, modal, flip).  Search
+    -- matches a card when EITHER face fits (SRCH-052), while the row and every
+    -- table column keep showing the front face.  back_mana_cost holds only the
+    -- cost NOT already inside mana_cost: split and adventure costs arrive as one
+    -- "A // B" string, so theirs stays empty.  The pips_* columns and trait_flags
+    -- above are computed over both faces.
+    back_mana_cost    TEXT NOT NULL DEFAULT '',
+    back_power        TEXT,
+    back_toughness    TEXT,
+    back_loyalty      TEXT,
+    back_defense      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards(name COLLATE NOCASE);
@@ -230,25 +247,80 @@ def register_functions(connection, functions):
             connection.create_function(name, arguments, callback)
 
 
+# SQLite result codes that mean the FILE is damaged.  Everything else a probe can
+# raise (busy, locked, I/O error, cannot open, read-only) says something about the
+# moment, not the file: antivirus, a backup tool or OneDrive holding cards.db
+# produces exactly those, and a healthy database must never be discarded for it.
+_SQLITE_CORRUPT = 11
+_SQLITE_NOTADB = 26
+
+# Waits between probe attempts while the file is unavailable (seconds).
+PROBE_RETRY_DELAYS = (0.2, 0.4, 0.8)
+
+# Written beside the database to ask the NEXT launch to quarantine and rebuild
+# it.  A damaged page deep inside the file passes the startup probe and fails
+# only when something reads it; the connections open then keep the file locked
+# on Windows, so the rebuild is deferred to a launch with nothing open.
+REBUILD_SENTINEL_SUFFIX = ".rebuild"
+
+
+def is_corruption_error(exc):
+    """True only for an error that means the database FILE is damaged."""
+    if not isinstance(exc, sqlite3.DatabaseError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None:
+        return (int(code) & 0xFF) in (_SQLITE_CORRUPT, _SQLITE_NOTADB)
+    text = str(exc).casefold()
+    return "malformed" in text or "not a database" in text
+
+
+def request_database_rebuild(path):
+    """Ask the next launch to set ``path`` aside and start a fresh database."""
+    try:
+        with open(path + REBUILD_SENTINEL_SUFFIX, "w", encoding="utf-8") as sentinel:
+            sentinel.write("damaged; rebuild on next launch\n")
+    except OSError:
+        log.exception("Could not write the database rebuild request")
+        return False
+    return True
+
+
 def _database_is_corrupt(path):
-    """True only when an existing file will not open as a SQLite database.
+    """True only when an existing file is genuinely damaged.
 
     A throwaway connection probes ``sqlite_master`` and is always closed before
     returning, so no handle lingers to block quarantining the file on Windows.
     A missing file, or an empty/valid database whose ``cards`` table is simply
-    absent, is not corruption -- schema init recreates the table. Only a
-    malformed file (interrupted write, disk fault) raises ``DatabaseError`` here.
+    absent, is not corruption -- schema init recreates the table.  Only an
+    error that says the file is damaged (see ``is_corruption_error``) counts.
+    A transient condition -- locked, disk I/O error, cannot open -- is retried
+    briefly and then treated as "unknown", never as corruption: quarantining a
+    healthy database throws away a 500 MB download.
     """
     if not os.path.exists(path):
         return False
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
-        return False
-    except sqlite3.DatabaseError:
-        return True
-    finally:
-        connection.close()
+    delays = iter(PROBE_RETRY_DELAYS)
+    while True:
+        connection = None
+        try:
+            connection = sqlite3.connect(path)
+            connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+            return False
+        except sqlite3.DatabaseError as exc:
+            if is_corruption_error(exc):
+                return True
+            failure = exc
+        finally:
+            if connection is not None:
+                connection.close()
+        delay = next(delays, None)
+        if delay is None:
+            log.warning(
+                "cards.db is unavailable (%s); leaving it in place instead of "
+                "treating it as corrupt", failure)
+            return False
+        time.sleep(delay)
 
 
 def _quarantine_database(path):
@@ -280,9 +352,17 @@ def open_primary_connection(path, functions):
     # ordinary query error later -- a full integrity scan every launch is not
     # worth its cost. This is the single choke point through which the primary
     # connection is opened, so every CardDB gets the same recovery.
-    if _database_is_corrupt(path):
-        log.warning("cards.db failed its integrity probe; rebuilding it from scratch")
+    sentinel = path + REBUILD_SENTINEL_SUFFIX
+    if os.path.exists(sentinel) or _database_is_corrupt(path):
+        log.warning("cards.db is damaged; rebuilding it from scratch")
         _quarantine_database(path)
+        if not os.path.exists(path):
+            # Gone (or replaced by a fresh file below): the request is met.  A
+            # file that could not be moved keeps the request for the next launch.
+            try:
+                os.remove(sentinel)
+            except OSError:
+                pass
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     _apply_pragmas(connection, PRIMARY_PRAGMAS)

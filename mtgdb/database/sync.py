@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 import urllib.parse
 
@@ -24,8 +25,9 @@ from mtgdb.database.bulk_import import (
     UNIVERSES_BEYOND_RULE, ScryfallBulkImporter, iter_card_objects)
 from mtgdb.database.schema import (
     CARD_TYPES_ATTEMPT_META_KEY, CARD_TYPES_ERROR_META_KEY,
-    RULES_SUPERTYPES_ATTEMPT_META_KEY, RULES_SUPERTYPES_ERROR_META_KEY,
-    RULES_SUPERTYPES_META_KEY, UNIVERSES_BEYOND_META_KEY,
+    CATALOGS_ATTEMPT_META_KEY, RULES_SUPERTYPES_ATTEMPT_META_KEY,
+    RULES_SUPERTYPES_ERROR_META_KEY, RULES_SUPERTYPES_META_KEY,
+    UNIVERSES_BEYOND_META_KEY, is_corruption_error, request_database_rebuild,
 )
 
 
@@ -33,8 +35,13 @@ log = logging.getLogger("mtg")
 
 API_BASE = "https://api.scryfall.com"
 AUTO_SYNC_SECONDS = 48 * 60 * 60
+# A trusted-catalog source that keeps failing (the Wizards page changed, Scryfall
+# retired a catalog) is retried on this schedule, not on every launch.
+CATALOG_RETRY_SECONDS = 24 * 60 * 60
 BULK_KIND = "default_cards"
 WIZARDS_RULES_PAGE_URL = "https://magic.wizards.com/en/rules"
+# Opening words of the damaged-file error, so the UI can present it differently.
+DAMAGED_DATABASE_MESSAGE = "The local card database file is damaged"
 
 
 class RulesTaxonomyError(ValueError):
@@ -274,6 +281,14 @@ class DatabaseSyncCancelled(JobCancelled):
     """Raised when shutdown cooperatively stops an incomplete refresh."""
 
 
+class DatabaseDamagedError(RuntimeError):
+    """The database FILE is damaged; it will be rebuilt on the next launch."""
+
+
+class DatabaseSyncUnavailable(RuntimeError):
+    """Scryfall could not be asked whether the local card data is current."""
+
+
 @dataclass(frozen=True)
 class DatabaseSyncEvent:
     kind: str
@@ -305,6 +320,10 @@ class DatabaseSyncService:
         self.http = http
         self.clock = clock
         self.monotonic = monotonic
+        # True once a refresh has replaced the cards, so a failure AFTER that
+        # point can still tell the UI to drop the caches built from the old ones.
+        self.cards_replaced = False
+        self.metadata_error = None
         self._remove_stale_bulk_downloads()
 
     def _remove_stale_bulk_downloads(self):
@@ -343,7 +362,43 @@ class DatabaseSyncService:
         except OSError:
             return AUTO_SYNC_SECONDS
 
+    def _damaged(self, exc):
+        """Ask the next launch to rebuild a damaged file; return the error to raise."""
+        request_database_rebuild(self.db.path)
+        log.error("The card database file is damaged: %s", exc)
+        return DatabaseDamagedError(
+            f"{DAMAGED_DATABASE_MESSAGE} ({exc}). It will be rebuilt from Scryfall "
+            "the next time MTG Deck Builder starts -- please close and reopen "
+            "the app.")
+
+    def _catalogs_incomplete(self):
+        if any(not self.db.catalog(name) for name in SCRYFALL_CATALOGS):
+            return True
+        try:
+            rules_values = json.loads(
+                self.db.get_meta(RULES_SUPERTYPES_META_KEY, "[]"))
+        except (TypeError, ValueError):
+            rules_values = []
+        return not isinstance(rules_values, list) or not rules_values
+
+    def _catalog_retry_due(self):
+        """False while a recent attempt is still within the retry backoff."""
+        try:
+            attempted = float(self.db.get_meta(CATALOGS_ATTEMPT_META_KEY, ""))
+        except (TypeError, ValueError):
+            return True
+        elapsed = self.clock() - attempted
+        return elapsed < 0 or elapsed >= CATALOG_RETRY_SECONDS
+
     def due_reason(self):
+        try:
+            return self._due_reason()
+        except sqlite3.DatabaseError as exc:
+            if not is_corruption_error(exc):
+                raise
+            raise self._damaged(exc) from exc
+
+    def _due_reason(self):
         age = self.database_age_seconds()
         if age is None:
             return "first_launch"
@@ -352,14 +407,9 @@ class DatabaseSyncService:
             # Cheap to satisfy and wrong until it runs, so do not wait for the
             # ordinary refresh window.
             return "classification_refresh"
-        if any(not self.db.catalog(name) for name in SCRYFALL_CATALOGS):
-            return "catalog_refresh"
-        try:
-            rules_values = json.loads(
-                self.db.get_meta(RULES_SUPERTYPES_META_KEY, "[]"))
-        except (TypeError, ValueError):
-            rules_values = []
-        if not isinstance(rules_values, list) or not rules_values:
+        # Missing trusted vocabulary is worth retrying, but a source that keeps
+        # failing would otherwise reopen the modal refresh on EVERY launch.
+        if self._catalogs_incomplete() and self._catalog_retry_due():
             return "catalog_refresh"
         if age >= AUTO_SYNC_SECONDS:
             return "scheduled"
@@ -373,9 +423,13 @@ class DatabaseSyncService:
 
     def _fetch_bulk_metadata(self, kind, cancel_event):
         self._check_cancel(cancel_event)
+        self.metadata_error = None
         try:
             obj = self.http.get_json(f"{API_BASE}/bulk-data/{kind}")
-        except Exception:
+        except Exception as exc:
+            # Remembered rather than hidden: "could not ask" is not the same as
+            # "there is something new", and sync() must tell them apart.
+            self.metadata_error = exc
             obj = None
         self._check_cancel(cancel_event)
         if isinstance(obj, dict) and obj.get("object") == "list":
@@ -412,6 +466,8 @@ class DatabaseSyncService:
         return values
 
     def _refresh_catalogs(self, stage, cancel_event):
+        # Stamped up front so even a run that fails part-way counts as an attempt.
+        self.db.set_meta_many({CATALOGS_ATTEMPT_META_KEY: f"{self.clock():.6f}"})
         refreshed = {}
         catalog_meta = {}
         total = len(SCRYFALL_CATALOGS) + 1
@@ -513,7 +569,22 @@ class DatabaseSyncService:
         return result
 
     def sync(self, progress_cb=None, cancel_event=None):
-        """Refresh Default Cards with measurable, cancellable phases."""
+        """Refresh Default Cards with measurable, cancellable phases.
+
+        A database FILE that is damaged below the first page passes the startup
+        probe and only fails here, when the import touches the bad page.  That
+        is reported as ``DatabaseDamagedError`` after asking the next launch (with
+        nothing holding the file open) to set it aside and rebuild.
+        """
+        self.cards_replaced = False
+        try:
+            return self._sync(progress_cb, cancel_event)
+        except sqlite3.DatabaseError as exc:
+            if not is_corruption_error(exc):
+                raise
+            raise self._damaged(exc) from exc
+
+    def _sync(self, progress_cb, cancel_event):
         kind = BULK_KIND
         phase_clock = {"name": None, "started": self.monotonic()}
 
@@ -552,10 +623,22 @@ class DatabaseSyncService:
         if not download_url:
             download_url = f"{API_BASE}/bulk-data/{kind}?format=file"
 
+        metadata_failed = obj is None and self.metadata_error is not None
+
         stage("catalogs", "Refreshing trusted Magic terminology...")
         self._refresh_catalogs(stage, cancel_event)
 
         self._check_cancel(cancel_event)
+        if metadata_failed and self.db.has_cards():
+            # We could not ask whether anything changed.  Downloading ~500 MB
+            # "just in case" (as a rate-limited or briefly unreachable metadata
+            # call used to trigger) is wrong when a usable library is already
+            # here.  With no cards at all the blind download is still the way in.
+            raise DatabaseSyncUnavailable(
+                "Couldn't check Scryfall for a newer card list "
+                f"({type(self.metadata_error).__name__}: {self.metadata_error}). "
+                "Your existing card library was left unchanged; try again "
+                "later from Database > Update Database.")
         previous_updated = self.db.get_meta("last_sync_updated_at", "")
         if self.db.has_cards() and updated_at and updated_at == previous_updated:
             stage("current", "Local card data already matches Scryfall's latest bulk revision.")
@@ -572,6 +655,30 @@ class DatabaseSyncService:
         db_dir = os.path.dirname(os.path.abspath(self.db.path))
         os.makedirs(db_dir, exist_ok=True)
         temporary_path = os.path.join(db_dir, f"scryfall_{kind}.download")
+
+        # Once the replacement transaction has committed the new cards are
+        # durable, so nothing after that point may abort the run: a "cancelled"
+        # here used to skip recording what was downloaded and force a full
+        # re-download on the next launch.
+        committed = {"done": False}
+
+        def check():
+            if not committed["done"]:
+                self._check_cancel(cancel_event)
+
+        def commit_metadata():
+            metadata = {
+                "last_sync_kind": kind,
+                "last_successful_sync_epoch": f"{self.clock():.6f}",
+                # load_cards ran classify_universes_beyond inline as part of this
+                # load, so record the applied classification rule now. Without it
+                # the next launch sees classification_refresh due (due_reason) and
+                # re-syncs once for nothing before the marker finally lands.
+                UNIVERSES_BEYOND_META_KEY: UNIVERSES_BEYOND_RULE,
+            }
+            if updated_at:
+                metadata["last_sync_updated_at"] = updated_at
+            return metadata
 
         try:
             def downloaded(read, total):
@@ -590,7 +697,7 @@ class DatabaseSyncService:
             }
 
             def parsed(read, total):
-                self._check_cancel(cancel_event)
+                check()
                 parse_state["read"] = read
                 parse_state["total"] = total
                 stage("load_source", (
@@ -598,7 +705,7 @@ class DatabaseSyncService:
                     parse_state["estimated_cards"]))
 
             def loaded_cards(count):
-                self._check_cancel(cancel_event)
+                check()
                 parse_state["loaded"] = int(count or 0)
                 read = float(parse_state["read"] or 0)
                 total_bytes = float(parse_state["total"] or 0)
@@ -619,34 +726,31 @@ class DatabaseSyncService:
                     parse_state["total"], parse_state["estimated_cards"]))
 
             def maintenance(phase, current, total):
-                self._check_cancel(cancel_event)
+                if phase == "commit" and current >= total:
+                    committed["done"] = True
+                else:
+                    check()
                 stage("maintenance", (phase, current, total))
 
             def card_objects():
                 for card in iter_card_objects(temporary_path, progress_cb=parsed):
-                    self._check_cancel(cancel_event)
+                    check()
                     yield card
 
+            # The download record is written by the load itself, in the same
+            # transaction as the cards.
             total = self.db.load_cards(
                 card_objects(), progress_cb=loaded_cards,
-                maintenance_cb=maintenance, minimum_count=1000)
-
-            # load_cards commits atomically. Once it returns, finish the small
-            # metadata write even if shutdown is requested at the same instant.
-            metadata = {
-                "last_sync_kind": kind,
-                "last_successful_sync_epoch": f"{self.clock():.6f}",
-                # load_cards ran classify_universes_beyond inline as part of this
-                # load, so record the applied classification rule now. Without it
-                # the next launch sees classification_refresh due (due_reason) and
-                # re-syncs once for nothing before the marker finally lands.
-                UNIVERSES_BEYOND_META_KEY: UNIVERSES_BEYOND_RULE,
-            }
-            if updated_at:
-                metadata["last_sync_updated_at"] = updated_at
-            self.db.set_meta_many(metadata)
-            self._record_compatibility_diagnostics()
-            stage("cleanup", "Removing the temporary bulk-data file.")
+                maintenance_cb=maintenance, minimum_count=1000,
+                meta=commit_metadata)
+            self.cards_replaced = True
+            try:
+                self._record_compatibility_diagnostics()
+                stage("cleanup", "Removing the temporary bulk-data file.")
+            except Exception:
+                # The cards are replaced and recorded; reporting this as a failed
+                # update would be wrong.
+                log.exception("Post-refresh housekeeping failed")
         finally:
             try:
                 os.remove(temporary_path)
@@ -690,7 +794,9 @@ class DatabaseSyncController(GenerationalWorker):
                 event = DatabaseSyncEvent("cancelled", generation)
             except Exception as exc:
                 log.exception("Card database update failed")
-                event = DatabaseSyncEvent("error", generation, payload=str(exc))
+                event = DatabaseSyncEvent(
+                    "error", generation, stage=type(exc).__name__,
+                    payload=str(exc))
             self.events.put(event)
 
         self._spawn(worker, "database-sync")

@@ -6,6 +6,7 @@ import logging
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from mtgdb.database.sync import DatabaseDamagedError
 from mtgdb.ui.tokens import (
     FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD,
     FONT_PROGRESS_TITLE, PALETTE,
@@ -13,6 +14,30 @@ from mtgdb.ui.tokens import (
 
 
 log = logging.getLogger("mtg")
+
+
+_SYNC_REASON_TEXT = {
+    "first_launch": "The initial card library is being downloaded now.",
+    "catalog_refresh": (
+        "Authoritative Scryfall filter catalogs are being refreshed. "
+        "If the card snapshot is already current, no bulk download is needed."),
+    "classification_refresh": (
+        "A search rule changed, so the stored card data is being re-checked. "
+        "Nothing large is downloaded if your card snapshot is already current."),
+    "scheduled": (
+        "Your local card library is more than 48 hours old, so it is being "
+        "refreshed."),
+}
+# A manual update says what was asked, not how old the data is: it may have been
+# refreshed minutes ago.
+_SYNC_MANUAL_TEXT = (
+    "Checking Scryfall for a newer card list. If your library is already "
+    "current, nothing large is downloaded.")
+
+
+def sync_reason_text(reason):
+    """Why the refresh dialog is showing, in words that are true for ``reason``."""
+    return _SYNC_REASON_TEXT.get(reason, _SYNC_MANUAL_TEXT)
 
 
 class DatabaseSyncMixin:
@@ -37,7 +62,11 @@ class DatabaseSyncMixin:
     def _maybe_auto_sync(self):
         if self.database_sync_controller.running:
             return
-        reason = self.database_sync_controller.due_reason()
+        try:
+            reason = self.database_sync_controller.due_reason()
+        except DatabaseDamagedError as exc:
+            self._sync_error(str(exc), kind="DatabaseDamagedError")
+            return
         if reason:
             self._sync_db(reason=reason)
 
@@ -75,13 +104,7 @@ class DatabaseSyncMixin:
         intro = (
             "MTG Deck Builder keeps a complete Scryfall card database locally so "
             "searches are fast and continue to work offline. "
-            + ("The initial card library is being downloaded now."
-               if reason == "first_launch"
-               else ("Authoritative Scryfall filter catalogs are being refreshed. "
-                     "If the card snapshot is already current, no bulk download is needed."
-                     if reason == "catalog_refresh"
-                     else "Your local card library is more than 48 hours old, so it is being refreshed."))
-        )
+            + sync_reason_text(reason))
         tk.Label(
             shell, text=intro, bg=p["surface"], fg=p["muted"],
             font=FONT_BODY, justify="left", wraplength=610
@@ -210,7 +233,7 @@ class DatabaseSyncMixin:
             if poll.terminal.kind == "done":
                 self._sync_done(poll.terminal.payload)
             elif poll.terminal.kind == "error":
-                self._sync_error(poll.terminal.payload)
+                self._sync_error(poll.terminal.payload, kind=poll.terminal.stage)
             else:
                 self._close_sync_popup()
             return
@@ -352,8 +375,23 @@ class DatabaseSyncMixin:
             self._sync_stage_label.configure(text="Finishing update…")
             self._sync_detail_label.configure(text=str(info or "Cleaning up temporary files"))
 
-    def _sync_done(self, total):
+    def _reconcile_after_database_change(self):
+        """Drop every cache built from the old cards and rebuild it off Tk."""
         self._invalidate_search_cache()
+        # Database replacement invalidates every trusted taxonomy snapshot.
+        # Rebuild through the same generation-protected background path used
+        # for startup and cold Search scopes; do not scan the new DB on Tk.
+        self.search_catalog_controller.invalidate()
+        self.search_context_controller.invalidate()
+        # The bitset facet index caches every card, so a rebuilt database must
+        # drop it or it would serve stale contextual counts.  Rebuild it now in
+        # the background so the first post-sync filter pick is instant.
+        self.search_context_controller.reset_facet_index()
+        self.search_context_controller.warm_facet_index()
+        self._update_search_filter_summary()
+        self._refresh_search_catalogs()
+
+    def _sync_done(self, total):
         if self._sync_poll_after is not None:
             try:
                 self.after_cancel(self._sync_poll_after)
@@ -372,23 +410,12 @@ class DatabaseSyncMixin:
         if self._sync_percent_label is not None:
             self._sync_percent_label.configure(text="100%")
 
-        # Database replacement invalidates every trusted taxonomy snapshot.
-        # Rebuild through the same generation-protected background path used
-        # for startup and cold Search scopes; do not scan the new DB on Tk.
-        self.search_catalog_controller.invalidate()
-        self.search_context_controller.invalidate()
-        # The bitset facet index caches every card, so a rebuilt database must
-        # drop it or it would serve stale contextual counts.  Rebuild it now in
-        # the background so the first post-sync filter pick is instant.
-        self.search_context_controller.reset_facet_index()
-        self.search_context_controller.warm_facet_index()
-        self._update_search_filter_summary()
-        self._refresh_search_catalogs()
+        self._reconcile_after_database_change()
         popup = self._sync_popup
         if popup is not None:
             self._schedule_sync_popup_close(popup)
 
-    def _sync_error(self, msg):
+    def _sync_error(self, msg, kind=""):
         if self._sync_poll_after is not None:
             try:
                 self.after_cancel(self._sync_poll_after)
@@ -398,6 +425,16 @@ class DatabaseSyncMixin:
         self._close_sync_popup()
         where = ("\n\nFull details are in the local error log:\n" + self.log_path
                  if self.log_path else "")
+        # A failure AFTER the cards were replaced still left new cards behind:
+        # search caches built from the old ones must not survive it.
+        service = getattr(self.database_sync_controller, "service", None)
+        if getattr(service, "cards_replaced", False):
+            self._reconcile_after_database_change()
+        if kind == "DatabaseDamagedError":
+            messagebox.showerror(
+                "Card database needs rebuilding",
+                f"{msg}{where}")
+            return
         messagebox.showerror(
             "Database update failed",
             "MTG Deck Builder couldn't refresh the local card database.\n\n"

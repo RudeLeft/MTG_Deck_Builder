@@ -37,8 +37,8 @@ from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
     _PIP_KEYS, _SPECIAL_PROPERTY_KEYS, _STATUS_PROPERTY_KEYS,
     _catalog_values, _comma_members, _finite,
-    _has_meaningful_mana_cost, _json_object, _keyword_values, _relaxed,
-    _trait_keys,
+    _BACK_STAT_COLUMNS, _face_stat_pairs, _has_meaningful_mana_cost,
+    _json_object, _keyword_values, _relaxed, _row_mana_cost, _trait_keys,
 )
 
 _NUMERIC_FIELDS = ("cmc", "power", "toughness", "loyalty", "defense")
@@ -85,7 +85,7 @@ def _trait_filter_keys(row):
     faces = row.get("card_faces")
     has_faces = faces is not None and str(faces) not in ("", "[]", "null")
     keys.add("multi_faced" if has_faces else "single_faced")
-    mana = str(row.get("mana_cost") or "")
+    mana = _row_mana_cost(row)
     if mana_cost_has_hybrid_symbol(mana):
         keys.add("hybrid_mana")
     if mana_cost_has_phyrexian_symbol(mana):
@@ -95,13 +95,12 @@ def _trait_filter_keys(row):
     indicator = row.get("color_indicator")
     if indicator is not None and str(indicator) != "":
         keys.add("color_indicator")
-    power = str(row.get("power") or "")
-    toughness = str(row.get("toughness") or "")
-    if "*" in power or "*" in toughness:
-        keys.add("variable_stats")
-    if (_glob_numeric(power) and _glob_numeric(toughness)
-            and _cast_real(power) > _cast_real(toughness)):
-        keys.add("top_heavy")
+    for power, toughness in _face_stat_pairs(row):
+        if "*" in power or "*" in toughness:
+            keys.add("variable_stats")
+        if (_glob_numeric(power) and _glob_numeric(toughness)
+                and _cast_real(power) > _cast_real(toughness)):
+            keys.add("top_heavy")
     return keys
 
 
@@ -138,6 +137,10 @@ class FacetIndex:
         "power", "toughness", "cmc", "loyalty", "defense", "legalities",
         "set_code", "set_type", "games", "lang", "paper",
         "name", "oracle_text_search",
+        # The other face of a two-faced card: a card is found by either face's
+        # cost and stats (SRCH-052).
+        "back_mana_cost", "back_power", "back_toughness", "back_loyalty",
+        "back_defense",
     )
 
     def __init__(self, rows):
@@ -310,10 +313,24 @@ class FacetIndex:
                     raw = row.get(field)
                     if _glob_numeric(raw):
                         numeric_filter[field].set(_cast_real(raw), i)
+            # A two-faced card's back-face stat lands in the same bitsets as its
+            # front's, so either face satisfies a range (SRCH-052).  Mana value
+            # is the card's own, with no back-face counterpart.  Absent back
+            # values (~95% of cards) are skipped before any parsing.
+            for field, back_name in _BACK_STAT_COLUMNS:
+                raw = row.get(back_name)
+                if raw is None or raw == "":
+                    continue
+                value = _finite(raw)
+                if value is not None:
+                    numeric[field].set(value, i)
+                    mark(numeric_finite[field], i)
+                if _glob_numeric(raw):
+                    numeric_filter[field].set(_cast_real(raw), i)
             if cmc_value is not None and _has_meaningful_mana_cost(row):
                 mark(meaningful, i)
             represented = set()
-            for symbol in _mana_cost_symbol_colors(str(row.get("mana_cost") or "")):
+            for symbol in _mana_cost_symbol_colors(_row_mana_cost(row)):
                 represented |= set(symbol)
             for color in represented:
                 if color in pip_repr:

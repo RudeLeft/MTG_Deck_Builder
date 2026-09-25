@@ -278,17 +278,27 @@ class SearchQueryBuilder:
         return number
 
     def _add_numeric_stat(self, field, minimum, maximum):
+        """Bound a stat on EITHER face (SRCH-052).
+
+        A two-faced card is found when its front or its back face satisfies the
+        range; ``back_<field>`` is NULL for a single-faced card, so it never
+        matches there.  Each range is independent of the others.
+        """
         if minimum is None and maximum is None:
             return
-        self.clauses.append(
-            f"{field} IS NOT NULL AND {field} <> '' "
-            f"AND {field} NOT GLOB '*[^0-9.-]*'")
-        if minimum is not None:
-            self.clauses.append(f"CAST({field} AS REAL) >= ?")
-            self.params.append(float(minimum))
-        if maximum is not None:
-            self.clauses.append(f"CAST({field} AS REAL) <= ?")
-            self.params.append(float(maximum))
+        faces = []
+        for column in (field, f"back_{field}"):
+            parts = [
+                f"{column} IS NOT NULL AND {column} <> '' "
+                f"AND {column} NOT GLOB '*[^0-9.-]*'"]
+            if minimum is not None:
+                parts.append(f"CAST({column} AS REAL) >= ?")
+                self.params.append(float(minimum))
+            if maximum is not None:
+                parts.append(f"CAST({column} AS REAL) <= ?")
+                self.params.append(float(maximum))
+            faces.append("(" + " AND ".join(parts) + ")")
+        self.clauses.append("(" + " OR ".join(faces) + ")")
 
     # A card has two faces when Scryfall gives it two, not when its layout
     # appears on a list somebody maintained. The list called Saga, Class,
@@ -399,7 +409,12 @@ class SearchQueryBuilder:
             self.clauses.extend(
                 f"pips_{color.casefold()} = 0" for color in selected)
 
-        self.clauses.append("MANA_COST_SYMBOL_MATCH(mana_cost, ?, ?, ?) = 1")
+        # Every face's cost, so a transform or modal card matches on its back
+        # face too (SRCH-052); back_mana_cost is empty for single-faced and for
+        # split/adventure cards, whose top-level cost already holds both halves.
+        self.clauses.append(
+            "MANA_COST_SYMBOL_MATCH("
+            "COALESCE(mana_cost, '') || ' ' || back_mana_cost, ?, ?, ?) = 1")
         self.params.extend((",".join(selected), normalized, minimum))
 
     GAME_PLATFORMS = ("paper", "mtgo", "arena")

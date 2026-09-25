@@ -91,9 +91,12 @@ def main():
             identity_seen += 1 if imask else 0
             produced_seen += 1 if pmask else 0
 
+        # The back-face columns matter: stored flags describe EVERY face
+        # (SRCH-052), so the independent classifier must read them too.
         trait_cols = ("mana_cost", "power", "toughness", "card_faces",
                       "color_indicator", "universes_beyond", "reserved",
-                      "game_changer", "trait_flags")
+                      "game_changer", "back_mana_cost", "back_power",
+                      "back_toughness", "trait_flags")
         flags_ok = True
         flags_seen = 0
         for row in reader.execute(

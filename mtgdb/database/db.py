@@ -139,8 +139,9 @@ class CardDB(CardQueryMixin, CardSearchQueryMixin, CardTaxonomyMixin):
         return clean
 
     def load_cards(self, objects, progress_cb=None, replace=True,
-                   maintenance_cb=None, minimum_count=1):
+                   maintenance_cb=None, minimum_count=1, meta=None):
         """Delegate one transactional bulk import to its exclusive owner."""
         return self._bulk_importer.load_cards(
             objects, progress_cb=progress_cb, replace=replace,
-            maintenance_cb=maintenance_cb, minimum_count=minimum_count)
+            maintenance_cb=maintenance_cb, minimum_count=minimum_count,
+            meta=meta)
