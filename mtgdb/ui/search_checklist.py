@@ -572,7 +572,15 @@ def open_search_checklist(owner, **options):
     cache = getattr(owner, "_search_checklist_cache", None)
     if cache is None:
         cache = owner._search_checklist_cache = {}
-    key = (bool(options.get("mode_var") is not None), bool(options.get("single_select", False)))
+    # mode_choices is resolved once, at construction (SearchChecklistDialog's
+    # mode radio row is built once and show() never rebuilds it on a cache
+    # hit), so two pickers with different mode_choices must not share a cache
+    # slot: Card Form wants Any/None only, while Subtype/Mechanics/etc. want
+    # Any/All/None -- sharing a slot let whichever picker built it first
+    # permanently decide every other picker's mode options.
+    key = (bool(options.get("mode_var") is not None),
+           bool(options.get("single_select", False)),
+           tuple(options.get("mode_choices") or ()))
     dialog = cache.get(key)
     if dialog is None or dialog.popup is None:
         dialog = SearchChecklistDialog(owner, **options)

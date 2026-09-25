@@ -185,11 +185,21 @@ class _GalleryCardPeekWindow:
         rotation = card_display_rotation_degrees(
             self.card, self._rotation_turns, self._face_index)
         target = _target_for_rotation(CARD_ZOOM_BASE_PORTRAIT_SIZE, rotation)
+        width, height = target[0] + 10, target[1] + 56
         try:
-            self.owner._center_popup_with_visible_actions(
-                self.top, preferred_width=target[0] + 10,
-                preferred_height=target[1] + 56, min_width=360, min_height=520,
-                lock_size=True, screen_margin_x=24, screen_margin_y=24)
+            if center or not self._presented:
+                self.owner._center_popup_with_visible_actions(
+                    self.top, preferred_width=width, preferred_height=height,
+                    min_width=360, min_height=520, lock_size=True,
+                    screen_margin_x=24, screen_margin_y=24)
+            else:
+                # Rotate/Flip both call _render(center=False) to resize in
+                # place: _center_popup_with_visible_actions always recomputes
+                # a centered position regardless of its argument, so this
+                # parameter was accepted but never actually consulted, and
+                # every click snapped the popup back to the middle of the
+                # work area even after the user had dragged it elsewhere.
+                self._resize_in_place(width, height)
         except tk.TclError:
             pass
         if not self._presented:
@@ -197,6 +207,24 @@ class _GalleryCardPeekWindow:
             self.owner._present_hidden_popup(
                 self.top, center=False, focus=self.image)
         self._request_image(target, rotation)
+
+    def _resize_in_place(self, width, height):
+        """Apply a new size while keeping the window's current centre point.
+
+        Mirrors _center_popup_with_visible_actions' own lock_size handling
+        (geometry() first, then minsize/maxsize re-locked to match) but keeps
+        the window's current position instead of recentring it.
+        """
+        self.top.update_idletasks()
+        old_x, old_y = self.top.winfo_x(), self.top.winfo_y()
+        old_w, old_h = self.top.winfo_width(), self.top.winfo_height()
+        center_x, center_y = old_x + old_w // 2, old_y + old_h // 2
+        x = max(0, center_x - width // 2)
+        y = max(0, center_y - height // 2)
+        self.top.geometry(f"{width}x{height}+{x}+{y}")
+        self.top.resizable(False, False)
+        self.top.minsize(width, height)
+        self.top.maxsize(width, height)
 
     def _rotate(self):
         self._rotation_turns = (self._rotation_turns + 1) % 4

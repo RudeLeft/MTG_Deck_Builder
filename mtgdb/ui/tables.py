@@ -287,6 +287,18 @@ class TableInfrastructureMixin:
         enabled = {
             key for key in available_columns(view)
             if variables.get(key) and variables[key].get()}
+        if not enabled:
+            # Unchecking every column would leave the table with rows present
+            # but nothing to see or click. Name is the one column every view
+            # has and the most useful to keep alone, so re-check it (both in
+            # the retained set and its own checkbox, so the popup reflects
+            # what actually stayed visible) instead of leaving the table blank.
+            columns = available_columns(view)
+            fallback = "name" if "name" in columns else columns[0]
+            enabled = {fallback}
+            variable = variables.get(fallback)
+            if variable is not None:
+                variable.set(True)
         current = [
             key for key in self._visible_columns.get(view, []) if key in enabled]
         current.extend(

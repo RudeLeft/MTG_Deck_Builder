@@ -133,7 +133,13 @@ CARD_ZOOM_LEVELS = (50, 75, 100, 125, 150, 175, 200, 225)
 RESULT_GALLERY_WINDOW_SIZE = (1240, 860)
 RESULT_GALLERY_WINDOW_MIN_SIZE = (760, 520)
 RESULT_GALLERY_MAX_COLUMNS = 32
-RESULT_GALLERY_MAX_VISIBLE_ROWS = 16
+# At the minimum card width (120px) the row stride is ~171px, so 16 rows only
+# covers a ~2400px-tall viewport before the computed row need exceeds the cap
+# and the viewport's bottom renders as empty background instead of staying
+# filled -- reachable on 4K/portrait/stacked multi-monitor setups. 32 rows
+# covers a ~5000px viewport with the same headroom, while staying the same
+# order of magnitude as RESULT_GALLERY_MAX_COLUMNS for bounded slot-widget count.
+RESULT_GALLERY_MAX_VISIBLE_ROWS = 32
 # The Results Gallery owns a live card-size slider.  The target is the initial
 # card-art width; the user can trade density for readability without changing
 # the logical result set or abandoning the bounded virtualized grid.

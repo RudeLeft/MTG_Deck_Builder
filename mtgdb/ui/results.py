@@ -587,7 +587,8 @@ class SearchResultsMixin:
             return
         tv = self.results_tv
         try:
-            selected_slots = set(tv.selection())
+            selection_order = tv.selection()
+            selected_slots = set(selection_order)
             focused = tv.focus()
         except tk.TclError:
             return
@@ -606,6 +607,19 @@ class SearchResultsMixin:
             self._result_selection_anchor_id = focused_id
         elif not self._result_selected_ids:
             self._result_focus_id = None
+        else:
+            # Ctrl-click can deselect the previously-focused row while other
+            # rows remain selected: Tk's own focus() still names that now-
+            # deselected row (neither branch above fires), so the tracked
+            # focus stayed pointed at a card no longer part of the selection
+            # and the preview kept showing it. Re-anchor to whichever
+            # selected row is now first in on-screen order instead.
+            for slot in selection_order:
+                candidate = self._result_id_for_iid(slot)
+                if candidate and candidate in self._result_selected_ids:
+                    self._result_focus_id = candidate
+                    self._result_selection_anchor_id = candidate
+                    break
         self._result_selection_changed()
 
     def _result_selection_changed(self):

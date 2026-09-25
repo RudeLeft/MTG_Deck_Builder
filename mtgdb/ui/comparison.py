@@ -410,8 +410,20 @@ class CardComparisonWindow:
         except ValueError:
             position = 0
         self._face_indexes[cid] = order[(position + 1) % len(order)]
-        self._image_requests.pop(instance_key, None)
-        self._queue_image(card, instance_key)
+        # _face_indexes is shared across every grid cell showing this same
+        # printing (e.g. a sample hand drawing two copies of one card), but
+        # each cell has its own image request/label keyed by instance_key
+        # ("{card_index}:{cid}"). Re-queue every sibling cell sharing this
+        # cid too, not just the one clicked, or a sibling silently keeps
+        # showing the old face while the shared index has already advanced
+        # -- and clicking that sibling next reads the already-advanced
+        # index, which can appear to flip the first cell back without it
+        # ever being clicked.
+        suffix = f":{cid}"
+        for key in list(self._image_labels):
+            if key.endswith(suffix):
+                self._image_requests.pop(key, None)
+                self._queue_image(card, key)
 
     def _poll_images(self):
         self._image_after = None

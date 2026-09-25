@@ -238,6 +238,15 @@ class DeckStatsMixin:
         for iid in self.hand_tv.get_children():
             self.hand_tv.delete(iid)
         self._hand = []
+        # A hydration request already in flight from a Draw Hand click before
+        # this refresh must not repopulate the table just cleared above: its
+        # staleness check only compared against a second Draw Hand click
+        # (a generation bump inside _draw_hand itself), never against the
+        # deck changing underneath it, so a slow-to-return hydration could
+        # land after a mutation/tab switch and silently restore a hand drawn
+        # from a different deck state.
+        self._sample_hand_generation = (
+            int(getattr(self, "_sample_hand_generation", 0)) + 1)
         if getattr(self, "hand_view_btn", None) is not None:
             self.hand_view_btn.state(["disabled"])
         self._close_card_grid_window("sample_hand")

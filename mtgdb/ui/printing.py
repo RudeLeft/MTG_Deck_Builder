@@ -29,9 +29,11 @@ class PrintingMixin:
         self._print_detail_label = None
         self._print_progressbar = None
         self._print_percent_label = None
+        self._print_overall_percent = 0.0
 
     def _show_print_popup(self, total_cards):
         self._cancel_print_popup_close()
+        self._print_overall_percent = 0.0
         # Match the sync adapter: a popup left over from a previous job would
         # otherwise be overwritten without being destroyed, stranding a grabbed
         # window whose close button is disabled.
@@ -206,25 +208,45 @@ class PrintingMixin:
         if self.print_controller.running:
             self._print_poll_after = self.after(40, self._poll_print_events)
 
+    def _set_print_percent(self, pct):
+        """Monotonic overall progress so the bar never jumps backward by phase."""
+        pct = max(self._print_overall_percent, min(99.0, float(pct)))
+        self._print_overall_percent = pct
+        bar = self._print_progressbar
+        if bar is None:
+            return
+        bar.configure(maximum=100, value=pct)
+        if self._print_percent_label is not None:
+            self._print_percent_label.configure(text=f"{pct:.0f}%")
+
     def _update_print_progress(self, stage, current, maximum, detail):
         if self._print_progressbar is None:
             return
         maximum = max(int(maximum or 1), 1)
         current = min(max(int(current or 0), 0), maximum)
-        self._print_progressbar.configure(maximum=maximum, value=current)
-        self._print_percent_label.configure(
-            text=f"{(current / maximum) * 100:.0f}%")
+        fraction = current / maximum
+        # download and layout each report progress against their OWN item
+        # count (distinct PNGs to fetch vs. total card placements on pages),
+        # which differ whenever a deck has duplicate cards -- nearly every
+        # real deck (basics, 4-ofs). Mapping each phase's local fraction into
+        # its own half of one monotonic overall percent keeps the bar from
+        # reaching ~100% at the end of downloading and then visibly jumping
+        # back down to a few percent when layout resets its own local
+        # maximum to the much larger placement count.
         if stage == "download":
+            self._set_print_percent(fraction * 50)
             self._print_stage_label.configure(
                 text="Preparing high-resolution PNGs…")
             self._print_detail_label.configure(
                 text=f"Checking/downloading: {detail}")
         elif stage == "layout":
+            self._set_print_percent(50 + fraction * 50)
             self._print_stage_label.configure(
                 text="Building printable pages…")
             self._print_detail_label.configure(
                 text=f"Placed {current:,} of {maximum:,} cards at full print size")
         elif stage == "done":
+            self._set_print_percent(99)
             self._print_stage_label.configure(text="Print template is ready")
             self._print_detail_label.configure(
                 text="The PDF was created successfully.")

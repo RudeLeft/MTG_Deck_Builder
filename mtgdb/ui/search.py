@@ -2739,7 +2739,15 @@ class SearchFeatureMixin:
                 widget.state(["!disabled"] if enabled else ["disabled"])
             except (tk.TclError, AttributeError):
                 try:
-                    widget.configure(state=state)
+                    # Fallback for a classic (non-ttk) widget, whose state()
+                    # takes a plain string rather than a ttk state list. The
+                    # parameter here is "enabled" (this method's own
+                    # parameter), not "state" -- the latter was undefined,
+                    # raising NameError that the bare except below silently
+                    # swallowed, leaving the widget's enabled/disabled state
+                    # never actually applied on this fallback path.
+                    widget.configure(
+                        state="normal" if enabled else "disabled")
                 except Exception:
                     pass
 
