@@ -238,9 +238,13 @@ class Harness:
         self.db.load_cards(build_corpus())
         self.repo = SearchRepository(self.db)
         self.reader = self.db.open_reader()
-        index_rows = [dict(r) for r in self.reader.execute(
-            "SELECT " + ", ".join(FacetIndex.INDEX_COLUMNS) + " FROM cards")]
-        self.index = FacetIndex(index_rows)
+        # Fetch id alongside the index columns in one scan so bit position i in a
+        # facet bitset maps to id_order[i] in the exact same row order the index
+        # was built from. FacetIndex ignores the extra id key.
+        raw = [dict(r) for r in self.reader.execute(
+            "SELECT id, " + ", ".join(FacetIndex.INDEX_COLUMNS) + " FROM cards")]
+        self.id_order = [row["id"] for row in raw]
+        self.index = FacetIndex(raw)
         self.ctrl = SearchContextController(self.repo)
         self.ctrl._facet_index_disabled = True   # force the SQLite reference path
         self.vocab = self.ctrl._vocabulary_payload(**self._raw_vocab())
@@ -258,6 +262,23 @@ class Harness:
             formats=list((repo.formats_by_status(scope) or {}).get("playable") or ()),
             set_types=[s[0] for s in repo.set_types(scope)],
             sets=repo.sets(content_types=scope))
+
+    def facet_result_ids(self, crit):
+        """The matching card-id set from the facet index, or None if it declines.
+
+        Bit position i in the filter bitset maps to id_order[i], so this is the
+        independent (bitset) golden result set the SQL query path is checked
+        against.
+        """
+        bitset = self.index.filter_bitset(crit)
+        if bitset is None:
+            return None
+        ids = set()
+        while bitset:
+            low = bitset & -bitset
+            ids.add(self.id_order[low.bit_length() - 1])
+            bitset ^= low
+        return ids
 
     def close(self):
         try:

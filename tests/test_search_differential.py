@@ -33,6 +33,7 @@ def main():
 
         count_matches_results = True
         fast_count_matches = True
+        fast_ids_match = True
         fast_context_matches = True
         representable_declines = True
         representable_seen = 0
@@ -59,6 +60,10 @@ def main():
                 fast_count_matches = False
                 print("    fast count mismatch: %d != %d :: %r"
                       % (fast["count"], reference["count"], crit))
+            facet_ids = harness.facet_result_ids(crit)
+            if facet_ids != set(reference["ids"]):
+                fast_ids_match = False
+                print("    result-set mismatch (SQL vs facet golden) :: %r" % (crit,))
             bad = H.compare_context(reference["context"], fast["context"])
             if bad:
                 fast_context_matches = False
@@ -71,6 +76,8 @@ def main():
                 count_matches_results,
             "fast-path count equals count_search where representable":
                 fast_count_matches,
+            "SQL result set equals the facet golden id set where representable":
+                fast_ids_match,
             "fast-path context equals the SQLite worker where representable":
                 fast_context_matches,
             "only pip-minimum criteria decline the fast path":

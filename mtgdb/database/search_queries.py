@@ -9,7 +9,8 @@ from mtgdb.database.constants import (
     ART_LAYOUTS, COLORS, CONTENT_TYPES, PLAYABLE_LEGALITY_STATUSES,
 )
 from mtgdb.database.schema import _CARD_COLUMN_NAMES
-from mtgdb.database.semantics import _escape_like, _normalize_rules_text
+from mtgdb.database.semantics import (
+    COLOR_BITS, _escape_like, _normalize_rules_text, _type_key)
 
 
 class SearchQueryBuilder:
@@ -41,8 +42,9 @@ class SearchQueryBuilder:
             raise ValueError(
                 "Unknown card-content type(s): " + ", ".join(unknown_content))
         placeholders = ",".join("?" * len(content_types))
-        self.clauses.append(
-            f"CARD_CONTENT_KIND(layout, type_line) IN ({placeholders})")
+        # Precomputed indexed column (content_kind == CARD_CONTENT_KIND at import)
+        # replaces the per-row Python function on every candidate row.
+        self.clauses.append(f"content_kind IN ({placeholders})")
         self.params.extend(sorted(content_types))
         return True
 
@@ -118,103 +120,117 @@ class SearchQueryBuilder:
     def add_type_filters(self, card_types, card_type_mode, supertypes,
                          supertype_mode, subtypes, subtype_mode,
                          keywords, keyword_mode, type_line):
-        self._add_function_terms(
-            card_types, card_type_mode, "CARD_HAS_TYPE(type_line, ?) = 1")
-        self._add_function_terms(
-            supertypes, supertype_mode,
-            "CARD_HAS_TYPE(type_line, ?) = 1")
-        self._add_function_terms(
-            subtypes, subtype_mode, "CARD_HAS_SUBTYPE(type_line, ?) = 1")
+        # Types and supertypes both live in the left type-line part, so both map
+        # to the card_types membership table (as CARD_HAS_TYPE covered both).
+        self._add_membership_terms(card_types, card_type_mode, "card_types")
+        self._add_membership_terms(supertypes, supertype_mode, "card_types")
+        self._add_membership_terms(subtypes, subtype_mode, "card_subtypes")
 
-        keyword_values = [
-            str(value).strip() for value in (keywords or []) if str(value).strip()
+        keyword_terms = [
+            str(value).strip().casefold()
+            for value in (keywords or []) if str(value).strip()
         ]
-        if keyword_values:
+        if keyword_terms:
             normalized = str(keyword_mode).casefold()
             joiner = " OR " if normalized in ("any", "none") else " AND "
             group = "(" + joiner.join(
-                "EXISTS (SELECT 1 FROM json_each(COALESCE(keywords, '[]')) "
-                "AS keyword_value WHERE keyword_value.value = ? COLLATE NOCASE)"
-                for _ in keyword_values) + ")"
+                "EXISTS (SELECT 1 FROM card_keywords m "
+                "WHERE m.card_id = id AND m.term = ?)"
+                for _ in keyword_terms) + ")"
             self.clauses.append(
                 f"NOT {group}" if normalized == "none" else group)
-            self.params.extend(keyword_values)
+            self.params.extend(keyword_terms)
 
         if type_line:
             self.clauses.append("type_line LIKE ? ESCAPE '\\'")
             self.params.append(f"%{_escape_like(type_line)}%")
 
-    def _add_function_terms(self, values, mode, sql_expr):
-        clean = [str(value).strip() for value in (values or [])
-                 if str(value).strip()]
-        if not clean:
+    def _add_membership_terms(self, values, mode, table):
+        """Filter by an indexed (card_id, term) membership table.
+
+        Replaces the per-row CARD_HAS_TYPE / CARD_HAS_SUBTYPE functions: the
+        selected value is normalized to the same term the import stored (every
+        contiguous n-gram of the type-line words), so an EXISTS on the indexed
+        term reproduces the contiguous-run match exactly. Any/All/None combine
+        the per-term EXISTS clauses just as the function version did.
+        """
+        terms = []
+        for value in (values or []):
+            term = " ".join(_type_key(str(value)).split())
+            if term:
+                terms.append(term)
+        if not terms:
             return
         normalized = str(mode).casefold()
+        expr = (f"EXISTS (SELECT 1 FROM {table} m "
+                f"WHERE m.card_id = id AND m.term = ?)")
         group = "(" + (" OR " if normalized in ("any", "none") else " AND ").join(
-            sql_expr for _ in clean) + ")"
+            expr for _ in terms) + ")"
         # "none" excludes every card matching any selected value, which is the
         # only way to ask for a green non-creature or a creature without flying.
         self.clauses.append(f"NOT {group}" if normalized == "none" else group)
-        self.params.extend(clean)
+        self.params.extend(terms)
 
-    def _add_color_set_filter(self, column, selected, mode, members):
-        """Filter one comma-joined WUBRG(+C) column by within/includes/exact.
+    def _add_color_set_filter(self, mask_column, selected, mode, members):
+        """Filter a precomputed WUBRG(+C) bitmask column by within/includes/exact.
 
-        ``color_identity`` and ``produced_mana`` share this encoding, so both
-        filters share one implementation rather than drifting apart.
-
-        Stored values are joined in alphabetical order (``B,G,R,U,W``) while
-        ``COLORS`` is in WUBRG order, so an exact match MUST sort the requested
-        set. Building the needle in COLORS order made every multi-colour
-        "Exactly" search silently return nothing.
+        ``identity_mask`` and ``produced_mask`` share this encoding, so both
+        filters share one implementation. The integer AND replaces the former
+        per-colour LIKE over the comma-joined string: includes means the card
+        has all selected bits, exact means its bits equal the selected set, and
+        within means it has no bit outside the selected set.
         """
         if not selected:
             return
+        selected_mask = 0
+        for color in selected:
+            selected_mask |= COLOR_BITS[color]
         if mode == "includes":
-            for color in selected:
-                self.clauses.append(f"{column} LIKE ?")
-                self.params.append(f"%{color}%")
+            self.clauses.append(f"({mask_column} & ?) = ?")
+            self.params.extend([selected_mask, selected_mask])
         elif mode == "exact":
-            self.clauses.append(f"COALESCE({column}, '') = ?")
-            self.params.append(",".join(sorted(selected)))
+            self.clauses.append(f"{mask_column} = ?")
+            self.params.append(selected_mask)
         else:
+            outside_mask = 0
             for color in members:
                 if color not in selected:
-                    self.clauses.append(f"{column} NOT LIKE ?")
-                    self.params.append(f"%{color}%")
+                    outside_mask |= COLOR_BITS[color]
+            self.clauses.append(f"({mask_column} & ?) = 0")
+            self.params.append(outside_mask)
 
     def add_color_filter(self, colors, color_mode, scope="identity"):
         """Filter by colour identity, or by the card's own colours.
 
         Scryfall separates these and so does the stored schema: Ghostfire
-        is a colourless card with a red identity. Both columns share one
+        is a colourless card with a red identity. Both bitmask columns share one
         encoding, so only the column name changes.
         """
-        column = "colors" if str(scope) == "colors" else "color_identity"
+        mask_column = "colors_mask" if str(scope) == "colors" else "identity_mask"
         requested = [color for color in (colors or []) if color in (*COLORS, "C")]
         selected = [color for color in requested if color in COLORS]
         if selected:
-            self._add_color_set_filter(column, selected, color_mode, COLORS)
+            self._add_color_set_filter(mask_column, selected, color_mode, COLORS)
         elif "C" in requested:
-            self.clauses.append(f"COALESCE({column}, '') = ''")
+            self.clauses.append(f"{mask_column} = 0")
 
     def add_produces_filter(self, produces, produces_mode):
         """Filter by the mana a card can actually produce.
 
         Distinct from colour identity: Birds of Paradise has identity ``G`` and
         produces every colour, and Command Tower has no identity at all. Here
-        colourless is a real member stored inline as ``C`` (``B,C,G``) rather
-        than an empty value, so it participates like any other colour.
+        colourless is a real member (the ``C`` bit) rather than an empty value,
+        so it participates like any other colour.
         """
         members = (*COLORS, "C")
         selected = [color for color in (produces or []) if color in members]
         if not selected:
             return
         self._add_color_set_filter(
-            "produced_mana", selected, produces_mode, members)
+            "produced_mask", selected, produces_mode, members)
         if produces_mode != "exact":
-            # "within" alone would match the 99k cards that produce nothing.
-            self.clauses.append("COALESCE(produced_mana, '') != ''")
+            # "within" alone would match the ~99k cards that produce nothing.
+            self.clauses.append("produced_mask != 0")
 
     def add_numeric_filters(self, cmc_min, cmc_max, power_min, power_max,
                             toughness_min, toughness_max):
