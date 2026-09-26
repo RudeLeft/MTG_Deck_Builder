@@ -13,10 +13,12 @@ exercises the one thing only real Windows can prove: that ``robocopy /E /XD``
 truly replaces the program while leaving ``data\\`` alone.
 """
 
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,17 +43,25 @@ def main():
         data = program / su.DATA_DIRNAME
         (program / "_internal").mkdir(parents=True)
         data.mkdir(parents=True)
-        # Old program files that the update should replace.
+        # Old program files that the update should replace.  robocopy skips a
+        # file whose size and timestamp match the one already there, so a fixture
+        # of same-length files written milliseconds apart is skipped about half
+        # the time -- which is not what an update looks like.  An installed
+        # program is older than the build that replaces it, and a new build is a
+        # different size, so the fixture is too.
         (program / su.PROGRAM_EXE).write_text("OLD EXE", encoding="utf-8")
         (program / "_internal" / "lib.txt").write_text("OLD LIB", encoding="utf-8")
+        a_day_ago = time.time() - 24 * 3600
+        for old_file in (program / su.PROGRAM_EXE, program / "_internal" / "lib.txt"):
+            os.utime(old_file, (a_day_ago, a_day_ago))
         # User data that MUST survive the swap untouched.
         (data / "cards.db").write_text("USER DB", encoding="utf-8")
         (data / "decks.json").write_text("USER DECKS", encoding="utf-8")
         # The staged new version.
         staged = Path(su.staged_program_dir(str(data)))
         (staged / "_internal").mkdir(parents=True)
-        (staged / su.PROGRAM_EXE).write_text("NEW EXE", encoding="utf-8")
-        (staged / "_internal" / "lib.txt").write_text("NEW LIB", encoding="utf-8")
+        (staged / su.PROGRAM_EXE).write_text("NEW EXE, REBUILT", encoding="utf-8")
+        (staged / "_internal" / "lib.txt").write_text("NEW LIB, REBUILT", encoding="utf-8")
         (staged / "_internal" / "new.txt").write_text("ADDED", encoding="utf-8")
 
         script = su.build_swap_script(str(data))
@@ -66,7 +76,7 @@ def main():
 
         backup = Path(su.backup_dir(str(data)))
         checks["program exe replaced with the new build"] = (
-            (program / su.PROGRAM_EXE).read_text(encoding="utf-8") == "NEW EXE")
+            (program / su.PROGRAM_EXE).read_text(encoding="utf-8") == "NEW EXE, REBUILT")
         checks["an added program file is copied in"] = (
             (program / "_internal" / "new.txt").read_text(encoding="utf-8") == "ADDED")
         checks["user database is preserved"] = (
