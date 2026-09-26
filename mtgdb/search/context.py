@@ -34,7 +34,7 @@ CONTEXT_COLUMNS = (
     "type_line", "keywords", "rarity", "layout", "cmc", "power",
     "toughness", "loyalty", "defense", "released_at", "mana_cost",
     "back_mana_cost", "back_power", "back_toughness", "back_loyalty",
-    "back_defense",
+    "back_defense", "back_colors",
     "produced_mana", "colors", "color_identity", "color_indicator",
     "reserved", "game_changer", "universes_beyond", "card_faces",
     "set_code", "set_name", "set_type", "games", "lang", "legalities",
@@ -390,6 +390,10 @@ def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
     result = {candidate: 0 for candidate in vocabulary}
     for row in rows:
         members = _comma_members(row.get(field))
+        if field == "colors":
+            # A two-faced card's own colours are the colours of every face
+            # together (SRCH-052): the front's plus the back's (NULL = no back).
+            members = members | _comma_members(row.get("back_colors"))
         for candidate in vocabulary:
             if not _color_match(members, targets[candidate], mode, produced=produced):
                 continue
@@ -432,13 +436,18 @@ def _predict_pips(rows, selected, minimum, mode="all"):
                     continue
             else:
                 if normalized == "any":
-                    if not (wanted & represented):
+                    # Self-excluding (SRCH-045): the candidate is measured ALONE,
+                    # so an already-selected colour's symbols cannot help it reach
+                    # the Minimum.  (Showing 9 for Red while selecting Red alone
+                    # returned 5.)
+                    if candidate not in represented:
                         continue
+                    counted = {candidate}
                 elif not wanted.issubset(represented):
                     continue
-                if sum(1 for colors in symbols if colors & wanted) < threshold:
-                    continue
-                if normalized == "any" and candidate not in represented:
+                else:
+                    counted = wanted
+                if sum(1 for colors in symbols if colors & counted) < threshold:
                     continue
             result[candidate] += 1
     return result
@@ -691,7 +700,7 @@ _FACET_COLUMNS = {
     "supertypes": ("type_line",),
     "subtypes": ("type_line",),
     "keywords": ("keywords",),
-    "colors": ("colors", "color_identity"),
+    "colors": ("colors", "color_identity", "back_colors"),
     "produces": ("produced_mana",),
     "traits": (
         "mana_cost", "back_mana_cost", "card_faces", "universes_beyond",

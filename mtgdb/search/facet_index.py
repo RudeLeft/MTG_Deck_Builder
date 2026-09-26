@@ -30,8 +30,8 @@ from mtgdb.database.constants import (
 from mtgdb.database.semantics import (
     _card_content_kind, _cast_real, _glob_numeric, _mana_cost_symbol_colors,
     _normalize_rules_text, _type_line_search_parts,
-    mana_cost_has_hybrid_symbol, mana_cost_has_phyrexian_symbol,
-    pip_minimum_threshold,
+    fold_search_text, mana_cost_has_hybrid_symbol,
+    mana_cost_has_phyrexian_symbol, pip_minimum_threshold,
 )
 from mtgdb.search.context import (
     _CONTENT_KEYS, _GAME_KEYS, _LEGACY_TRAIT_KEYS, _MANA_FEATURE_KEYS,
@@ -140,7 +140,9 @@ class FacetIndex:
         # The other face of a two-faced card: a card is found by either face's
         # cost and stats (SRCH-052).
         "back_mana_cost", "back_power", "back_toughness", "back_loyalty",
-        "back_defense",
+        "back_defense", "back_colors",
+        # The case- and accent-folded name Card Name matches on (SRCH-053).
+        "name_search",
     )
 
     def __init__(self, rows):
@@ -186,6 +188,7 @@ class FacetIndex:
         # Free-text search corpora scanned per query.  Names are ASCII-folded to
         # mirror LIKE/COLLATE NOCASE; oracle_text_search is already normalized.
         self._name_lower = [""] * n
+        self._name_fold = [""] * n
         self._oracle_search = [""] * n
 
         def mark(buf, i):
@@ -201,6 +204,10 @@ class FacetIndex:
 
         for i, row in enumerate(rows):
             self._name_lower[i] = str(row.get("name") or "").translate(_ASCII_LOWER)
+            # The stored folded copy, so the substring scan folds exactly as the
+            # SQL LIKE does; fall back to folding the name for rows without it.
+            self._name_fold[i] = (str(row.get("name_search") or "")
+                                  or fold_search_text(row.get("name")))
             self._oracle_search[i] = str(row.get("oracle_text_search") or "")
             layout_value = row.get("layout")
             layout_key = str(layout_value or "").casefold().strip()
@@ -249,7 +256,11 @@ class FacetIndex:
             for key in _trait_filter_keys(row):
                 trait_filter.set(key, i)
 
-            mark_colors(row.get("colors"), colors, colors_empty, i)
+            # A two-faced card's own colours are the colours of every face
+            # together (SRCH-052): the front's plus the back's (NULL = no back).
+            mark_colors(
+                ",".join(filter(None, (row.get("colors"), row.get("back_colors")))),
+                colors, colors_empty, i)
             mark_colors(row.get("color_identity"), identity, identity_empty, i)
             mark_colors(row.get("produced_mana"), produced, produced_empty, i)
 
@@ -483,10 +494,10 @@ class FacetIndex:
                     result |= 1 << i
             return result
         if name:
-            needle = str(name).translate(_ASCII_LOWER)
+            needle = fold_search_text(name)
             result = 0
-            for i, lowered in enumerate(self._name_lower):
-                if needle in lowered:
+            for i, folded in enumerate(self._name_fold):
+                if needle in folded:
                     result |= 1 << i
             return result
         return self.universe

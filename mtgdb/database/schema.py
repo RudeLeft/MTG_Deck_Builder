@@ -1,16 +1,20 @@
 """SQLite schema, indexes, migration, and connection configuration."""
 
+import json
 import logging
 import os
 import re
 import sqlite3
 import time
 
+from mtgdb.database.semantics import (
+    _all_oracle_text, face_dependent_columns, fold_search_text)
+
 
 log = logging.getLogger("mtg")
 
 
-_SCHEMA_VERSION = 18
+_SCHEMA_VERSION = 19
 
 # Scryfall catalogs are the authoritative, forward-updatable vocabulary for
 # Card Types, subtypes, and abilities. Official Supertype vocabulary comes
@@ -115,7 +119,15 @@ CREATE TABLE IF NOT EXISTS cards (
     back_power        TEXT,
     back_toughness    TEXT,
     back_loyalty      TEXT,
-    back_defense      TEXT
+    back_defense      TEXT,
+    -- Card Name matches on this case- and accent-folded copy of name
+    -- (semantics.fold_search_text), so "eowyn" finds "Éowyn" (SRCH-053).
+    name_search       TEXT NOT NULL DEFAULT '',
+    -- The back face's colours, comma-joined like colors.  NULL means there is no
+    -- back face (or no colour data for it); '' is a real colourless back face.
+    -- Colours match when EITHER face fits (SRCH-052).
+    back_colors       TEXT,
+    back_colors_mask  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 CREATE INDEX IF NOT EXISTS idx_cards_name_nocase ON cards(name COLLATE NOCASE);
@@ -385,6 +397,120 @@ def open_writer_connection(path):
     return connection
 
 
+# In-place upgrades.  A schema change used to drop the card table, so the first
+# launch after an update had no cards and re-downloaded ~500 MB.  Every column
+# added since version 17 is derivable from data the table already stores, so it is
+# backfilled instead.  Each step uses the SAME derivation functions the importer
+# uses (semantics.face_dependent_columns, fold_search_text, _all_oracle_text), so
+# an upgraded database holds exactly what a fresh import would.  Anything that
+# goes wrong rolls back and falls through to the old drop-and-resync path.
+_OLDEST_UPGRADABLE_VERSION = 17
+
+
+def _add_columns(connection, columns):
+    existing = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
+    for name, ddl in columns:
+        if name not in existing:
+            connection.execute(f"ALTER TABLE cards ADD COLUMN {name} {ddl}")
+
+
+def _load_faces(text):
+    try:
+        faces = json.loads(text or "[]")
+    except (TypeError, ValueError):
+        return []
+    return faces if isinstance(faces, list) else []
+
+
+def _upgrade_17_to_18(connection):
+    """Back-face cost and stats; colour columns and trait flags over both faces."""
+    _add_columns(connection, (
+        ("back_mana_cost", "TEXT NOT NULL DEFAULT ''"), ("back_power", "TEXT"),
+        ("back_toughness", "TEXT"), ("back_loyalty", "TEXT"),
+        ("back_defense", "TEXT")))
+    updates = []
+    for (row_id, mana_cost, power, toughness, faces_text,
+         indicator) in connection.execute(
+            "SELECT id, mana_cost, power, toughness, card_faces, color_indicator "
+            "FROM cards").fetchall():
+        derived = face_dependent_columns(
+            _load_faces(faces_text), mana_cost, power, toughness, faces_text,
+            indicator)
+        pips = derived["pips"]
+        updates.append((
+            derived["back_mana_cost"], derived["back_power"],
+            derived["back_toughness"], derived["back_loyalty"],
+            derived["back_defense"], derived["trait_flags"], pips["W"],
+            pips["U"], pips["B"], pips["R"], pips["G"], pips["C"], row_id))
+    connection.executemany(
+        "UPDATE cards SET back_mana_cost=?, back_power=?, back_toughness=?, "
+        "back_loyalty=?, back_defense=?, trait_flags=?, pips_w=?, pips_u=?, "
+        "pips_b=?, pips_r=?, pips_g=?, pips_c=? WHERE id=?", updates)
+
+
+def _upgrade_18_to_19(connection):
+    """Folded name, back-face colours, and a seam in two-faced rules text."""
+    _add_columns(connection, (
+        ("name_search", "TEXT NOT NULL DEFAULT ''"), ("back_colors", "TEXT"),
+        ("back_colors_mask", "INTEGER")))
+    updates = []
+    rules_updates = []
+    for (row_id, name, oracle_text, mana_cost, power, toughness, faces_text,
+         indicator) in connection.execute(
+            "SELECT id, name, oracle_text, mana_cost, power, toughness, "
+            "card_faces, color_indicator FROM cards").fetchall():
+        faces = _load_faces(faces_text)
+        derived = face_dependent_columns(
+            faces, mana_cost, power, toughness, faces_text, indicator)
+        updates.append((
+            fold_search_text(name), derived["back_colors"],
+            derived["back_colors_mask"], row_id))
+        if len(faces) > 1:
+            # Only a multi-face card's joined text changes (it gains the seam).
+            # The stored oracle_text is the top-level text or, failing that, the
+            # first face's, so rebuilding from it and the faces reproduces the
+            # importer's text once exact repeats are dropped.
+            rules_updates.append((_all_oracle_text(
+                {"oracle_text": oracle_text or None, "card_faces": faces}), row_id))
+    connection.executemany(
+        "UPDATE cards SET name_search=?, back_colors=?, back_colors_mask=? "
+        "WHERE id=?", updates)
+    connection.executemany(
+        "UPDATE cards SET oracle_text_search=? WHERE id=?", rules_updates)
+
+
+_UPGRADES = {17: _upgrade_17_to_18, 18: _upgrade_18_to_19}
+
+
+def _upgrade_in_place(connection, version):
+    """Upgrade ``cards`` in place to the current schema; False if it cannot."""
+    steps = list(range(version, _SCHEMA_VERSION))
+    if (version < _OLDEST_UPGRADABLE_VERSION or not steps
+            or any(step not in _UPGRADES for step in steps)):
+        return False
+    started = time.perf_counter()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        for step in steps:
+            _UPGRADES[step](connection)
+        connection.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
+            (str(_SCHEMA_VERSION),))
+        connection.commit()
+    except Exception:
+        log.exception(
+            "In-place upgrade from schema %s failed; rebuilding the card table",
+            version)
+        try:
+            connection.rollback()
+        except sqlite3.Error:
+            pass
+        return False
+    log.info("Card database upgraded in place from schema %s to %s in %.1f s",
+             version, _SCHEMA_VERSION, time.perf_counter() - started)
+    return True
+
+
 def _existing_schema_version(connection):
     """Return the committed schema version without modifying the database."""
     row = connection.execute(
@@ -404,8 +530,9 @@ def _existing_schema_version(connection):
 def initialize_schema(connection):
     """Migrate and initialize the complete SQLite contract atomically."""
     version = _existing_schema_version(connection)
+    upgraded = version != _SCHEMA_VERSION and _upgrade_in_place(connection, version)
     statements = ["BEGIN IMMEDIATE;"]
-    if version != _SCHEMA_VERSION:
+    if version != _SCHEMA_VERSION and not upgraded:
         statements.append("DROP TABLE IF EXISTS cards;")
         # Membership tables are derived from cards; drop them on any version
         # change so a rebuilt snapshot never inherits stale (card, term) rows.

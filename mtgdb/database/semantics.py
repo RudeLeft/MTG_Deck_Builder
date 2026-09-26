@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 import re
+import unicodedata
 
 from mtgdb.database.constants import (
     ART_LAYOUTS, CONTENT_TYPES, KNOWN_SCRYFALL_LAYOUTS, NON_CARD_LAYOUTS)
@@ -34,6 +35,88 @@ def _normalize_rules_text(value):
     text = re.sub(r"[.,;:!?]+", " ", text)
     text = " ".join(text.split())
     return text.casefold()
+
+
+# Letters that decomposition leaves alone but that a keyboard without them types
+# as plain letters.
+_FOLD_LETTERS = str.maketrans({
+    "\u00e6": "ae", "\u0153": "oe", "\u00f8": "o", "\u00f0": "d",
+    "\u00fe": "th", "\u0111": "d", "\u0142": "l",
+})
+
+
+def fold_search_text(value):
+    """Case- and accent-insensitive form of text, for matching card names.
+
+    "\u00c9owyn", "\u00e9owyn" and "eowyn" fold to the same string, as do "\u00c6ther
+    Vial" and "aether vial".  Stored (``name_search``) and typed text are folded by
+    this one function, so SQL, the in-memory index and autocomplete all agree.
+    SQLite's own ``LIKE`` folds case for A-Z only, which is why accents needed this.
+    """
+    text = str(value or "")
+    if text.isascii():
+        return text.lower()
+    decomposed = unicodedata.normalize("NFKD", text)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return stripped.casefold().translate(_FOLD_LETTERS)
+
+
+# Joins the rules text of a card's faces.  It is not whitespace, so normalization
+# keeps it, and no typed phrase contains it: a quoted phrase therefore cannot match
+# across the seam between two halves of a split card (or two faces of any card).
+FACE_TEXT_BOUNDARY = "\u00b6"
+
+
+def _all_oracle_text(card):
+    """Return normalized rules text covering the parent object and every face."""
+    parts = []
+    parent = card.get("oracle_text")
+    if parent:
+        parts.append(parent)
+    for face in card.get("card_faces") or []:
+        text = face.get("oracle_text")
+        if text:
+            parts.append(text)
+    # Deduplicate exact repeated text while preserving face order.
+    seen, unique = set(), []
+    for part in parts:
+        key = str(part)
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+    return _normalize_rules_text(f" {FACE_TEXT_BOUNDARY} ".join(unique))
+
+
+PIP_COLORS = ("W", "U", "B", "R", "G", "C")
+
+
+def _mana_pips(mana_cost):
+    """Count coloured symbols in a mana cost, once per colour.
+
+    A hybrid symbol counts for both of its colours, which is how devotion
+    reads them and what someone asking for "two green" means: {G/W}{G/W}
+    costs two green and two white. Phyrexian {G/P} is one green. Generic,
+    variable and snow symbols contribute to no colour.
+    """
+    counts = dict.fromkeys(PIP_COLORS, 0)
+    for symbol in _MANA_COST_SYMBOL.findall(str(mana_cost or "")):
+        for part in str(symbol).upper().split("/"):
+            if part in counts:
+                counts[part] += 1
+    return counts
+
+
+def _back_face(card):
+    """The second face of a two-faced card, or ``{}``.
+
+    Search matches a card when either face fits (SRCH-052), so the back face's
+    cost, stats and colours are stored beside the front's.  Three or more faces
+    are rare and reach only the second.
+    """
+    faces = card.get("card_faces") or []
+    if len(faces) > 1 and isinstance(faces[1], dict):
+        return faces[1]
+    return {}
 
 
 _BFM_NAME_KEY = "b.f.m. (big furry monster)"
@@ -436,6 +519,40 @@ def combined_mana_cost(mana_cost, back_mana_cost=""):
     if front and back:
         return f"{front} // {back}"
     return front or back
+
+
+def face_dependent_columns(card_faces, mana_cost, power, toughness,
+                           card_faces_text, color_indicator):
+    """Every stored column that depends on a two-faced card's back face.
+
+    The importer computes these from a Scryfall card; the in-place schema upgrade
+    computes them from the columns already stored.  Both call this, so a database
+    upgraded in place holds exactly what a fresh import would.
+    """
+    faces = card_faces or []
+    back = faces[1] if len(faces) > 1 and isinstance(faces[1], dict) else {}
+    mana_cost = mana_cost or ""
+    # A split or adventure card's top-level cost already holds both halves
+    # ("A // B"); only a transform / modal card needs the back cost added.
+    back_mana_cost = "" if "//" in mana_cost else str(back.get("mana_cost") or "")
+    colors = back.get("colors")
+    # NULL means "no back face (or no colour data for it)"; an empty string is a
+    # real colourless back face.  The difference keeps Colorless from matching
+    # every single-faced card through its non-existent back.
+    back_colors = None if colors is None else ",".join(colors)
+    return {
+        "back_mana_cost": back_mana_cost,
+        "back_power": back.get("power"),
+        "back_toughness": back.get("toughness"),
+        "back_loyalty": back.get("loyalty"),
+        "back_defense": back.get("defense"),
+        "back_colors": back_colors,
+        "back_colors_mask": None if back_colors is None else color_mask(back_colors),
+        "pips": _mana_pips(combined_mana_cost(mana_cost, back_mana_cost)),
+        "trait_flags": derive_trait_flags(
+            mana_cost, power, toughness, card_faces_text, color_indicator,
+            back_mana_cost, back.get("power"), back.get("toughness")),
+    }
 
 
 def derive_trait_flags(mana_cost, power, toughness, card_faces, color_indicator,

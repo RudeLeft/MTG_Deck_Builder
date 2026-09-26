@@ -3,7 +3,7 @@
 import re
 
 from mtgdb.database.constants import ART_LAYOUTS, NON_CARD_LAYOUTS
-from mtgdb.database.semantics import _escape_like
+from mtgdb.database.semantics import _escape_like, fold_search_text
 
 
 # --- decklist name normalization -------------------------------------------
@@ -289,16 +289,15 @@ class CardQueryMixin:
         placeholders = ",".join("?" * len(ART_LAYOUTS))
         visible = f"(layout IS NULL OR layout NOT IN ({placeholders}))"
 
-        # Treat LIKE metacharacters as literal user input.
-        escaped = (query.replace("\\", "\\\\")
-                         .replace("%", "\\%")
-                         .replace("_", "\\_"))
+        # Treat LIKE metacharacters as literal user input, and match the folded
+        # copy so autocomplete agrees with the Name search (accent-insensitive).
+        escaped = _escape_like(fold_search_text(query))
         prefix_pattern = escaped + "%"
 
         with self._lock:
             rows = self.conn.execute(
                 f"SELECT DISTINCT name FROM cards "
-                f"WHERE name LIKE ? ESCAPE '\\' AND {visible} "
+                f"WHERE name_search LIKE ? ESCAPE '\\' AND {visible} "
                 f"ORDER BY name COLLATE NOCASE LIMIT ?",
                 (prefix_pattern, *ART_LAYOUTS, limit),
             ).fetchall()
@@ -311,8 +310,8 @@ class CardQueryMixin:
                 contains_pattern = "%" + escaped + "%"
                 rows = self.conn.execute(
                     f"SELECT DISTINCT name FROM cards "
-                    f"WHERE name LIKE ? ESCAPE '\\' "
-                    f"AND name NOT LIKE ? ESCAPE '\\' AND {visible} "
+                    f"WHERE name_search LIKE ? ESCAPE '\\' "
+                    f"AND name_search NOT LIKE ? ESCAPE '\\' AND {visible} "
                     f"ORDER BY length(name), name COLLATE NOCASE LIMIT ?",
                     (contains_pattern, prefix_pattern, *ART_LAYOUTS, remaining),
                 ).fetchall()

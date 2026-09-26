@@ -347,6 +347,27 @@ def main():
     finally:
         _root.destroy()
 
+    # The table's Power/Toughness filters read a stat exactly as Search does (digits,
+    # '.' and '-' only; SQL CAST for the value), so a printed "+1" is in neither
+    # or both -- the table used to keep a card that Search dropped.
+    from mtgdb.search.results import filter_numeric_value as _numeric_value
+    _at_least_zero = {"power": {"kind": "numeric", "min": 0.0, "max": None}}
+    stat_filters_match_search = (
+        _numeric_value({"power": "+1"}, "power") is None
+        and _numeric_value({"toughness": "*+1"}, "toughness") is None
+        and _numeric_value({"power": "*"}, "power") is None
+        and _numeric_value({"power": "3"}, "power") == 3.0
+        and _numeric_value({"power": "2.5"}, "power") == 2.5
+        and _numeric_value({"toughness": "-1"}, "toughness") == -1.0
+        # SQL CAST reads the leading number of a printed "1-2".
+        and _numeric_value({"power": "1-2"}, "power") == 1.0
+        and _passes({"power": "+1"}, _at_least_zero) is False
+        and _passes({"power": "2"}, _at_least_zero) is True
+        # Columns other than the two stats are unchanged.
+        and _numeric_value({"cmc": "3"}, "cmc") == 3.0
+        and _numeric_value({"released_at": "2020-05-01"}, "year") == 2020.0
+        and _numeric_value({}, "qty", qty=4) == 4.0)
+
     # Every column heading opens a filter, so every column needs a value to
     # match against. Cost had none: table_value fell through to "" while the
     # popup listed mana costs from a special case of its own, so filtering the
@@ -465,6 +486,8 @@ def main():
             every_column_has_a_filter_value
             and cost_filters_by_mana_symbol),
         "table numeric filters refuse non-finite bounds": finite_filter_bounds,
+        "table Power/Toughness filters treat a printed +1 as Search does": (
+            stat_filters_match_search),
         "table numeric filters explain a refusal and apply valid ranges": (
             table_filter_messages),
         "column drag reorder lands on the dropped slot, including the last": (

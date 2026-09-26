@@ -57,9 +57,18 @@ class DatabaseSyncMixin:
         self._sync_percent_label = None
 
     def _database_sync_is_running(self):
-        return self.database_sync_controller.running
+        """True while a refresh runs, or is about to (the launch decision).
+
+        The launch-time refresh starts a moment after the window appears.  In that
+        gap a database that was just rebuilt (the first launch after an update)
+        is empty and no refresh is "running" yet, so this used to answer False and
+        the user was told the database was empty rather than being prepared.
+        """
+        return bool(self.database_sync_controller.running
+                    or getattr(self, "_auto_sync_pending", False))
 
     def _maybe_auto_sync(self):
+        self._auto_sync_pending = False
         if self.database_sync_controller.running:
             return
         try:
@@ -388,6 +397,11 @@ class DatabaseSyncMixin:
         # the background so the first post-sync filter pick is instant.
         self.search_context_controller.reset_facet_index()
         self.search_context_controller.warm_facet_index()
+        if getattr(self, "_search_after_cards", False):
+            # A saved search that found the database empty at launch runs now
+            # that the cards are here, once the catalogs below have loaded.
+            self._search_after_cards = False
+            self._pending_search_request = True
         self._update_search_filter_summary()
         self._refresh_search_catalogs()
 

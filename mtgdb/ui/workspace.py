@@ -127,7 +127,14 @@ class WorkspaceMixin:
             self._restored_workspace_geometry = payload.get("geometry", {})
             search = payload.get("search", {})
             if self._restore_search_workspace_state(search):
-                if getattr(self, "_search_catalog_loading", False):
+                if not self.search_repository.has_cards():
+                    # A database being rebuilt (first launch, or right after an
+                    # update changed the schema) has nothing to search yet.
+                    # Running the saved search now would only raise an "empty
+                    # database" dialog nobody asked for, so it waits for the
+                    # cards (see _reconcile_after_database_change).
+                    self._search_after_cards = True
+                elif getattr(self, "_search_catalog_loading", False):
                     self._pending_search_request = True
                 else:
                     self._do_search()

@@ -1,5 +1,6 @@
 """Search-layer ownership, projection, controller, and responsiveness contracts."""
 
+import gc
 import os
 import tempfile
 from dataclasses import fields
@@ -522,6 +523,12 @@ def _activity_indicator_behaviour():
         return results
     finally:
         root.destroy()
+        # PulseStatus/ActivityIndicator hold reference cycles that keep the Tk
+        # root alive.  Left to the cyclic collector, the root can be finalised
+        # inside whichever worker thread happens to trigger a collection, which
+        # aborts the process ("Tcl_AsyncDelete: async handler deleted by the
+        # wrong thread").  Collect here, on the thread that created it.
+        gc.collect()
 
 
 def main():
@@ -646,10 +653,17 @@ def main():
                 pips=["G", "W"], pip_mode="any", pip_min=2)
             # Live candidate prediction uses the same physical-symbol total.
             # Under Any, Black must occur itself; selected White cannot revive
-            # a Black candidate that never appears on a card.
+            # a Black candidate that never appears on a card.  Each Any
+            # candidate is also measured ALONE (SRCH-045): {W}{B} has one Black
+            # symbol, so selected White cannot lift Black to a Minimum of two
+            # (the count once showed 9 for Red where selecting Red returned 5).
             and _predict_pips([
                 {"mana_cost": "{W/B}"}, {"mana_cost": "{W}{B}"},
                 {"mana_cost": "{W}{W}"}, {"mana_cost": "{U}{U}"},
+            ], ["W"], 2, "any")["B"] == 0
+            and _predict_pips([
+                {"mana_cost": "{B}{B}"}, {"mana_cost": "{W}{B}"},
+                {"mana_cost": "{W}{W}"},
             ], ["W"], 2, "any")["B"] == 1
             and _predict_pips([
                 {"mana_cost": "{W/B}"}, {"mana_cost": "{W}{B}"},

@@ -559,6 +559,117 @@ def _database_review_checks():
     return results
 
 
+def _first_launch_after_update_checks():
+    """The first launch after an update must not call the database "empty".
+
+    A schema change rebuilds the card table, so that launch starts with no cards
+    and re-downloads them.  The saved workspace restored the last search at once
+    -- before the launch-time refresh had started -- and the user was told "The
+    card database is empty. Use Database -> Update Database first" while the
+    refresh was about to fill it.  Reproduced against the real app on a temporary
+    data folder: the dialog appeared at 0.22 s, the refresh began at 0.58 s.
+    """
+    from types import SimpleNamespace
+    from mtgdb.ui import database_sync as ui_sync
+    from mtgdb.ui.workspace import WorkspaceMixin
+
+    results = {}
+
+    class SyncOwner(ui_sync.DatabaseSyncMixin):
+        pass
+
+    def sync_owner(*, running=False, pending=False, due=None):
+        owner = SyncOwner()
+        owner.database_sync_controller = SimpleNamespace(
+            running=running, due_reason=lambda: due)
+        owner._auto_sync_pending = pending
+        owner.started = []
+        owner._sync_db = lambda reason="manual": owner.started.append(reason)
+        return owner
+
+    results["a refresh that is about to start counts as running"] = (
+        sync_owner(pending=True)._database_sync_is_running() is True
+        and sync_owner(running=True)._database_sync_is_running() is True
+        and sync_owner()._database_sync_is_running() is False
+        and SyncOwner.__new__(SyncOwner).__class__ is SyncOwner)
+
+    launch = sync_owner(pending=True, due="first_launch")
+    launch._maybe_auto_sync()
+    quiet = sync_owner(pending=True, due=None)
+    quiet._maybe_auto_sync()
+    results["the launch decision clears the pending flag and starts the refresh"] = (
+        launch._auto_sync_pending is False and launch.started == ["first_launch"]
+        and quiet._auto_sync_pending is False and quiet.started == [])
+
+    class RestoreOwner(WorkspaceMixin):
+        pass
+
+    def restore(*, has_cards, loading=False):
+        owner = RestoreOwner()
+        owner._workspace_restoring = False
+        owner._search_catalog_loading = loading
+        owner._pending_search_request = False
+        owner._search_after_cards = False
+        owner.searches = 0
+        owner.search_repository = SimpleNamespace(has_cards=lambda: has_cards)
+        owner._restore_search_workspace_state = lambda state: True
+        owner._do_search = lambda: setattr(owner, "searches", owner.searches + 1)
+        owner.workspace_repository = SimpleNamespace(remember=lambda payload: None)
+        owner._apply_workspace_restore({"search": {"had_results": True}}, None)
+        return owner
+
+    empty = restore(has_cards=False)
+    ready = restore(has_cards=True)
+    loading = restore(has_cards=True, loading=True)
+    results["a restored search waits for the cards instead of hitting an empty database"] = (
+        empty.searches == 0 and empty._search_after_cards is True
+        and empty._pending_search_request is False
+        and ready.searches == 1 and ready._search_after_cards is False
+        and loading.searches == 0 and loading._pending_search_request is True
+        and loading._search_after_cards is False)
+
+    class Controller:
+        def __init__(self, log, name):
+            self._log, self._name = log, name
+
+        def __getattr__(self, method):
+            return lambda *a, **k: self._log.append(f"{self._name}.{method}")
+
+    def reconcile(waiting):
+        owner = SyncOwner()
+        owner.log = []
+        owner._search_after_cards = waiting
+        owner._pending_search_request = False
+        owner._invalidate_search_cache = lambda: owner.log.append("cache")
+        owner.search_catalog_controller = Controller(owner.log, "catalog")
+        owner.search_context_controller = Controller(owner.log, "context")
+        owner._update_search_filter_summary = lambda: owner.log.append("summary")
+
+        def refresh():
+            # The pending search must already be armed when the catalogs are
+            # requested: a cached snapshot resumes it immediately.
+            owner.log.append(f"refresh(pending={owner._pending_search_request})")
+        owner._refresh_search_catalogs = refresh
+        owner._reconcile_after_database_change()
+        return owner
+
+    waiting = reconcile(True)
+    idle = reconcile(False)
+    results["the saved search runs once the cards arrive, after the catalogs are requested"] = (
+        waiting._pending_search_request is True
+        and waiting._search_after_cards is False
+        and "refresh(pending=True)" in waiting.log
+        and idle._pending_search_request is False
+        and "refresh(pending=False)" in idle.log)
+
+    app_source = (ROOT / "mtgdb/ui/app.py").read_text(encoding="utf-8")
+    results["startup marks the refresh pending before scheduling it"] = (
+        "self._auto_sync_pending = True\n        self.after(350, self._maybe_auto_sync)"
+        in app_source
+        and "self._auto_sync_pending = False" in app_source)
+    return results
+
+
 def main():
     discovered_txt = _discover_comprehensive_rules_txt(
         f'<a href="{RULES_TXT_URL}"><span>TXT</span></a>'.encode("utf-8"))
@@ -899,6 +1010,7 @@ def main():
     }
 
     checks.update(_database_review_checks())
+    checks.update(_first_launch_after_update_checks())
 
     ok = True
     for label, passed in checks.items():

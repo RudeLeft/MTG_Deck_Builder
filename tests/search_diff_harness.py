@@ -291,6 +291,70 @@ def build_corpus():
              "oracle_text": ""}],
         oracle_text=""))
 
+    # Card names with accents and ligatures (Card Name folds them, SRCH-053), a
+    # two-faced card whose faces differ in colour, a spell // land whose back is
+    # colourless, a split card with rules text on BOTH halves, and a printed "+1".
+    add(_printings("eowyn", "\u00c9owyn, Fearless Knight",
+                   "Legendary Creature \u2014 Human Knight", [
+        ("ltr", "expansion", "rare", "2023-06-23", "en")],
+        cmc=3.0, mana_cost="{2}{R}", colors=["R"], color_identity=["R"],
+        power="3", toughness="1", oracle_text="Haste."))
+    add(_printings("jotun", "J\u00f6tun Grunt", "Creature \u2014 Giant Soldier", [
+        ("ice", "expansion", "uncommon", "2015-01-01", "en")],
+        cmc=2.0, mana_cost="{1}{W}", colors=["W"], color_identity=["W"],
+        power="4", toughness="4", oracle_text="Cumulative upkeep."))
+    add(_printings("aether", "\u00c6ther Vial", "Artifact", [
+        ("dst", "expansion", "uncommon", "2015-01-01", "en")],
+        cmc=1.0, mana_cost="{1}", colors=[], color_identity=[],
+        oracle_text="At the beginning of your upkeep, you may put a charge counter."))
+    add(_printings("limdul", "Lim-D\u00fbl the Necromancer",
+                   "Legendary Creature \u2014 Zombie Wizard", [
+        ("all", "expansion", "rare", "2015-01-01", "en")],
+        cmc=5.0, mana_cost="{3}{U}{B}", colors=["U", "B"],
+        color_identity=["U", "B"], power="4", toughness="4",
+        oracle_text="Whenever a creature dies."))
+    add(_printings("scholar", "Civilized Scholar // Homicidal Brute",
+                   "Creature \u2014 Human Advisor // Creature \u2014 Human Warrior", [
+        ("isd", "expansion", "uncommon", "2015-09-30", "en")],
+        cmc=3.0, color_identity=["U", "R"], layout="transform",
+        card_faces=[
+            {"name": "Civilized Scholar", "mana_cost": "{2}{U}", "colors": ["U"],
+             "type_line": "Creature \u2014 Human Advisor", "power": "0",
+             "toughness": "1", "oracle_text": "Loot."},
+            {"name": "Homicidal Brute", "mana_cost": "", "colors": ["R"],
+             "type_line": "Creature \u2014 Human Warrior", "power": "5",
+             "toughness": "1", "oracle_text": "Trample."}],
+        oracle_text=""))
+    add(_printings("mdfc", "Spell Then Land // Test Land",
+                   "Sorcery // Land", [
+        ("znr", "expansion", "rare", "2020-09-25", "en")],
+        cmc=3.0, color_identity=["B"], layout="modal_dfc",
+        card_faces=[
+            {"name": "Spell Then Land", "mana_cost": "{2}{B}", "colors": ["B"],
+             "type_line": "Sorcery", "oracle_text": "Draw a card."},
+            {"name": "Test Land", "mana_cost": "", "colors": [],
+             "type_line": "Land", "oracle_text": "Test Land enters tapped."}],
+        oracle_text=""))
+    add(_printings("burnfreeze", "Burn // Freeze", "Instant // Instant", [
+        ("apc", "expansion", "uncommon", "2015-06-04", "en")],
+        cmc=4.0, mana_cost="{1}{R} // {1}{U}", colors=["R", "U"],
+        color_identity=["R", "U"], layout="split",
+        card_faces=[
+            {"name": "Burn", "mana_cost": "{1}{R}", "colors": ["R"],
+             "type_line": "Instant",
+             "oracle_text": "Burn deals 2 damage to one or two targets"},
+            {"name": "Freeze", "mana_cost": "{1}{U}", "colors": ["U"],
+             "type_line": "Instant", "oracle_text": "Tap target permanent"}],
+        oracle_text=""))
+    add(_printings("untap", "Untap Everything", "Sorcery", [
+        ("m19", "core", "common", "2018-07-13", "en")],
+        cmc=2.0, mana_cost="{1}{G}", colors=["G"], color_identity=["G"],
+        oracle_text="Untap all lands you control."))
+    add(_printings("plusone", "Vanguard Plus", "Creature \u2014 Test", [
+        ("van", "promo", "special", "2015-01-01", "en")],
+        cmc=1.0, mana_cost="{G}", colors=["G"], color_identity=["G"],
+        power="+1", toughness="+1", oracle_text=""))
+
     # Split and adventure cards ship ONE top-level cost holding both halves, so
     # their back-face cost must stay empty (or every symbol would count twice).
     add(_printings("adventure", "Bonecrusher Giant // Stomp",
@@ -419,7 +483,7 @@ def _vocab_lists(harness):
 _COLORS = ("W", "U", "B", "R", "G")
 _TEXT_WORDS = ("draw", "damage", "creature", "token", "flying", "destroy",
                "counter", "target", "add", "life", '"deals 3 damage"',
-               "draw a card")
+               "draw a card", '"targets tap target"')
 
 
 def generate_criteria(harness, seed=1234, n=240):
@@ -488,7 +552,9 @@ def generate_criteria(harness, seed=1234, n=240):
         lambda c: c.update(defense_min=float(rng.randint(1, 4))),
         lambda c: c.update(text=pick(list(_TEXT_WORDS), 1, 2),
                            text_mode=rng.choice(("all", "any", "none"))),
-        lambda c: c.update(name=rng.choice(("bear", "bolt", "a", "e", "of"))),
+        lambda c: c.update(name=rng.choice((
+            "bear", "bolt", "a", "e", "of", "eowyn", "\u00e9owyn", "J\u00d6TUN",
+            "lim-dul", "aether", "\u00e6ther vial", "l\u00fbl"))),
         lambda c: c.update(pips=pick(list(_COLORS), 1, 2),
                            pip_mode=rng.choice(("any", "all", "none"))),
         # The Minimum box's own default (1) and the values the SQL clamps to it.

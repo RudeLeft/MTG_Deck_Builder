@@ -176,6 +176,146 @@ def _either_face_checks(harness):
     }
 
 
+EOWYN = "\u00c9owyn, Fearless Knight"
+JOTUN = "J\u00f6tun Grunt"
+AETHER = "\u00c6ther Vial"
+LIMDUL = "Lim-D\u00fbl the Necromancer"
+SCHOLAR = "Civilized Scholar // Homicidal Brute"
+MDFC = "Spell Then Land // Test Land"
+BURN_FREEZE = "Burn // Freeze"
+
+
+def _names_colors_and_text_checks(harness):
+    """Card Name folds accents, a two-faced card's colours span both faces, a
+    quoted phrase cannot span the seam between two halves, and an "Any" mana-symbol
+    count is measured alone.  Each is checked on the SQL path AND the in-memory
+    index, and against named cards rather than only against each other."""
+    from mtgdb.search.models import SearchCriteria
+
+    def crit(**fields):
+        return SearchCriteria.from_mapping({"content_types": ("card",), **fields})
+
+    def sql_names(**fields):
+        _c, rows = harness.db.search_projection(
+            connection=harness.reader, columns=("name",),
+            **crit(**fields).query_arguments())
+        return {row[0] for row in rows}
+
+    def index_names(**fields):
+        ids = harness.facet_result_ids(crit(**fields))
+        if ids is None:
+            return None
+        _c, rows = harness.db.search_projection(
+            connection=harness.reader, columns=("id", "name"),
+            **crit(**fields).query_arguments())
+        return {name for row_id, name in rows if row_id in ids}
+
+    def both(**fields):
+        """The names found; SQL and the index must give the same answer."""
+        found, indexed = sql_names(**fields), index_names(**fields)
+        return found if indexed is None or indexed == found else None
+
+    # ---- Card Name: case- AND accent-insensitive (both engines) ----------------
+    lookups = (
+        ("\u00e9owyn", EOWYN), ("eowyn", EOWYN), ("\u00c9OWYN", EOWYN),
+        ("J\u00d6TUN", JOTUN), ("jotun", JOTUN), ("lim-dul", LIMDUL),
+        ("D\u00dbL", LIMDUL), ("aether vial", AETHER), ("\u00e6ther", AETHER),
+        ("AETHER", AETHER))
+    name_ok = all(
+        target in (both(name=query) or set()) for query, target in lookups)
+    plain_ok = (
+        "Grizzly Bear" in (both(name="bear") or set())
+        and EOWYN not in (both(name="jotun") or {EOWYN})
+        # LIKE metacharacters stay literal: neither is a wildcard.
+        and both(name="%") == set() and both(name="_") == set())
+    suggestions = harness.db.name_suggestions("eowyn")
+    suggestions_ok = EOWYN in suggestions and JOTUN in harness.db.name_suggestions("j\u00f6t")
+
+    # ---- Colours: a two-faced card's own colours are every face's, together ------
+    def colors(*chosen, mode, scope="colors"):
+        return both(colors=chosen, color_mode=mode, color_scope=scope)
+
+    colors_ok = (
+        # Front blue, back red: found as red, as blue, and exactly as both.
+        SCHOLAR in (colors("R", mode="includes") or set())
+        and SCHOLAR in (colors("U", mode="includes") or set())
+        and SCHOLAR in (colors("U", "R", mode="exact") or set())
+        and SCHOLAR not in (colors("U", mode="exact") or {SCHOLAR})
+        and SCHOLAR not in (colors("R", mode="within") or {SCHOLAR})
+        # A spell // land: the colourless land back adds no colour and takes none
+        # away, so it is black -- not Colorless, and not "within" any other colour.
+        and MDFC in (colors("B", mode="exact") or set())
+        and MDFC not in (colors("C", mode="exact") or {MDFC})
+        and MDFC not in (colors("R", mode="within") or {MDFC})
+        and AETHER in (colors("C", mode="exact") or set())
+        # Colour identity is unchanged, and already covered both faces.
+        and SCHOLAR in (colors("R", mode="includes", scope="identity") or set()))
+
+    # ---- Rules text: no phrase across the seam; word search is unchanged ------------
+    across = both(text=('"one or two targets tap target permanent"',))
+    inside_first = both(text=('"deals 2 damage to one or two targets"',))
+    inside_second = both(text=('"tap target permanent"',))
+    words = both(text=("targets", "tap"), text_mode="all")
+    text_ok = (
+        across is not None and BURN_FREEZE not in across
+        and BURN_FREEZE in (inside_first or set())
+        and BURN_FREEZE in (inside_second or set())
+        # Separate words still AND across the whole card, and the whole-word
+        # behaviour of Rules Text is deliberately left as it was.
+        and BURN_FREEZE in (words or set())
+        and "Untap Everything" in (both(text=("tap",)) or set()))
+
+    # ---- an "Any" symbol count is measured alone (SRCH-045) -------------------------
+    parity = True
+    for chosen in (("W",), ("R",), ("U", "B")):
+        context = H.reference_capture(harness, crit(
+            pips=chosen, pip_mode="any", pip_min=2.0))["context"]["pip_counts"]
+        for color in ("W", "U", "B", "R", "G"):
+            alone = harness.repo.count(
+                crit(pips=(color,), pip_mode="any", pip_min=2.0), harness.reader)
+            if context.get(color) != alone:
+                parity = False
+
+    # ---- the live colour counts (index AND SQLite worker) see the back face too ----
+    live_ok = True
+    for fields in (
+            {"colors": ("U",), "color_mode": "includes", "color_scope": "colors"},
+            {"colors": ("B",), "color_mode": "within", "color_scope": "colors"},
+            {"colors": ("R",), "color_mode": "exact", "color_scope": "colors"},
+            {"colors": ("C",), "color_mode": "exact", "color_scope": "colors"}):
+        criteria = crit(**fields)
+        reference = H.reference_capture(harness, criteria)
+        fast = H.fast_capture(harness, criteria)
+        if fast is None or H.compare_context(reference["context"], fast["context"]):
+            live_ok = False
+    # With Blue included, Red is offered ONLY through Civilized Scholar's red back.
+    blue_counts = H.reference_capture(harness, crit(
+        colors=("U",), color_mode="includes",
+        color_scope="colors"))["context"]["color_counts"]
+    live_ok = live_ok and blue_counts.get("R", 0) >= 1
+
+    # ---- a printed "+1" is in neither Search nor the table filter (both engines) ----
+    from mtgdb.search.results import row_passes_filters
+    plus_one = {"power": "+1", "toughness": "+1", "name": "Vanguard Plus"}
+    plus_one_ok = (
+        "Vanguard Plus" not in (both(power_min=0.0) or {"Vanguard Plus"})
+        and "Vanguard Plus" not in (both(toughness_max=9.0) or {"Vanguard Plus"})
+        and row_passes_filters(
+            plus_one, {"power": {"kind": "numeric", "min": 0.0, "max": None}}) is False
+        and row_passes_filters(
+            plus_one, {"toughness": {"kind": "numeric", "min": None, "max": 9.0}}) is False)
+
+    return {
+        "a printed +1 is excluded by Search and by the table filter alike": plus_one_ok,
+        "the live colour counts include a back face's colours, on both engines": live_ok,
+        "Card Name ignores case AND accents on both engines": name_ok and plain_ok,
+        "autocomplete agrees with the accent-insensitive Name search": suggestions_ok,
+        "a two-faced card's colours are its faces' colours together": colors_ok,
+        "a quoted phrase cannot match across the seam between two halves": text_ok,
+        "an Any symbol count equals selecting that colour alone, at Minimum 2": parity,
+    }
+
+
 def main():
     harness = H.Harness()
     try:
@@ -224,6 +364,7 @@ def main():
                 print("    fast context mismatch %s :: %r" % (bad, crit))
 
         either_face = _either_face_checks(harness)
+        either_face.update(_names_colors_and_text_checks(harness))
 
         checks = {
             "battery exercises both fast and fallback paths": (

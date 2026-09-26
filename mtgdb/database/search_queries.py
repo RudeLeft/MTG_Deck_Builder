@@ -12,7 +12,8 @@ from mtgdb.database.schema import _CARD_COLUMN_NAMES
 from mtgdb.database.semantics import (
     COLOR_BITS, TRAIT_COLOR_INDICATOR, TRAIT_HAS_X_COST, TRAIT_HYBRID_MANA,
     TRAIT_PHYREXIAN_MANA, TRAIT_TOP_HEAVY, TRAIT_VARIABLE_STATS,
-    _escape_like, _normalize_rules_text, _type_key, pip_minimum_threshold)
+    _escape_like, _normalize_rules_text, _type_key, fold_search_text,
+    pip_minimum_threshold)
 
 
 class SearchQueryBuilder:
@@ -65,8 +66,11 @@ class SearchQueryBuilder:
                 f"name COLLATE NOCASE IN ({placeholders})")
             self.params.extend(exact_names)
         elif name:
-            self.clauses.append("name LIKE ? ESCAPE '\\'")
-            self.params.append(f"%{_escape_like(name)}%")
+            # Case- AND accent-insensitive (SRCH-053): the stored folded copy is
+            # matched against the folded text, so "eowyn" finds "Éowyn".  SQLite's
+            # own LIKE folds only A-Z.
+            self.clauses.append("name_search LIKE ? ESCAPE '\\'")
+            self.params.append(f"%{_escape_like(fold_search_text(name))}%")
         if not text:
             return
         raw_terms = (
@@ -180,7 +184,8 @@ class SearchQueryBuilder:
         filters share one implementation. The integer AND replaces the former
         per-colour LIKE over the comma-joined string: includes means the card
         has all selected bits, exact means its bits equal the selected set, and
-        within means it has no bit outside the selected set.
+        within means it has no bit outside the selected set.  ``mask_column`` may
+        be any integer expression over the same encoding.
         """
         if not selected:
             return
@@ -201,14 +206,22 @@ class SearchQueryBuilder:
             self.clauses.append(f"({mask_column} & ?) = 0")
             self.params.append(outside_mask)
 
+    # A two-faced card's own colours are the colours of EVERY face together
+    # (SRCH-052), as its colour identity already is: the front's mask OR the
+    # back's (NULL, meaning no back face, counts as none).  Reading each face on
+    # its own instead would let a spell // land card's colourless land back match
+    # every "within" and Colorless search whatever the spell's colour.
+    CARD_COLORS_MASK = "(colors_mask | COALESCE(back_colors_mask, 0))"
+
     def add_color_filter(self, colors, color_mode, scope="identity"):
         """Filter by colour identity, or by the card's own colours.
 
         Scryfall separates these and so does the stored schema: Ghostfire
         is a colourless card with a red identity. Both bitmask columns share one
-        encoding, so only the column name changes.
+        encoding, so only the column changes.
         """
-        mask_column = "colors_mask" if str(scope) == "colors" else "identity_mask"
+        mask_column = (
+            self.CARD_COLORS_MASK if str(scope) == "colors" else "identity_mask")
         requested = [color for color in (colors or []) if color in (*COLORS, "C")]
         selected = [color for color in requested if color in COLORS]
         if selected:

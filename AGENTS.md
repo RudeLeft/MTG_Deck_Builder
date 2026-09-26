@@ -813,7 +813,9 @@ every feature together and is exempt.
   served by the index. The shared reader MUST NOT raise: a non-finite Minimum reads
   as one there, is rejected by the SQL builder at its boundary like every other
   numeric filter (SRCH-015), and is declined by the index so the builder answers it.
-  The index MUST decline a non-finite value in ANY numeric criterion (Mana Value,
+  Under Any, each candidate colour's count is measured ALONE (SRCH-045), so an
+  already-selected colour's symbols cannot lift it to a Minimum above one: the
+  count once showed 9 for Red where selecting Red returned 5. The index MUST decline a non-finite value in ANY numeric criterion (Mana Value,
   Power, Toughness, Loyalty, Defense, release year, and the Minimum) rather than
   answer or raise for it: an infinite release year made it raise `OverflowError`.
   _Verification:_ **AUTO**.
@@ -854,11 +856,29 @@ every feature together and is exempt.
   `back_mana_cost` is empty when the top-level cost already holds both halves
   ("A // B"), so no symbol is counted twice. Mana Value is the card's own and has
   no back-face counterpart. The row, the Results and deck table columns, and the
-  Results column filters keep showing and filtering the FRONT face. A schema
-  version change rebuilds `cards`, so the first launch after such an update
-  re-syncs the card database. The differential battery MUST include two-faced
-  cards, and named expectations MUST pin which cards are found.
+  Results column filters keep showing and filtering the FRONT face. A card's own
+  colours (Mana Color with the Colors scope) are the colours of EVERY face
+  together, as its colour identity already is: the back face's colours are stored
+  as `back_colors` / `back_colors_mask` (NULL means no back face, an empty string a
+  colourless one) and read as the front's OR the back's, in the SQL builder, the
+  bitset index and the context worker alike. Reading each face separately would
+  let a spell // land card's colourless back match every "within" and Colorless
+  search. The differential battery MUST include two-faced cards, and named
+  expectations MUST pin which cards are found. _Verification:_ **AUTO**.
+- **SRCH-053 — MUST:** Match Card Name without regard to case OR accents:
+  "eowyn", "éowyn" and "ÉOWYN" all find Éowyn, and "aether" finds Æther Vial.
+  The folded copy is stored (`name_search`, made by `semantics.fold_search_text`:
+  decompose, drop combining marks, casefold, ligatures to letters) and both the
+  typed text and the stored name pass through that one function, so the SQL
+  builder, the bitset index and autocomplete agree. SQLite's own `LIKE` folds only
+  A-Z, which is why accents needed this. An exact-name batch stays exact.
   _Verification:_ **AUTO**.
+- **SRCH-054 — MUST:** Keep a quoted Rules Text phrase inside one face. The rules
+  text of a card's faces is joined with `FACE_TEXT_BOUNDARY` (not whitespace, so
+  normalization keeps it, and never typed), so a phrase cannot match across the
+  seam between the two halves of a split card or two faces of any card; separate
+  words still combine across the whole card. Whole-word matching within a face is
+  deliberately unchanged. _Verification:_ **AUTO**.
 
 ## Database internals architecture
 
@@ -924,12 +944,23 @@ every feature together and is exempt.
 - **DBI-008 — MUST NOT:** Put schema, connection construction, bulk extraction,
   canonical search construction, or taxonomy discovery directly in the façade.
   _Verification:_ **AUTO**.
-- **DBI-009 — MUST:** Preserve schema version 18, the card-column contract,
+- **DBI-009 — MUST:** Preserve schema version 19, the card-column contract,
   search indexes, WAL, query-only readers, and registered type/subtype
   functions. Every connection opened in `database/schema.py` MUST set an
   explicit `busy_timeout` rather than inherit the 5-second `sqlite3` default;
   the primary connection is used from background threads and is never the
   first to give up while a bulk rebuild holds the database.
+  _Verification:_ **AUTO**.
+- **DBI-011 — MUST:** Upgrade the card table in place when a schema change adds
+  columns that stored data can supply, instead of dropping it. A rebuild empties
+  `cards` and re-downloads about 500 MB, and left the first launch after an update
+  looking like an empty database. Each upgrade step (`schema._UPGRADES`, from
+  `_OLDEST_UPGRADABLE_VERSION`) runs in ONE transaction and computes its columns
+  with the same functions the importer uses (`face_dependent_columns`,
+  `fold_search_text`, `_all_oracle_text`), so an upgraded database holds exactly
+  what a fresh import would; a test MUST compare them row for row from every
+  supported older shape. A step that fails MUST roll back and fall through to the
+  rebuild, and a schema older than the oldest upgradable one MUST still rebuild.
   _Verification:_ **AUTO**.
 - **DBI-010 — MUST:** Preserve exact-printing identity, search semantics, import
   resolution, catalog fallback, and public `CardDB` method signatures.
@@ -1032,6 +1063,13 @@ every feature together and is exempt.
   update MUST NOT. A damaged-database error MUST be presented as needing a
   restart, without the "left available, retry from Update Database" advice.
   _Verification:_ **AUTO**.
+- **DBS-020 — MUST:** Never call the card database "empty" during the launch that
+  follows a schema change. That launch starts with no cards (the table is rebuilt)
+  and the launch-time refresh fills it a moment after the window appears, so the
+  refresh MUST count as running from the moment it is scheduled, not only once it
+  starts. A workspace restore that finds no cards MUST NOT run the saved search or
+  raise a dialog: it waits, and runs once the refresh has filled the database and
+  the trusted catalogs are requested. _Verification:_ **AUTO**.
 
 ## Deck domain architecture
 
@@ -1553,6 +1591,11 @@ every feature together and is exempt.
   a visible Search-form reset. A numeric column filter MUST refuse a reversed range
   (Minimum above Maximum) and a non-finite bound with a message inside the popup,
   leaving it open; applying a reversed range silently emptied the table.
+  _Verification:_ **AUTO**.
+- **TBL-012 — MUST:** Read a numeric Power or Toughness column filter exactly as
+  Search reads the stat: only digits, `.` and `-` are numeric (the SQL GLOB guard),
+  valued as SQL `CAST` does. A printed "+1" is then in neither Search nor the table
+  filter; the table used to keep a card that Search dropped.
   _Verification:_ **AUTO**.
 - **TBL-011 — MUST:** Position every Edit Columns popup inside the visible work
   area of the physical monitor containing its anchor control. Clamp both positive

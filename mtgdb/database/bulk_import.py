@@ -8,62 +8,11 @@ import os
 from mtgdb.database.schema import (
     _INDEX_DEFINITIONS, MEMBERSHIP_TABLES, open_writer_connection)
 from mtgdb.database.semantics import (
-    _card_content_kind, _complete_type_line, _face0, _normalize_rules_text,
-    _raw_type_line, _type_line_search_parts, color_mask, combined_mana_cost,
-    derive_trait_flags,
+    PIP_COLORS, _all_oracle_text, _card_content_kind, _complete_type_line,
+    _face0, _mana_pips, _normalize_rules_text, _raw_type_line,
+    _type_line_search_parts, color_mask, face_dependent_columns,
+    fold_search_text,
 )
-
-
-def _all_oracle_text(card):
-    """Return normalized rules text covering the parent object and every face."""
-    parts = []
-    parent = card.get("oracle_text")
-    if parent:
-        parts.append(parent)
-    for face in card.get("card_faces") or []:
-        text = face.get("oracle_text")
-        if text:
-            parts.append(text)
-    # Deduplicate exact repeated text while preserving face order.
-    seen, unique = set(), []
-    for part in parts:
-        key = str(part)
-        if key not in seen:
-            seen.add(key)
-            unique.append(key)
-    return _normalize_rules_text(" ".join(unique))
-
-_MANA_SYMBOL = re.compile(r"\{([^}]+)\}")
-PIP_COLORS = ("W", "U", "B", "R", "G", "C")
-
-
-def _mana_pips(mana_cost):
-    """Count coloured symbols in a mana cost, once per colour.
-
-    A hybrid symbol counts for both of its colours, which is how devotion
-    reads them and what someone asking for "two green" means: {G/W}{G/W}
-    costs two green and two white. Phyrexian {G/P} is one green. Generic,
-    variable and snow symbols contribute to no colour.
-    """
-    counts = dict.fromkeys(PIP_COLORS, 0)
-    for symbol in _MANA_SYMBOL.findall(str(mana_cost or "")):
-        for part in str(symbol).upper().split("/"):
-            if part in counts:
-                counts[part] += 1
-    return counts
-
-
-def _back_face(card):
-    """The second face of a two-faced card, or ``{}``.
-
-    Search matches a card when either face fits (SRCH-052), so the back face's
-    cost and stats are stored beside the front's.  Three or more faces are rare
-    and reach only the second.
-    """
-    faces = card.get("card_faces") or []
-    if len(faces) > 1 and isinstance(faces[1], dict):
-        return faces[1]
-    return {}
 
 
 def _extract_row(card, type_line=None):
@@ -107,13 +56,14 @@ def _extract_row(card, type_line=None):
     mana_cost = card.get("mana_cost") or face.get("mana_cost") or ""
     # Both halves of a split card are one printing with one cost string, so
     # counting the whole string answers "costs two green" for either half.
-    # A transform or modal card's back-face cost is stored separately (its front
-    # cost stays what the tables draw) and counts here too, so the colour
-    # columns describe every face.  When the top-level cost already holds both
-    # halves ("A // B") there is nothing more to add.
-    back = _back_face(card)
-    back_mana_cost = "" if "//" in mana_cost else str(back.get("mana_cost") or "")
-    pips = _mana_pips(combined_mana_cost(mana_cost, back_mana_cost))
+    # A transform or modal card's back face (cost, stats, colours) is stored
+    # beside the front's and counts too, so the colour and trait columns describe
+    # every face; the front columns stay what the tables draw.
+    faces = card.get("card_faces") or []
+    derived = face_dependent_columns(
+        faces, mana_cost, either("power"), either("toughness"),
+        json.dumps(faces), ",".join(indicator))
+    pips = derived["pips"]
 
     # Precompute the content scope so searches filter on a stored, indexed column
     # instead of the per-row CARD_CONTENT_KIND SQL function.  Computed from the
@@ -128,10 +78,7 @@ def _extract_row(card, type_line=None):
     colors_mask = color_mask(",".join(colors))
     identity_mask = color_mask(",".join(identity))
     produced_mask = color_mask(",".join(sorted(card.get("produced_mana") or [])))
-    trait_flags = derive_trait_flags(
-        mana_cost, either("power"), either("toughness"),
-        json.dumps(card.get("card_faces") or []), ",".join(indicator),
-        back_mana_cost, back.get("power"), back.get("toughness"))
+    trait_flags = derived["trait_flags"]
 
     return (
         card["id"],
@@ -186,8 +133,13 @@ def _extract_row(card, type_line=None):
         content_kind,
         colors_mask, identity_mask, produced_mask, trait_flags,
         pips["W"], pips["U"], pips["B"], pips["R"], pips["G"], pips["C"],
-        back_mana_cost, back.get("power"), back.get("toughness"),
-        back.get("loyalty"), back.get("defense"),
+        derived["back_mana_cost"], derived["back_power"],
+        derived["back_toughness"], derived["back_loyalty"],
+        derived["back_defense"],
+        # Card Name matches on this folded copy (SRCH-053); NULL back colours
+        # mean "no back face".
+        fold_search_text(card["name"]), derived["back_colors"],
+        derived["back_colors_mask"],
     )
 
 
@@ -281,9 +233,10 @@ INSERT OR REPLACE INTO cards (
     related_parts, card_faces, layout, content_kind,
     colors_mask, identity_mask, produced_mask, trait_flags,
     pips_w, pips_u, pips_b, pips_r, pips_g, pips_c,
-    back_mana_cost, back_power, back_toughness, back_loyalty, back_defense
+    back_mana_cost, back_power, back_toughness, back_loyalty, back_defense,
+    name_search, back_colors, back_colors_mask
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-          ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 

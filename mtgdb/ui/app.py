@@ -119,6 +119,10 @@ class DeckBuilderApp(
         self._search_catalog_scope = None
         self._pending_catalog_filter_state = None
         self._pending_search_request = False
+        # The launch-time refresh decision is scheduled but has not run yet, and a
+        # restored search that found the database empty is waiting for its cards.
+        self._auto_sync_pending = False
+        self._search_after_cards = False
         self._format_catalog = []
         self._format_catalog_by_status = {}
         self._rarity_catalog = []
@@ -173,6 +177,7 @@ class DeckBuilderApp(
         # Automatic database maintenance: first launch always downloads;
         # subsequent launches refresh only after 48 hours.
         self.bind("<Configure>", self._on_root_configure, add="+")
+        self._auto_sync_pending = True
         self.after(350, self._maybe_auto_sync)
 
     # ======================================================================

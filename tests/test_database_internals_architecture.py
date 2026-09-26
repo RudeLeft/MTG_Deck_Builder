@@ -307,6 +307,140 @@ def _corrupt_db_recovery_check():
     return healed and quarantined and preserved and untouched
 
 
+def _upgrade_in_place_checks():
+    """An in-place schema upgrade must produce exactly what a fresh import does.
+
+    A schema change used to drop the card table, so the first launch after an
+    update had no cards and re-downloaded ~500 MB.  Every column added since
+    version 17 is derivable from data already stored, so it is backfilled -- by
+    the SAME functions the importer uses.  This proves it, row for row, from both
+    older shapes, and that a failed upgrade falls back to the old rebuild.
+    """
+    import os
+    from mtgdb.database import schema
+    sys.path.insert(0, str(ROOT / "tests"))
+    import search_diff_harness as H
+
+    derived = (
+        "back_mana_cost", "back_power", "back_toughness", "back_loyalty",
+        "back_defense", "name_search", "back_colors", "back_colors_mask",
+        "pips_w", "pips_u", "pips_b", "pips_r", "pips_g", "pips_c",
+        "trait_flags", "oracle_text_search", "colors_mask", "identity_mask")
+
+    def snapshot(path):
+        connection = sqlite3.connect(path)
+        try:
+            rows = connection.execute(
+                f"SELECT id, {', '.join(derived)} FROM cards ORDER BY id").fetchall()
+            version = connection.execute(
+                "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
+        finally:
+            connection.close()
+        return rows, version
+
+    results = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh_path = os.path.join(tmp, "fresh.db")
+        fresh = CardDB(fresh_path)
+        fresh.load_cards(H.build_corpus())
+        total = fresh.count()
+        fresh.close()
+        expected, _version = snapshot(fresh_path)
+        seam = "\u00b6"
+
+        def old_shape(version):
+            path = os.path.join(tmp, f"v{version}.db")
+            shutil.copy(fresh_path, path)
+            connection = sqlite3.connect(path)
+            try:
+                dropped = ["name_search", "back_colors", "back_colors_mask"]
+                if version == 17:
+                    dropped += ["back_mana_cost", "back_power", "back_toughness",
+                                "back_loyalty", "back_defense"]
+                # Rebuild the table WITHOUT the newer columns (a copy of just the
+                # older ones): the shape a database from that version has.
+                kept = [row[1] for row in connection.execute(
+                    "PRAGMA table_info(cards)") if row[1] not in dropped]
+                connection.execute(
+                    f"CREATE TABLE cards_old AS SELECT {', '.join(kept)} FROM cards")
+                connection.execute("DROP TABLE cards")
+                connection.execute("ALTER TABLE cards_old RENAME TO cards")
+                if version == 17:
+                    # The old derivations were front-face only.
+                    connection.execute(
+                        "UPDATE cards SET pips_w=0, pips_u=0, pips_b=0, pips_r=0, "
+                        "pips_g=0, pips_c=0, trait_flags=0")
+                connection.execute(
+                    "UPDATE cards SET oracle_text_search = "
+                    f"REPLACE(oracle_text_search, ' {seam} ', ' ')")
+                connection.execute(
+                    "UPDATE meta SET value=? WHERE key='schema_version'",
+                    (str(version),))
+                connection.commit()
+            finally:
+                connection.close()
+            return path
+
+        for version in (17, 18):
+            path = old_shape(version)
+            probe = sqlite3.connect(path)
+            try:
+                before = probe.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+            finally:
+                probe.close()
+            upgraded = CardDB(path)
+            kept = upgraded.count()
+            upgraded.close()
+            rows, stored_version = snapshot(path)
+            mismatched = [
+                (a[0], [d for d, x, y in zip(derived, a[1:], b[1:]) if x != y])
+                for a, b in zip(rows, expected) if a != b]
+            results[f"schema {version} upgrades in place to exactly what a fresh import holds"] = (
+                before == total and kept == total and rows == expected
+                and stored_version == str(_SCHEMA_VERSION) and not mismatched)
+            if mismatched:
+                print("    upgrade from", version, "differs:", mismatched[:3])
+
+        # A failing step rolls back and falls back to the old rebuild.
+        path = old_shape(18)
+        original = schema._UPGRADES[18]
+
+        def failing(_connection):
+            raise RuntimeError("simulated upgrade failure")
+
+        schema._UPGRADES[18] = failing
+        try:
+            fallback = CardDB(path)
+            emptied = fallback.count()
+            fallback.close()
+        finally:
+            schema._UPGRADES[18] = original
+        connection = sqlite3.connect(path)
+        try:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
+            version = connection.execute(
+                "SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
+        finally:
+            connection.close()
+        results["a failed in-place upgrade falls back to a clean rebuild"] = (
+            emptied == 0 and columns == set(_CARD_COLUMN_NAMES)
+            and version == str(_SCHEMA_VERSION))
+
+        # Versions older than 17 are not upgradable and still rebuild.
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("UPDATE meta SET value='16' WHERE key='schema_version'")
+            connection.commit()
+        finally:
+            connection.close()
+        old = CardDB(path)
+        old_total = old.count()
+        old.close()
+        results["a schema older than the oldest upgradable one still rebuilds"] = (
+            old_total == 0 and schema._OLDEST_UPGRADABLE_VERSION == 17)
+    return results
+
+
 def main():
     sources = {
         name: (ROOT / name).read_text(encoding="utf-8")
@@ -453,7 +587,7 @@ def main():
         "search projection rejects columns outside the allow-list": (
             projection_guarded),
         "schema version and columns survive extraction": (
-            schema_version == str(_SCHEMA_VERSION) == "18"
+            schema_version == str(_SCHEMA_VERSION) == "19"
             and table_columns == _CARD_COLUMN_NAMES),
         "connection policies and registered type functions survive": (
             str(journal_mode).casefold() == "wal"
@@ -527,6 +661,8 @@ def main():
             and "RULES_SUPERTYPES_META_KEY" in sources["mtgdb/database/sync.py"]
             and "from mtgdb.database.db import" not in sources["mtgdb/database/sync.py"]),
     }
+
+    checks.update(_upgrade_in_place_checks())
 
     ok = True
     for label, passed in checks.items():

@@ -12,6 +12,8 @@ import re
 import threading
 import time
 
+from mtgdb.database.semantics import _cast_real, _glob_numeric
+
 from mtgdb.core.background_jobs import spawn_daemon
 
 
@@ -626,6 +628,13 @@ def filter_numeric_value(card, key, qty=None):
         raw = (card.get("released_at") or "")[:4]
     else:
         raw = card.get(key)
+        if key in ("power", "toughness") and not _glob_numeric(raw):
+            # The same guard Search's stat filters apply (digits, '.' and '-'
+            # only), so a printed "+1" or "*+1" is in neither or both.  Without
+            # it the table kept a card that Search dropped.
+            return None
+        if key in ("power", "toughness"):
+            return _cast_real(raw)
     try:
         return float(raw)
     except (TypeError, ValueError):
