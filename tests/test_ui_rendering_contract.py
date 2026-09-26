@@ -432,16 +432,20 @@ def _scroll_zone_settle_checks(results):
         zone.canvas.configure(yscrollcommand=log)
         # The situation on a large window: the form (300 px) fits, so the zone
         # is 300 px tall; opening Advanced grows it to 900 px, which the window
-        # can give only 850 of.  A jump to the row at y=300 is clamped to 50, but
-        # decided against the OLD 300 px viewport it lands at 294 first.
+        # can give only part of (850 of 1000, or less on a small screen).  A jump
+        # to the row at y=300 is clamped to what remains scrollable, but decided
+        # against the OLD 300 px viewport it lands at 294 first.  The final place
+        # is worked out from the measured sizes, so a screen that shortens the
+        # window changes the answer but not the rule.
         tops.clear()
         add_rows(12)
         zone.scroll_to(rows[6])
         pump()
+        final = min(rows[6].winfo_y() - 6, 900 - zone.canvas.winfo_height())
         opened = sorted(set(tops))
         results["opening moves the view once, straight to its final place"] = (
-            round(zone.canvas.canvasy(0)) == 50 and opened[-1] == 50
-            and len(opened) <= 2 and max(tops) <= 50)
+            round(zone.canvas.canvasy(0)) == final and opened[-1] == final
+            and len(opened) <= 2 and max(tops) <= final)
     finally:
         root.destroy()
 
