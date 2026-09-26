@@ -453,7 +453,8 @@ class PrintingFilter:
             tk.Label(
                 outer, text=self._intro_text,
                 bg=p["surface2"], fg=p["muted"], font=FONT_HELPER,
-                justify="left", wraplength=720).pack(anchor="w", pady=(2, 9))
+                justify="left", anchor="w", wraplength=720).pack(
+                    anchor="w", pady=(2, 9))
 
         # PRINTING TYPE replaces the single Paper-only checkbox: a printing can
         # exist on paper, on Arena, on MTGO, or several at once, and the old

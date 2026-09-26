@@ -217,8 +217,8 @@ class TableFilterMixin:
         if help_text:
             tk.Label(
                 outer, text=help_text, bg=p["surface2"], fg=p["muted"],
-                font=FONT_HELPER, justify="left", wraplength=320).pack(
-                    anchor="w", pady=(1, 4))
+                font=FONT_HELPER, justify="left", anchor="w",
+                wraplength=320).pack(anchor="w", pady=(1, 4))
         return pop, outer
 
     def _build_filter_sort_controls(self, outer, view, key):
@@ -260,7 +260,7 @@ class TableFilterMixin:
         # A reserved line, so a message never resizes the popup after it is
         # mapped.  The popup stays open on a refusal with the input visible.
         message = tk.Label(
-            editor, text=" ", bg=p["surface2"], fg=p["deck_bad"],
+            editor, text=" ", bg=p["surface2"], fg=p["bad"],
             font=FONT_HELPER, anchor="w", justify="left", wraplength=280)
         message.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         for var in (min_var, max_var):
@@ -340,9 +340,13 @@ class TableFilterMixin:
         modes.pack(fill="x", pady=(0, 6))
         tk.Label(modes, text="Match", bg=p["surface2"], fg=p["muted"],
                  font=FONT_HELPER).pack(side="left", padx=(0, 6))
-        AppCombobox(
-            modes, textvariable=mode_var, values=("Any", "All", "None"),
-            state="readonly", width=8).pack(side="left")
+        # Radios, like every Any/All/None row in Search (UI-010): the three
+        # answers are visible at once instead of hiding behind a dropdown.
+        for mode_name in ("Any", "All", "None"):
+            ttk.Radiobutton(
+                modes, text=mode_name, value=mode_name, variable=mode_var,
+                style="DialogChoice.TRadiobutton").pack(
+                    side="left", padx=(0, 8))
 
         selected_prev = current.get("groups")
         grid = tk.Frame(editor, bg=p["surface2"])

@@ -8,8 +8,7 @@ from tkinter import messagebox, ttk
 
 from mtgdb.database.sync import DatabaseDamagedError
 from mtgdb.ui.tokens import (
-    FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD,
-    FONT_PROGRESS_TITLE, PALETTE,
+    FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD, PALETTE,
 )
 
 
@@ -95,19 +94,19 @@ class DatabaseSyncMixin:
         shell.pack(fill="both", expand=True, padx=1, pady=1)
 
         if reason == "first_launch":
-            eyebrow, title = "FIRST-TIME SETUP", "Preparing your card library"
+            heading, headline = "FIRST-TIME SETUP", "Preparing your card library"
         elif reason == "catalog_refresh":
-            eyebrow, title = "SEARCH METADATA", "Refreshing trusted filter catalogs"
+            heading, headline = (
+                "SEARCH METADATA", "Refreshing trusted filter catalogs")
         else:
-            eyebrow, title = "DATABASE REFRESH", "Updating your card library"
+            heading, headline = "DATABASE REFRESH", "Updating your card library"
 
+        # The popup title is the shared gold dialog title (UI-014); the line
+        # under it says what is happening.
+        ttk.Label(shell, text=heading, style="DialogTitle.TLabel").pack(anchor="w")
         tk.Label(
-            shell, text=eyebrow, bg=p["surface"], fg=p["accent"],
-            font=FONT_HELPER_BOLD
-        ).pack(anchor="w")
-        tk.Label(
-            shell, text=title, bg=p["surface"], fg=p["text"],
-            font=FONT_PROGRESS_TITLE
+            shell, text=headline, bg=p["surface"], fg=p["text"],
+            font=FONT_BODY_BOLD, anchor="w"
         ).pack(anchor="w", pady=(3, 8))
 
         intro = (
@@ -116,7 +115,7 @@ class DatabaseSyncMixin:
             + sync_reason_text(reason))
         tk.Label(
             shell, text=intro, bg=p["surface"], fg=p["muted"],
-            font=FONT_BODY, justify="left", wraplength=610
+            font=FONT_BODY, justify="left", anchor="w", wraplength=610
         ).pack(anchor="w", fill="x", pady=(0, 18))
 
         stage_box = tk.Frame(
@@ -155,13 +154,13 @@ class DatabaseSyncMixin:
             text="Please keep MTG Deck Builder open while this finishes. "
                  "No action is required.",
             bg=p["surface"], fg=p["muted"],
-            font=FONT_HELPER, justify="left"
+            font=FONT_HELPER, justify="left", anchor="w"
         ).pack(anchor="w", pady=(14, 0))
 
         self._present_hidden_popup(
-            popup, preferred_width=680,
-            preferred_height=max(360, popup.winfo_reqheight()),
-            min_width=620, min_height=340, lock_size=True, grab=True)
+            popup, preferred_width=680, preferred_height=360,
+            min_width=620, min_height=340, lock_size=True, grab=True,
+            fit_content=True)
 
     def _cancel_sync_popup_close(self):
         pending = self._sync_close_after

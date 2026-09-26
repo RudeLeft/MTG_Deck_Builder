@@ -9,6 +9,7 @@ from tkinter import ttk
 from mtgdb.core.format_names import (
     FORMAT_WORD_LABELS, format_display_name)
 
+from mtgdb.ui.styles import scaled_pixels
 from mtgdb.ui.tokens import (
     ACTIVITY_MIN_DWELL_MS,
     CLASSIC_ENTRY_IPADY,
@@ -277,6 +278,35 @@ def deck_board_label(board):
     mainboard reads as the sideboard, matching Deck.BOARDS.
     """
     return "Mainboard" if board == "main" else "Sideboard"
+
+
+def autohide_scrollbar(scrollbar):
+    """Return a ``yscrollcommand`` that shows *scrollbar* only while it can scroll.
+
+    A dialog list that fits its viewport used to carry a full-length gold bar
+    with nothing to scroll.  The scrollbar must be gridded; hiding it leaves its
+    column free for the list, and it returns as soon as the list overflows.
+    """
+    def command(first, last):
+        scrollbar.set(first, last)
+        try:
+            if float(first) <= 0.0 and float(last) >= 1.0:
+                scrollbar.grid_remove()
+            else:
+                scrollbar.grid()
+        except (ValueError, tk.TclError):
+            pass
+    return command
+
+
+def card_count_text(count):
+    """Return ``N CARDS`` -- or ``1 CARD`` -- for a count heading.
+
+    Every heading that names a count (Results, Mainboard, Sideboard, Gallery,
+    Compare) builds it here, so the singular cannot come out as "1 CARDS".
+    """
+    count = int(count)
+    return f"{count:,} CARD" if count == 1 else f"{count:,} CARDS"
 
 
 # Scryfall's legality keys are single lowercase words, so the obvious
@@ -693,7 +723,9 @@ _CHECK_ROLES = {
         # user-facing border.
         "highlightthickness": 0, "highlightbackground": PALETTE["border"],
         "highlightcolor": PALETTE["text"],
-        "font": FONT_HELPER, "padx": 7, "pady": 3, "cursor": "hand2",
+        # 5 px, not 7: at 7 the widest label ("Phenomenon") could not share a
+        # three-column grid in a 273 px pane, which forced two.
+        "font": FONT_HELPER, "padx": 5, "pady": 3, "cursor": "hand2",
     },
 }
 
@@ -864,6 +896,255 @@ class ClassicRadiobutton(tk.Radiobutton):
         }
         options.update(kwargs)
         super().__init__(master, **options)
+
+
+class _ScrollZoneWheelTarget:
+    """Adapts a ScrollZone to the ``yview_scroll`` the wheel router calls."""
+
+    def __init__(self, zone):
+        self._zone = zone
+
+    def yview_scroll(self, units, what="units"):
+        if what == "units":
+            self._zone.scroll_units(units)
+        else:
+            self._zone.canvas.yview_scroll(units, what)
+
+    def xview_scroll(self, _units, _what="units"):
+        return None
+
+
+class ScrollZone(ttk.Frame):
+    """A vertically scrolling frame with an always-reserved scrollbar gutter.
+
+    The Search form and its Advanced panel live in one of these (LAY-011), so
+    however tall they grow the rows packed BELOW the zone -- Search/Clear/Add and
+    the Results table -- can never be pushed off the pane.  Pack the zone AFTER
+    the fixed block and let it take what is left: the zone asks for its content's
+    natural height, so when the form fits it looks exactly like an ordinary frame,
+    and when it does not, Tk's packer squeezes the zone (the last claimant) and
+    the scrollbar wakes up.
+
+    The gutter is always there, so the width of the form never shifts as the bar
+    appears (it would reflow the chip rows); but with nothing to scroll the bar is
+    disabled and paints nothing at all (``IDLE_STYLE``), so a form that fits looks
+    like a plain frame.  It draws, gold, only once the content overflows.  Build
+    the zone's widgets inside ``inner``.
+    """
+
+    ACTIVE_STYLE = "Dark.Vertical.TScrollbar"
+    IDLE_STYLE = "ZoneIdle.Vertical.TScrollbar"
+    # Air between the controls and the bar (6 px at 100%): flush, the gold bar
+    # touched the right edge of every picker and field.
+    BAR_GAP = 6
+
+    def __init__(self, master, *, scroll_step=20):
+        super().__init__(master)
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, minsize=scaled_pixels(self, self.BAR_GAP))
+        self.rowconfigure(0, weight=1)
+        self._step = max(1, int(scroll_step))
+        # One-pixel units so a jump lands exactly where it is asked to; a wheel
+        # notch or a scrollbar arrow moves ``scroll_step`` of them (see _yview).
+        self.canvas = tk.Canvas(
+            self, bg=PALETTE["surface"], highlightthickness=0, bd=0,
+            width=1, height=1, takefocus=0, yscrollincrement=1)
+        self.scrollbar = ttk.Scrollbar(
+            self, orient="vertical", command=self._yview, style=self.IDLE_STYLE)
+        self.scrollbar.state(["disabled"])
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=2, sticky="ns")
+        self.inner = ttk.Frame(self.canvas)
+        self._window = self.canvas.create_window(
+            0, 0, window=self.inner, anchor="nw")
+        self._sync_after = None
+        self._watch_after = None
+        self._last_content = 0
+        self._pending = None
+        self.inner.bind("<Configure>", self._schedule_sync, add="+")
+        self.canvas.bind("<Configure>", self._schedule_sync, add="+")
+        self.bind("<Destroy>", self._cancel_sync, add="+")
+
+    # -- geometry ---------------------------------------------------------
+    def _cancel_sync(self, event=None):
+        if event is not None and event.widget is not self:
+            return
+        for name in ("_sync_after", "_watch_after"):
+            pending = getattr(self, name)
+            setattr(self, name, None)
+            if pending is not None:
+                try:
+                    self.after_cancel(pending)
+                except tk.TclError:
+                    pass
+
+    def _schedule_sync(self, _event=None):
+        if self._sync_after is None:
+            try:
+                self._sync_after = self.after_idle(self._sync)
+            except tk.TclError:
+                self._sync_after = None
+
+    def _sync(self):
+        """Fit the scroll region, the requested size and the scrollbar state."""
+        self._sync_after = None
+        try:
+            if self._pending is not None and self._pending[0] == "top":
+                # The first row is the first row at any height, so go there now,
+                # before Tk clamps the view against the shrinking content and
+                # the form slides through a position it never rests at.
+                self._pending = None
+                self.canvas.yview_moveto(0)
+            elif self._pending is not None:
+                # A jump is waiting (someone clicked Advanced).  A resize takes
+                # several layout levels to reach this canvas, one idle callback
+                # each, so measure only after the whole chain has run; otherwise
+                # the jump lands against the old height and is corrected a moment
+                # later.  Only a click reaches here, never a resize or a wheel.
+                self.update_idletasks()
+            width = max(1, int(self.canvas.winfo_width()))
+            viewport = max(1, int(self.canvas.winfo_height()))
+            content = max(1, int(self.inner.winfo_reqheight()))
+            self.canvas.itemconfigure(self._window, width=width)
+            self.canvas.configure(
+                scrollregion=(0, 0, width, max(viewport, content)))
+            # Ask for the natural size: the packer grants it when there is room
+            # and squeezes this zone, the last claimant, when there is not.  The
+            # width request keeps the pane's minimum what the form itself needs.
+            resized = False
+            if int(self.canvas.cget("height")) != content:
+                self.canvas.configure(height=content)
+                resized = True
+            wanted_width = max(1, int(self.inner.winfo_reqwidth()))
+            if int(self.canvas.cget("width")) != wanted_width:
+                self.canvas.configure(width=wanted_width)
+                resized = True
+            self._last_content = content
+            if resized:
+                # The viewport is about to change (a taller form gets a taller
+                # zone), so anything decided now -- a jump to a widget, a clamp --
+                # would be decided against the old height and undone a moment
+                # later: the Advanced button flashed at the top, then dropped to
+                # where it belongs.  Let the packer act on the new request, and
+                # finish in the next pass against the size that actually results.
+                self._schedule_sync()
+                return
+            overflow = content > viewport + 1
+            self.scrollbar.state(["!disabled"] if overflow else ["disabled"])
+            wanted_style = self.ACTIVE_STYLE if overflow else self.IDLE_STYLE
+            if str(self.scrollbar.cget("style")) != wanted_style:
+                self.scrollbar.configure(style=wanted_style)
+            if not overflow:
+                self.canvas.yview_moveto(0)
+            elif self.canvas.canvasy(0) + viewport > content:
+                self.canvas.yview_moveto((content - viewport) / content)
+            self._apply_pending()
+            if self.canvas.canvasy(0) > 0:
+                self._start_watch()
+        except tk.TclError:
+            pass
+
+    def _start_watch(self):
+        """Keep an eye on the content height while the view is scrolled.
+
+        A canvas only repaints (and so only reports the new size of) a window
+        item that is on screen.  Scrolled down and then shortened -- chips
+        re-rendering with fewer rows -- the item is off screen, no Configure
+        ever fires, and the view would sit past the end of the content, blank.
+        While scrolled, compare the requested height a few times a second; at the
+        top nothing needs watching because the item is visible and reports itself.
+        """
+        if self._watch_after is None:
+            try:
+                self._watch_after = self.after(150, self._watch)
+            except tk.TclError:
+                self._watch_after = None
+
+    def _watch(self):
+        self._watch_after = None
+        try:
+            if int(self.inner.winfo_reqheight()) != self._last_content:
+                self._sync()
+            elif self.canvas.canvasy(0) > 0:
+                self._start_watch()
+        except tk.TclError:
+            pass
+
+    # -- scrolling --------------------------------------------------------
+    def _yview(self, *args):
+        """Scrollbar command: arrows and the wheel move a step, not one pixel."""
+        if len(args) == 3 and args[0] == "scroll" and args[2] == "units":
+            args = ("scroll", int(args[1]) * self._step, "units")
+        self.canvas.yview(*args)
+
+    def scroll_units(self, units):
+        """Scroll by wheel notches: each is ``scroll_step`` pixels."""
+        self._sync()
+        self.canvas.yview_scroll(int(units) * self._step, "units")
+
+    def wheel_target(self):
+        """The object the app's wheel routing scrolls when the pointer is over us."""
+        return _ScrollZoneWheelTarget(self)
+
+    def _apply_pending(self):
+        pending, self._pending = self._pending, None
+        if pending is not None:
+            kind, widget = pending
+            self._scroll(kind, widget)
+
+    def _scroll(self, kind, widget=None, margin=6):
+        try:
+            content = max(1, int(self.inner.winfo_reqheight()))
+            viewport = max(1, int(self.canvas.winfo_height()))
+            if content <= viewport + 1:
+                self.canvas.yview_moveto(0)
+                return
+            top = self.canvas.canvasy(0)
+            if kind == "top" or widget is None:
+                target = 0
+            else:
+                y = widget.winfo_rooty() - self.inner.winfo_rooty()
+                if kind == "align":
+                    target = y - margin
+                elif y < top:
+                    target = y - margin
+                elif y + widget.winfo_height() > top + viewport:
+                    target = y + widget.winfo_height() - viewport + margin
+                else:
+                    return
+            target = max(0, min(target, content - viewport))
+            self.canvas.yview_moveto(target / content)
+        except tk.TclError:
+            pass
+
+    def scroll_to_top(self):
+        """Return to the first row once the next layout pass has settled."""
+        self._pending = ("top", None)
+        self._schedule_sync()
+
+    def scroll_to(self, widget):
+        """Put *widget* at the top of the viewport once the layout has settled."""
+        self._pending = ("align", widget)
+        self._schedule_sync()
+
+    def reveal(self, widget):
+        """Scroll just enough to bring *widget* fully into view (keyboard focus)."""
+        self._scroll("reveal", widget)
+
+    def contains(self, widget):
+        """True when *widget* is one of the zone's own descendants."""
+        return str(widget).startswith(str(self.inner) + ".")
+
+    def holds_pointer(self, x_root, y_root):
+        """True when a root-coordinate point is inside the visible viewport."""
+        try:
+            left = self.canvas.winfo_rootx()
+            top = self.canvas.winfo_rooty()
+            return (left <= x_root < left + self.canvas.winfo_width()
+                    and top <= y_root < top + self.canvas.winfo_height())
+        except tk.TclError:
+            return False
 
 
 class ToolTip:

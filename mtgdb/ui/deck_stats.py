@@ -8,7 +8,7 @@ from mtgdb.deck.analysis import (
     analyze_deck, card_draw_odds, curve_breakdown, sample_hand,
 )
 from mtgdb.deck.legality import legality_problems
-from mtgdb.ui.components import AppButton, ClassicButton, deck_board_label
+from mtgdb.ui.components import AppButton, autohide_scrollbar, deck_board_label
 from mtgdb.ui.tokens import (
     DECK_COLOR_SEGMENT_COLORS, DECK_TYPE_SEGMENT_COLORS, FONT_BODY,
     FONT_HELPER_BOLD, FONT_MICRO, MANA_NAMES,
@@ -382,7 +382,7 @@ class DeckStatsMixin:
                 row=r, column=2, sticky="e", padx=(10, 0))
             low = sources[key] and pips[key] and sources[key] * 2 < pips[key]
             ttk.Label(self.manacheck_frame, text=str(sources[key]),
-                      foreground=PALETTE["deck_bad"]
+                      foreground=PALETTE["bad"]
                       if (pips[key] and not sources[key]) or low
                       else PALETTE["text"]).grid(row=r, column=3, sticky="e",
                                                  padx=(12, 0))
@@ -547,12 +547,12 @@ class DeckStatsMixin:
         if not self._legality_problems:
             self.legality_lbl.configure(
                 text=f"\u2714  Basic format check passed for {fmt}",
-                foreground=PALETTE["deck_good"])
+                foreground=PALETTE["good"])
         else:
             n = len(self._legality_problems)
             self.legality_lbl.configure(
                 text=f"\u26a0  {n} issue{'s' if n != 1 else ''} for {fmt}",
-                foreground=PALETTE["deck_bad"])
+                foreground=PALETTE["bad"])
 
     def _show_legality_details(self):
         """Show every format-legality issue in a centered dark, scrollable dialog."""
@@ -590,7 +590,7 @@ class DeckStatsMixin:
         scroll = ttk.Scrollbar(
             list_shell, orient="vertical", command=issues.yview,
             style="Dark.Vertical.TScrollbar")
-        issues.configure(yscrollcommand=scroll.set)
+        issues.configure(yscrollcommand=autohide_scrollbar(scroll))
         issues.grid(row=0, column=0, sticky="nsew")
         scroll.grid(row=0, column=1, sticky="ns")
         self._register_scrollable(issues)
@@ -604,7 +604,7 @@ class DeckStatsMixin:
 
         foot = tk.Frame(shell, bg=p["surface"])
         foot.pack(fill="x", pady=(12, 0))
-        ClassicButton(
+        AppButton(
             foot, text="Close", role="compact", command=popup.destroy
         ).pack(side="right")
 

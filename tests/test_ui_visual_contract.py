@@ -139,6 +139,8 @@ def _card_type_grid_contract():
     owner._card_type_chip_frame = FakeGridFrame(430)
     owner._card_type_chip_widgets = tuple(FakeGridChip(80) for _ in range(10))
     owner._card_type_chip_columns = SearchUI.CARD_TYPE_MIN_COLUMNS
+    owner._layout_chip_grid = (
+        SearchUI.SearchFeatureMixin._layout_chip_grid.__get__(owner))
 
     SearchUI.SearchFeatureMixin._layout_card_type_chips(owner)
     wide_columns = owner._card_type_chip_columns
@@ -255,7 +257,7 @@ def main():
         'def _build_filter_rarity(',
         'self._format_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)',
         'self._rarity_btn.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)',
-        'frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)',
+        'frame.columnconfigure(0, minsize=self._filter_label_width())',
     ))
     button_family_pairs = (
         ("TButton", "Primary.TButton"),
@@ -381,8 +383,12 @@ def main():
                 in sources["search.py"]),
         "Advanced Format and Rarity use the shared aligned control column": (
             advanced_format_rarity_alignment),
-        "Search primary labels reserve one 144px alignment rail": (
-            SearchUI.FILTER_LABEL_WIDTH == 144),
+        "Search primary labels reserve one alignment rail that follows display scaling": (
+            SearchUI.FILTER_LABEL_WIDTH == 144
+            and 'def _filter_label_width(self):' in sources["search.py"]
+            and 'scaled_pixels(self, FILTER_LABEL_WIDTH)' in sources["search.py"]
+            and 'form.columnconfigure(0, minsize=self._filter_label_width())'
+                in sources["search.py"]),
         "Search primary labels use a zero-geometry stronger Style B fade rail": (
             SearchUI.ASSOCIATION_RAIL_LINE_WIDTH == 2
             and SearchUI.ASSOCIATION_RAIL_MIN_WIDTH == 10
@@ -395,7 +401,7 @@ def main():
                 == SearchUI._association_rail_color(0.75)
             and 'def _build_search_row_label(' in sources["search.py"]
             and 'label.grid(' in sources["search.py"]
-            and 'available = FILTER_LABEL_WIDTH - FILTER_LABEL_GAP'
+            and 'available = self._filter_label_width() - FILTER_LABEL_GAP'
                 in sources["search.py"]
             and 'rail.place(' in sources["search.py"]
             and 'rail.pack(' not in sources["search.py"]
@@ -464,7 +470,7 @@ def main():
             and SearchUI.MATCH_MODE_LABEL_WIDTH == 42
             and SearchUI.MATCH_MODE_CHOICE_GAP == 8
             and 'text=MATCH_MODE_LABEL' in sources["search.py"]
-            and 'minsize=MATCH_MODE_LABEL_WIDTH' in sources["search.py"]
+            and 'scaled_pixels(mode, MATCH_MODE_LABEL_WIDTH)' in sources["search.py"]
             and 'MATCH_MODE_CHOICE_GAP' in sources["search.py"]
             and 'uniform="search-mode-choice"' not in sources["search.py"]
             and 'def _build_filter_property_match' not in sources["search.py"]
@@ -484,11 +490,11 @@ def main():
             and 'Selected forms:' not in sources["search.py"]
             and 'Property matching:' not in sources["search.py"]),
         "Mana Color, Mana Produced, and Mana Symbols use one compact pip layout": (
-            SearchUI.MANA_CHOICE_GAP == 8
-            and 'def _pack_mana_choice(widget):' in sources["search.py"]
-            and sources["search.py"].count('_pack_mana_choice(') == 4
-            and 'widget.pack(side="left", padx=(0, MANA_CHOICE_GAP))'
-                in sources["search.py"]
+            SearchUI.MANA_CHOICE_GAP == 6
+            and 'def _grid_mana_choices(widgets, columns):' in sources["search.py"]
+            and sources["search.py"].count('self._register_mana_choice_row(') == 3
+            and 'padx=(0, MANA_CHOICE_GAP))' in sources["search.py"]
+            and '_pack_mana_choice' not in sources["search.py"]
             and 'uniform="search-color-choice"' not in sources["search.py"]
             and 'uniform="search-produced-choice"' not in sources["search.py"]
             and 'form, "Mana Color", row=row' in sources["search.py"]),
@@ -639,8 +645,9 @@ def main():
                 in comparison_controls_source
             and 'font=FONT_HELPER_BOLD' not in comparison_controls_source
             and 'text="COMPARE | 0 CARDS SELECTED"' in comparison_controls_source
-            and 'text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}"'
-                in comparison_controls_source),
+            and 'text=(f"COMPARE | {card_count_text(selected_count)} "'
+                in comparison_controls_source
+            and 'f"SELECTED{over_limit_note}"))' in comparison_controls_source),
         "picker list radio rows carry a themed, state-distinguishing indicator": (
             # UI-010.  The real failure this guards is a radio whose selected and
             # unselected indicators paint the same, so every row reads as
@@ -660,9 +667,9 @@ def main():
                 "indicatorbackground"]),
         "over-limit comparison heading flashes red through shared styles only": (
             fake_style.configured.get("SectionAlert.TLabel", {}).get("foreground")
-                == T.PALETTE["deck_bad"]
+                == T.PALETTE["bad_bright"]
             and fake_style.configured.get("SectionAlertDim.TLabel", {}).get(
-                "foreground") == T.PALETTE["deck_bad_dim"]
+                "foreground") == T.PALETTE["bad"]
             # Same weight, family and background as the normal heading, so the
             # alert state never reflows or repaints the comparison bar.
             and all(
@@ -670,7 +677,7 @@ def main():
                 == fake_style.configured["Section.TLabel"][key]
                 for name in ("SectionAlert.TLabel", "SectionAlertDim.TLabel")
                 for key in ("font", "background"))
-            and T.PALETTE["deck_bad_dim"] != T.PALETTE["deck_bad"]
+            and T.PALETTE["bad_bright"] != T.PALETTE["bad"]
             and 'style="SectionAlert.TLabel"' not in comparison_controls_source
             and '_apply_comparison_selection_style("SectionAlert.TLabel")'
                 in comparison_controls_source),
@@ -722,7 +729,6 @@ def main():
                 T.FONT_BODY, T.FONT_BODY_BOLD, T.FONT_HELPER,
                 T.FONT_HELPER_BOLD, T.FONT_MICRO, T.FONT_MICRO_BOLD,
                 T.FONT_PANE_TITLE, T.FONT_DIALOG_TITLE,
-                T.FONT_PROGRESS_TITLE,
             )),
         "classic and ttk secondary buttons share one hover direction": (
             C._CLASSIC_BUTTON_ROLES["secondary"]["bg"] == T.PALETTE["surface2"]
@@ -748,10 +754,14 @@ def main():
             and combined_source.count('text="Close", role="compact"') >= 4),
         "count headings use one canonical card-count grammar": (
             'text="RESULTS | 0 CARDS"' in combined_source
-            and 'MAINBOARD | {self.deck.total(\'main\')} CARDS' in combined_source
-            and 'SIDEBOARD | {self.deck.total(\'side\')} CARDS' in combined_source
+            and 'MAINBOARD | {card_count_text(self.deck.total(\'main\'))}' in combined_source
+            and 'SIDEBOARD | {card_count_text(self.deck.total(\'side\'))}' in combined_source
+            and 'RESULTS | {card_count_text(count)}' in combined_source
             and 'text="COMPARE | 0 CARDS SELECTED"' in comparison_controls_source
-            and 'RESULTS GALLERY | {count:,} CARDS' in sources["card_detail.py"]
+            and 'RESULTS GALLERY | {card_count_text(count)}' in sources["card_detail.py"]
+            # One helper owns the singular, so "1 CARDS" cannot come back.
+            and [C.card_count_text(n) for n in (0, 1, 2, 1234)]
+                == ["0 CARDS", "1 CARD", "2 CARDS", "1,234 CARDS"]
             and 'Cards Selected:' not in comparison_controls_source
             and 'MAINBOARD | Cards:' not in combined_source
             and 'SIDEBOARD | Cards:' not in combined_source),

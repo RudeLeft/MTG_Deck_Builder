@@ -5,7 +5,11 @@ import os
 import re
 
 from mtgdb.ui.assets import _asset_path
-from mtgdb.ui.tokens import FILTER_PIP_SIZE
+from mtgdb.ui.tokens import (
+    FILTER_PIP_SIZE, MANA_BORDER, MANA_COLORLESS_GLYPH_FILL,
+    MANA_COLORLESS_GLYPH_OUTLINE, MANA_FALLBACK_FILL, MANA_FALLBACK_OUTLINE,
+    MANA_FALLBACK_TEXT, MANA_FILL,
+)
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
@@ -15,10 +19,6 @@ except Exception:
 
 log = logging.getLogger("mtg")
 
-MANA_FILL = {"W": "#EDE3B0", "U": "#2E77B5", "B": "#4B4B4B",
-             "R": "#C0392B", "G": "#3C8D40", "C": "#AEA69B"}
-MANA_BORDER = {"W": "#C9BC7E", "U": "#20567F", "B": "#2C2C2C",
-               "R": "#8C2C22", "G": "#2B6630", "C": "#8A8377"}
 COST_CACHE_LIMIT = 512
 SYMBOL_CACHE_LIMIT = 128
 
@@ -47,8 +47,8 @@ class ManaSymbolsMixin:
             r = s * 0.25
             d.polygon(
                 [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)],
-                fill="#34383D",
-                outline="#1D2024",
+                fill=MANA_COLORLESS_GLYPH_FILL,
+                outline=MANA_COLORLESS_GLYPH_OUTLINE,
             )
 
         return ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS))
@@ -132,7 +132,8 @@ class ManaSymbolsMixin:
         img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         d.ellipse([scale, scale, s - scale, s - scale],
-                  fill="#CAC5C0", outline="#9A948E", width=max(1, scale // 2))
+                  fill=MANA_FALLBACK_FILL, outline=MANA_FALLBACK_OUTLINE,
+                  width=max(1, scale // 2))
         txt = token.upper().replace("/", "")[:3]
         font = None
         for fname in ("arialbd.ttf", "DejaVuSans-Bold.ttf", "segoeuib.ttf"):
@@ -146,7 +147,7 @@ class ManaSymbolsMixin:
         bb = d.textbbox((0, 0), txt, font=font)
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
         d.text(((s - tw) / 2 - bb[0], (s - th) / 2 - bb[1]), txt,
-               fill="#0D0F0F", font=font)
+               fill=MANA_FALLBACK_TEXT, font=font)
         return img.resize((height, height), Image.LANCZOS)
 
 

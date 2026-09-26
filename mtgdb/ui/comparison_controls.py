@@ -9,7 +9,8 @@ from mtgdb.comparison.models import (
     MAX_COMPARISON_CARDS, MIN_COMPARISON_CARDS, comparison_card_id,
 )
 from mtgdb.ui.comparison import CardComparisonWindow
-from mtgdb.ui.components import AppButton, AppMenubutton, deck_board_label
+from mtgdb.ui.components import (
+    AppButton, AppMenubutton, card_count_text, deck_board_label)
 from mtgdb.ui.tokens import (
     FONT_BODY,
     PALETTE,
@@ -607,7 +608,8 @@ class ComparisonFeatureMixin:
         over_limit_note = COMPARISON_OVER_LIMIT_NOTE if over_limit else ""
         if self._comparison_selection_lbl is not None:
             self._comparison_selection_lbl.configure(
-                text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}")
+                text=(f"COMPARE | {card_count_text(selected_count)} "
+                      f"SELECTED{over_limit_note}"))
         self._set_comparison_over_limit(over_limit)
         if self._comparison_add_selected_btn is not None:
             self._comparison_add_selected_btn.state(
@@ -721,7 +723,8 @@ class ComparisonFeatureMixin:
         popup.bind("<Return>", lambda _event: close())
         self._present_hidden_popup(
             popup, preferred_width=450, preferred_height=220,
-            min_width=380, min_height=190, lock_size=True, focus=popup, grab=True)
+            min_width=380, min_height=190, lock_size=True, focus=popup, grab=True,
+            fit_content=True)
         try:
             popup.wait_window()
         except tk.TclError:

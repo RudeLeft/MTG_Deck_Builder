@@ -5,7 +5,8 @@ from __future__ import annotations
 from tkinter import ttk
 
 from mtgdb.ui.components import AppButton
-from mtgdb.ui.set_filters import PrintingFilter, set_type_label
+from mtgdb.ui.set_filters import (
+    GAME_PLATFORM_SUMMARY_LABELS, PrintingFilter, set_type_label)
 from mtgdb.ui.tokens import PALETTE
 
 
@@ -235,7 +236,8 @@ class SearchPrintingFilter(PrintingFilter):
         if snapshot is not None and label is not None:
             try:
                 games = " · ".join(
-                    f"{key.title()} {int((snapshot.game_counts or {}).get(key, 0)):,}"
+                    f"{GAME_PLATFORM_SUMMARY_LABELS[key]} "
+                    f"{int((snapshot.game_counts or {}).get(key, 0)):,}"
                     for key in ("paper", "arena", "mtgo"))
                 language = (
                     f"English {int(snapshot.english_count):,} · "

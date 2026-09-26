@@ -9,6 +9,7 @@ from tkinter import ttk
 from mtgdb.ui.components import (
     ClassicButton, ClassicCheckbutton, ClassicEntry, ClassicRadiobutton,
 )
+from mtgdb.ui.styles import scaled_pixels
 from mtgdb.ui.tokens import (
     FONT_HELPER, PALETTE, POPUP_PADDING,
 )
@@ -396,7 +397,7 @@ class SearchChecklistDialog:
         self._title_label.pack(anchor="w")
         self._help_label = tk.Label(
             outer, text=help_text, bg=p["surface2"], fg=p["muted"],
-            font=FONT_HELPER, justify="left", wraplength=470)
+            font=FONT_HELPER, justify="left", anchor="w", wraplength=470)
         self._help_label.pack(anchor="w", pady=(2, 8))
 
         self.popup_mode = tk.StringVar(
@@ -404,7 +405,8 @@ class SearchChecklistDialog:
         if mode_var is not None:
             mode = tk.Frame(outer, bg=p["surface2"])
             mode.pack(fill="x", pady=(0, 7))
-            mode.columnconfigure(0, minsize=HELPER_LABEL_WIDTH)
+            mode.columnconfigure(
+                0, minsize=scaled_pixels(mode, HELPER_LABEL_WIDTH))
             resolved_mode_choices = tuple(mode_choices or self.MODE_CHOICES)
             self._mode_label = tk.Label(
                 mode, text=mode_label, bg=p["surface2"], fg=p["text"],

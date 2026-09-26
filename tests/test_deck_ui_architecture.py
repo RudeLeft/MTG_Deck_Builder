@@ -668,8 +668,8 @@ def main():
         "deck appearance values come from shared tokens": (
             "DECK_TYPE_SEGMENT_COLORS" in stats_source
             and "DECK_COLOR_SEGMENT_COLORS" in stats_source
-            and 'foreground=PALETTE["deck_good"]' in stats_source
-            and 'foreground=PALETTE["deck_bad"]' in stats_source),
+            and 'foreground=PALETTE["good"]' in stats_source
+            and 'foreground=PALETTE["bad"]' in stats_source),
         "deck-file workflow owns open save import and JSON export": (
             {"_open_deck", "_save_session_as",
              "_save_deck", "_deck_json_payload", "_export_all_decks_json"}

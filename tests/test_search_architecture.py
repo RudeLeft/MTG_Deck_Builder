@@ -1584,7 +1584,7 @@ def main():
                 search_source, "_build_filter_status_properties")
             and 'text=MATCH_MODE_LABEL' in _method_body(
                 search_source, "_build_mode_row")
-            and 'minsize=MATCH_MODE_LABEL_WIDTH' in _method_body(
+            and 'scaled_pixels(mode, MATCH_MODE_LABEL_WIDTH)' in _method_body(
                 search_source, "_build_mode_row")
             and 'MATCH_MODE_CHOICE_GAP' in _method_body(
                 search_source, "_build_mode_row")
@@ -1781,10 +1781,15 @@ def main():
             and "_build_advanced_filter_rows" not in _method_body(
                 search_source, "_toggle_advanced_filters")),
         "the advanced panel does not depend on a frame built after it": (
-            # The zone is built before the actions row it packs above, so a
-            # missing anchor must not be an AttributeError only a real window
-            # can reveal -- the class of bug that shipped as _rarity_btn.
-            'getattr(self, "_search_actions_frame", None)' in _method_body(
+            # The panel packs itself under its own button inside the scrolling
+            # filter zone, so it needs no anchor widget at all -- the old anchor
+            # (the actions row, built later) was the class of bug that shipped
+            # as _rarity_btn: an AttributeError only a real window reveals.
+            'self._advanced_host.pack(fill="x")' in _method_body(
+                search_source, "_toggle_advanced_filters")
+            and "_search_actions_frame" not in _method_body(
+                search_source, "_toggle_advanced_filters")
+            and "before=" not in _method_body(
                 search_source, "_toggle_advanced_filters")),
         "clearing advanced rows resets them in place without rebuilding": (
             # Clear no longer destroys and rebuilds ~15 controls (the bulk of the
@@ -2219,7 +2224,7 @@ def main():
             and "self._build_color_filters(form, row=5)" in search_source
             and "self._build_printing_filter(form, row=8)" not in search_source
             and "def _build_filter_printings(" in search_source
-            and "self._build_advanced_filter_zone(parent)" in search_source
+            and "self._build_advanced_filter_zone(zone.inner)" in search_source
             # Every registry filter still has a builder: Advanced is where the
             # rows live now, not a second way of declaring them.
             and all(f"def _build_filter_{key}(" in search_source

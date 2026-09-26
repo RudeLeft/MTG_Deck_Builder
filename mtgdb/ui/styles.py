@@ -79,6 +79,24 @@ def _map_button(style, name, *, primary=False):
 TREEVIEW_ROW_PADDING = 6
 TREEVIEW_MIN_ROW_HEIGHT = 28
 
+# Tk's `scaling` at 100% display scaling (96 dpi).  Pixel constants in this UI are
+# written for that size; anything that has to hold scaled text is multiplied by
+# display_scale() so it grows with the font instead of clipping it (WIN-009).
+DPI_BASELINE_SCALING = 96 / 72
+
+
+def display_scale(widget):
+    """Display scaling relative to 100%: 1.0 at 96 dpi, 1.25 at 125%, and so on."""
+    try:
+        return max(1.0, float(widget.tk.call("tk", "scaling")) / DPI_BASELINE_SCALING)
+    except Exception:
+        return 1.0
+
+
+def scaled_pixels(widget, pixels):
+    """*pixels* (designed for 100%) at the widget's current display scaling."""
+    return int(round(pixels * display_scale(widget)))
+
 
 def treeview_row_height(root):
     """Row height that still fits the body font at the active Tk scaling.
@@ -108,6 +126,10 @@ def install_ui_styles(root):
 
     # Classic Tk widgets and native ttk dropdown listboxes do not inherit ttk.
     root.option_add("*Font", FONT_BODY)
+    # ...but ttk labels DO have a -font option, so that default would beat the
+    # font their style declares: every heading, dialog title and helper line drew
+    # as 10 pt regular (TYP-003).  An empty value hands the font back to the style.
+    root.option_add("*TLabel.font", "")
     root.option_add("*Button.font", FONT_BODY)
     root.option_add("*Checkbutton.font", FONT_HELPER)
     root.option_add("*Radiobutton.font", FONT_BODY)
@@ -163,9 +185,9 @@ def install_ui_styles(root):
     # foreground changes.  The comparison over-limit flash alternates between
     # them, so feature code needs no local font tuple or colour.
     style.configure("SectionAlert.TLabel", background=p["surface"],
-                    foreground=p["deck_bad"], font=FONT_HELPER_BOLD)
+                    foreground=p["bad_bright"], font=FONT_HELPER_BOLD)
     style.configure("SectionAlertDim.TLabel", background=p["surface"],
-                    foreground=p["deck_bad_dim"], font=FONT_HELPER_BOLD)
+                    foreground=p["bad"], font=FONT_HELPER_BOLD)
     # "Working" flash variants of the section heading.  Same metrics as the idle
     # style so a style swap never reflows the bar; the inline PulseStatus
     # alternates bright/dim gold to read as busy (never the red reserved for
@@ -420,13 +442,34 @@ def install_ui_styles(root):
             lightcolor=p["accent"], arrowcolor=scrollbar_arrow,
             arrowsize=13, relief="flat",
         )
+        # Disabled means there is nothing to scroll: keep the gutter (so the table
+        # width never shifts) but let the thumb melt into the trough instead of
+        # a full-length gold bar (UI-016).
         style.map(
             name,
-            background=[("active", p["accent2"]),
+            background=[("disabled", p["surface2"]),
+                        ("active", p["accent2"]),
                         ("pressed", p["accent2"])],
-            arrowcolor=[("active", scrollbar_arrow),
+            darkcolor=[("disabled", p["surface2"])],
+            lightcolor=[("disabled", p["surface2"])],
+            arrowcolor=[("disabled", p["border"]),
+                        ("active", scrollbar_arrow),
                         ("pressed", scrollbar_arrow)],
         )
+    # The Search filter zone's bar while there is nothing to scroll: every part
+    # of it paints the surface it sits on, so the gutter stays (the form never
+    # reflows when the bar wakes up) but nothing is drawn (LAY-011).
+    style.configure(
+        "ZoneIdle.Vertical.TScrollbar", background=p["surface"],
+        troughcolor=p["surface"], bordercolor=p["surface"],
+        darkcolor=p["surface"], lightcolor=p["surface"],
+        arrowcolor=p["surface"], arrowsize=13, relief="flat")
+    style.map(
+        "ZoneIdle.Vertical.TScrollbar",
+        background=[("disabled", p["surface"]), ("active", p["surface"])],
+        darkcolor=[("disabled", p["surface"])],
+        lightcolor=[("disabled", p["surface"])],
+        arrowcolor=[("disabled", p["surface"]), ("active", p["surface"])])
     # Results Gallery size control.  Keep the slider in the shared component
     # palette instead of allowing a raw classic-Tk scale to invent its own
     # platform-dependent trough/thumb treatment.

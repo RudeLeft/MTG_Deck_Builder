@@ -315,7 +315,7 @@ def main():
                        if isinstance(w, _tk.Entry)]
             message = [w for w in editor.winfo_children()
                        if isinstance(w, _tk.Label)
-                       and str(w.cget("fg")) == _PALETTE["deck_bad"]][0]
+                       and str(w.cget("fg")) == _PALETTE["bad"]][0]
             entries[0].insert(0, low)
             entries[1].insert(0, high)
             apply_filter()

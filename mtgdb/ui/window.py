@@ -425,9 +425,22 @@ class WindowServicesMixin:
     def _present_hidden_popup(
             self, popup, *, preferred_width=None, preferred_height=None,
             min_width=320, min_height=220, lock_size=False, focus=None, grab=False,
-            center=True):
-        """Finish hidden geometry/style first, then map exactly once."""
+            center=True, fit_content=False):
+        """Finish hidden geometry/style first, then map exactly once.
+
+        *fit_content* raises the preferred size to what the popup's own widgets
+        request.  A size-locked dialog otherwise keeps the pixels it was designed
+        with while its text grows with display scaling, and its footer button is
+        the first thing squeezed away -- Close was 21 px tall at 125% and gone at
+        150%.  The popup is still hidden, so the layout flush is permitted.
+        """
         if center:
+            if fit_content:
+                popup.update_idletasks()
+                preferred_width = max(
+                    int(preferred_width or 0), popup.winfo_reqwidth())
+                preferred_height = max(
+                    int(preferred_height or 0), popup.winfo_reqheight())
             self._center_popup_with_visible_actions(
                 popup, preferred_width or popup.winfo_reqwidth(),
                 preferred_height or popup.winfo_reqheight(),

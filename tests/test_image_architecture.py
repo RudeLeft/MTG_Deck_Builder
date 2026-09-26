@@ -446,7 +446,7 @@ def main():
             and 'ttk.Scale(' in gallery_source
             and 'style="Gallery.Horizontal.TScale"' in gallery_source
             and 'self.card_size_scale = tk.Scale(' not in gallery_source
-            and 'RESULTS GALLERY | {count:,} CARDS' in gallery_source
+            and 'RESULTS GALLERY | {card_count_text(count)}' in gallery_source
             and 'self._scroll_y = 0.0' in gallery_source
             and 'self._top_row' not in gallery_source
             and 'slot["cell"].place(' in gallery_source

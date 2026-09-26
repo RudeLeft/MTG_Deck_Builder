@@ -556,7 +556,7 @@ every feature together and is exempt.
   **Any** radio choice: it MUST display selected whenever no specific format is
   active, and selecting it MUST replace/unselect every specific format. An empty Set
   Type or Exact Set selection means Any. _Verification:_ **AUTO**.
-- **SRCH-034 — MUST:** Present Search with the common filters always on the form and every remaining existing capability behind one **Advanced Filter Options** button. The standard order is Card Name, then one visually explicit **TYPE LINE** block in printed order **Supertype → Card Type → Subtype**, then Mana Color and Power / Toughness. **Printings belongs in Advanced under Printing & Status.** The Advanced Filter Options button MUST span the Search pane width and use a distinct section-control treatment rather than reading like another ordinary filter picker. Advanced remains built once and hidden/shown rather than rebuilt on expand. Its organizational groups are Search Scope, Mana, Card, and Printing & Status. Stable boolean predicates are divided into independent **Mana Cost Features**, **Special Properties**, and **Product / Status** facets; each facet owns its own Any/All/None mode and ANDs with the other facets. The legacy `traits`/`trait_mode` query path remains compatibility-only and MUST NOT be populated by the interactive Search UI. New workspace saves MUST persist each property's owning facet and mode; legacy workspace trait selections MUST be partitioned into their owning facets on restore, with an isolated legacy Single-faced selection translated to the equivalent Has multiple faces + None state. `Clear` MUST empty standard and Advanced values without removing controls, and workspace capture MUST preserve values plus Advanced open/closed state. _Verification:_ **AUTO**.
+- **SRCH-034 — MUST:** Present Search with the common filters always on the form and every remaining existing capability behind one **Advanced Filter Options** button. The standard order is Card Name, then one visually explicit **TYPE LINE** block in printed order **Supertype → Card Type → Subtype**, then Mana Color and Power / Toughness. **Printings belongs in Advanced under Printing & Status.** The Advanced Filter Options button MUST span the width of the Search filter zone (LAY-011) and use a distinct section-control treatment rather than reading like another ordinary filter picker. Advanced remains built once and hidden/shown rather than rebuilt on expand. Its organizational groups are Search Scope, Mana, Card, and Printing & Status. Stable boolean predicates are divided into independent **Mana Cost Features**, **Special Properties**, and **Product / Status** facets; each facet owns its own Any/All/None mode and ANDs with the other facets. The legacy `traits`/`trait_mode` query path remains compatibility-only and MUST NOT be populated by the interactive Search UI. New workspace saves MUST persist each property's owning facet and mode; legacy workspace trait selections MUST be partitioned into their owning facets on restore, with an isolated legacy Single-faced selection translated to the equivalent Has multiple faces + None state. `Clear` MUST empty standard and Advanced values without removing controls, and workspace capture MUST preserve values plus Advanced open/closed state. _Verification:_ **AUTO**.
 - **SRCH-035 — MUST:** Tooltips are a Search-filter teaching aid, not general application chrome. Attach application-owned tooltips only to Search filter labels, Search filter controls, and the mode/choice controls inside Search filter pickers; Search/Clear actions, the Advanced Filter Options section button, Results controls, deck controls, preview controls, Gallery controls, and other non-filter UI MUST NOT receive tooltips. Every Search filter tooltip MUST explain the user-visible filtering behavior and any important neighboring distinction in plain American English. Tooltip copy MUST NOT mention implementation or provenance such as Scryfall, a database, snapshots, APIs, trusted-vocabulary machinery, storage fields, or internal query names. Mana Color, Mana Produced, and Mana Symbols in Cost MUST be explained as distinct concepts. Mana Color tooltips MUST explain **Use: Color Identity vs Card Colors**, **Match: Within / Contains / Exactly**, and the special meaning of Colorless; Mana Produced MUST explain that `C` is actual colorless mana production; Mana Symbols in Cost MUST explain its Any/All/None Match mode, that Minimum is the total number of qualifying physical mana symbols, and that one hybrid/mixed symbol can represent multiple selected colors for Match while counting only once toward Minimum. Any/All/None tooltips MUST describe how adding choices broadens or narrows the filter where applicable. Live context SHOULD append useful predictive information to filter choices: discrete choices MAY show the number of cards compatible with that choice under the other current filters, numeric filters SHOULD show the applicable card count and current numeric range, and zero-result controls MUST explain why they are unavailable. Predictive wording MUST NOT claim an exact post-selection total for an Any/union choice when selected peers can broaden the final union. A selected value that has become incompatible MUST stay removable and its tooltip MUST explain that it can be deselected. User-facing taxonomy names MUST use real Magic concepts when such a concept exists; organizational UI headings MAY be plain-language group names but MUST NOT masquerade as Magic taxonomy. **Card Shape** and **Card Traits** MUST NOT appear as user-facing filter categories: layout is presented as **Card Form**, and stable boolean predicates are presented through Search Scope, Mana Cost Features, **Special Properties**, and Product / Status. Special Properties consolidates Power greater than toughness, Variable power or toughness, Has a color indicator, and Has multiple faces. Tooltips MUST reach the operated controls, not only labels. _Verification:_ **AUTO**.
 - **SRCH-033 — MUST:** Filter produced mana from the stored `produced_mana`
   column, never from colour identity or rules text. Colour identity answers a
@@ -1629,8 +1629,10 @@ every feature together and is exempt.
   MUST differ and MUST be asserted. Every `Any`/`All` and
   Within/Contains/Exactly mode row MUST carry the same style, in the picker
   dialogs and in the Search form alike: sitting beside themed controls, a
-  classic radio reads as a different widget family.
-  _Verification:_ **AUTO**.
+  classic radio reads as a different widget family. The Match row of a Cost or
+  Colors column-filter popup answers the same Any/All/None question, so it MUST be
+  three `DialogChoice.TRadiobutton` radios on that popup's surface, not a dropdown
+  that hides two of the answers. _Verification:_ **AUTO**.
 - **UI-011 — MUST:** Derive the Mainboard/Sideboard display name from the single
   `deck_board_label` helper in `ui/components.py`. The wording previously existed
   as six independent conditionals across the deck pane, comparison view,
@@ -1640,22 +1642,42 @@ every feature together and is exempt.
   affirmative action. Every visible `Close` button MUST use the secondary compact
   role; gold primary roles are reserved for affirmative actions such as Search,
   Apply, Done, OK, Gallery, or mutation commands that intentionally carry primary
-  emphasis. _Verification:_ **AUTO**.
+  emphasis. Every visible `Close` MUST also be the same widget class, `AppButton`:
+  a classic button of the same role is narrower and shorter, which left the two
+  Legality dialogs with Close buttons of different sizes. _Verification:_ **AUTO**.
 - **UI-013 — MUST:** Use Title Case for action-button labels. Count headings use one
   canonical grammar: `RESULTS | N CARDS`, `MAINBOARD | N CARDS`,
   `SIDEBOARD | N CARDS`, `RESULTS GALLERY | N CARDS`, and
-  `COMPARE | N CARDS SELECTED`. Status text after a heading separator MAY remain
-  sentence case because it is a state message rather than a count.
-  _Verification:_ **AUTO**.
+  `COMPARE | N CARDS SELECTED`. A count of one reads `1 CARD`, never `1 CARDS`, and
+  every such heading MUST build its count with `card_count_text` in
+  `ui/components.py`, the one owner of that wording. Status text after a heading
+  separator MAY remain sentence case because it is a state message rather than a
+  count. _Verification:_ **AUTO**.
 - **UI-014 — MUST:** Render major app-owned popup titles through the shared gold
   dialog-title ttk styles: `DialogTitle.TLabel` on `surface` and
   `RaisedDialogTitle.TLabel` on `surface2`. Feature code MUST NOT recreate the
-  dialog-title font/color tuple locally. _Verification:_ **AUTO**.
+  dialog-title font/color tuple locally. The database-refresh and Print progress
+  popups MUST use that same title, with the sentence saying what is happening
+  beneath it in `FONT_BODY_BOLD`; there is no separate progress-title font. The
+  Edit Columns and column-filter panels are section headings, not major popups,
+  and keep the small gold heading treatment. _Verification:_ **AUTO**.
 - **UI-015 — MUST:** Render the Results Gallery card-size control as themed ttk
   `Gallery.Horizontal.TScale`; do not use a raw `tk.Scale` whose platform chrome
   can drift from the charcoal/gold component system. The slider MUST reserve a
   15-pixel gap on its right edge before the Gallery Close action so the controls
   never visually touch. _Verification:_ **AUTO**.
+- **UI-016 — MUST:** Draw no scrollbar that has nothing to scroll. A dialog list MUST
+  hide its scrollbar until the list overflows its viewport
+  (`autohide_scrollbar` in `ui/components.py`); Results and the deck tables keep
+  a fixed gutter so their width never shifts, as does the Search filter zone
+  (LAY-011), but a disabled scrollbar MUST NOT paint a gold thumb: its thumb melts
+  into the trough, and the filter zone's idle bar paints nothing at all. A dialog with two rows
+  used to carry a full-length gold bar beside them. _Verification:_ **AUTO**.
+- **UI-017 — MUST:** Anchor every left-justified classic `tk.Label` west.
+  `justify` aligns the lines of a paragraph inside its own text block; the block
+  itself is centered in a label wider than it, which indented the Print and
+  database-refresh paragraphs against the title and box above and below them.
+  _Verification:_ **AUTO**.
 - **UI-003 — MUST:** Use `TokenBubbleEntry` for multi-value rules-text input and the
   `ui/autocomplete.py` components for autocomplete fields. `ToolTip` is the shared
   primitive only for Search-filter tooltips permitted by **SRCH-035**; feature UI
@@ -1709,13 +1731,21 @@ every feature together and is exempt.
 - **WIN-009 — MUST:** Enforce DPI-tolerant Mainboard/Sideboard minima during its
   retained sash motion and use measured widget requested widths plus expansion
   hysteresis for responsive action/chip layouts; fixed pixel breakpoints MUST NOT
-  choose an arrangement that cannot fit the current DPI/font scale. Controls
+  choose an arrangement that cannot fit the current DPI/font scale. The three
+  mana-colour rows and both Type Line chip rows are such layouts. Controls
   _Verification:_ **AUTO**.
 - **WIN-010 — MUST:** Keep controls from oscillating, clipping, or crossing the
   retained Mainboard/Sideboard divider while a person drags it. A drag is live
   interaction, so no deterministic check establishes it; WIN-009 keeps the
   measurable half — DPI-tolerant minima, measured requested widths, and
   expansion hysteresis. _Verification:_ **MANUAL**.
+
+- **WIN-011 — MUST:** Present a size-locked dialog with `fit_content=True`, which
+  raises its preferred size to what its own widgets request before the lock. A
+  locked size keeps the pixels it was designed with while the text inside grows
+  with display scaling, and the footer is the first thing squeezed away: Card
+  Legality's Close was 21 px tall at 125% and gone at 150%. The layout flush is
+  permitted because the popup is still hidden. _Verification:_ **WINDOWS**.
 
 ## Color, typography, sizing
 
@@ -1750,6 +1780,16 @@ every feature together and is exempt.
   button's highlight ring regardless of colour or thickness, which left classic
   buttons borderless beside their bordered ttk counterparts. Outline-exempt roles
   (chip close) keep no border. _Verification:_ **AUTO**.
+- **CLR-007 — MUST:** Give status TEXT one red and one green, `bad` and `good`, each
+  at least 4.5:1 against both `surface` and `surface2`. `bad_bright` is the alert
+  flash's brighter partner for `bad` and meets the same floor. The darker
+  greens and reds this replaced measured 3.2:1 and 3.4:1 on `surface` and 3.0:1 on
+  `surface2`, and error, unavailable and over-limit text used two different reds.
+  _Verification:_ **AUTO**.
+- **CLR-008 — MUST:** Define each mana colour once, as `MANA_FILL` and `MANA_BORDER` in
+  `ui/tokens.py`. The drawn mana pips and the deck-stats colour segments read
+  them; `ui/mana.py` MUST NOT define a colour or a hex literal of its own.
+  _Verification:_ **AUTO**.
 - **TYP-001 — MUST:** Define and consume typography through shared tokens, using
   Segoe UI at the size/weight assigned per role; no local font tuples in feature
   code. _Verification:_ **AUTO**.
@@ -1757,6 +1797,13 @@ every feature together and is exempt.
   actions, and intentional active state; regular for body and secondary actions.
   Major app-owned popup titles use the shared 15-point bold dialog title role and
   gold `accent` foreground. _Verification:_ **AUTO**.
+- **TYP-003 — MUST:** Draw every ttk label in the font its style declares. The
+  application-wide `*Font` option gives every ttk label a widget-level font that
+  beats its style, so every heading, dialog title and helper line drew as 10 pt
+  regular while the style tables and their tests said 9 pt bold and 15 pt bold.
+  `install_ui_styles` MUST hand `TLabel` back to its styles
+  (`option_add("*TLabel.font", "")`), and a test MUST measure real labels, because
+  reading `style.configure` cannot see the override. _Verification:_ **AUTO**.
 - **SIZ-001 — MUST:** Give primary and secondary variants of one family the same
   font size, vertical padding, border width, and requested height.
   _Verification:_ **AUTO**.
@@ -1774,7 +1821,13 @@ every feature together and is exempt.
   100%, 125%, and 150% — including `Compare`, `Add Mainboard`, and `Add Sideboard`.
   Intentional multiline labels MUST be validated by the widest rendered line,
   and both `Remove from Mainboard` and `Remove from Sideboard` MUST fit their
-  comparison side rail at all three simulated Tk scales. _Verification:_ **WINDOWS**.
+  comparison side rail at all three simulated Tk scales. The five Card Preview
+  actions (Gallery, Legality, Flip, Rotate, Zoom) share the fixed center column,
+  so each MUST be content-sized (`width=0`): clam's default minimum of eleven
+  characters asked for 465 px of a 442 px row at 100% and dropped Gallery
+  entirely at 125%. A size-locked dialog MUST also be at least as large as its
+  content asks for (WIN-011), so its footer button is whole at every scale.
+  _Verification:_ **WINDOWS**.
 
 ## Layout and behavior invariants
 
@@ -1810,16 +1863,30 @@ every feature together and is exempt.
 - **LAY-005 — MUST:** Preserve deck tabs, the visible New Deck control,
   user-configurable columns and filters, and exactly one user-resizable main-workspace
   sash: the vertical Mainboard/Sideboard divider. Main Search/center/Deck and
-  Card Preview/Deck Stats draggable sashes are prohibited. _Verification:_ **AUTO**.
+  Card Preview/Deck Stats draggable sashes are prohibited. The deck tab bar is
+  fixed in height, 34 px at 100% and multiplied by the display scaling, so its
+  tabs and the New Deck glyph are never clipped at 125% and above.
+  _Verification:_ **AUTO**.
 - **LAY-006 — MUST:** Lay out primary Card Type filter chips in four columns
   by default and expand to five columns only when the five-column grid's natural
-  requested width fits inside the available Card Type frame. Re-evaluate this
-  presentation-only layout as the frame resizes without recreating filter state.
-  _Verification:_ **AUTO**.
+  requested width, plus a headroom margin, fits inside the available Card Type
+  frame. Every cell is as wide as the widest chip, so when the four-column grid does
+  not fit the row MUST fall back to three columns, then two, rather than cut a
+  label such as `Enchantment` or `Planeswalker`; the Supertype chips follow the
+  same rule starting from five columns. Uniform columns are equal as columns,
+  padding included, so a row's required width is the column count times the widest
+  chip plus the widest per-column gap padding; counting the chips alone left a
+  middle-column chip one pixel short and cut it. Re-evaluate this presentation-only layout
+  as the frame resizes, and after every chip re-render, without recreating filter
+  state. _Verification:_ **AUTO**.
 - **LAY-007 — MUST:** Present the primary name label as **Card Name** and let its
   editable field span the remaining Search-form width. Search standard and Advanced
-  rows MUST share one 144-pixel primary label rail so every primary control begins at
-  the same horizontal position regardless of label length. Unused space inside that label
+  rows MUST share one primary label rail so every primary control begins at
+  the same horizontal position regardless of label length. The rail is 144 pixels at
+  100% display scaling, multiplied by the display scaling, and never narrower than
+  the widest label of the form: a fixed 144 pixels let `Mana symbols in cost` push
+  its control 34 pixels off the shared column at 125%. The `Match` and `Use`
+  helper rails scale the same way. Unused space inside that label
   rail MUST carry the Search Style B association cue: a palette-derived two-pixel horizontal
   line with a broad center-weighted fade from the dark surface toward the standard border
   color, begins after a compact text gap, and draws whenever a small usable gap remains.
@@ -1849,12 +1916,16 @@ every feature together and is exempt.
   its picker to the full right edge of the shared Search control area; in particular the
   Advanced Printings picker MUST stretch to the same full Search control-area right edge
   as the other Advanced picker rows. The Advanced Filter Options section button MUST span
-  the full Search pane width. A visual-only horizontal boundary MUST separate the filter/Advanced
+  the full width of the Search filter zone (LAY-011), which is the Search pane less its
+  scrollbar gutter. A visual-only horizontal boundary MUST separate the filter/Advanced
   region from the Search/Clear/deck-action/Results region without introducing a sash, nested pane,
-  fixed geometry, or other window-locking behavior. Mana Color, Mana Produced, and Mana Symbols in Cost MUST use the same
+  fixed geometry, or other window-locking behavior; the scrolling filter zone of LAY-011 is
+  none of those. Mana Color, Mana Produced, and Mana Symbols in Cost MUST use the same
   compact left-packed W/U/B/R/G/C choice spacing rather than distributing the choices
-  across equal-width columns. Lay out Supertypes in
-  five compact columns. Keep the shared English-only Search criterion in the top-right
+  across equal-width columns. While all six do not fit on one line the row MUST wrap
+  to two rows of three, then three rows of two, so no colour is ever clipped out of
+  reach. Lay out Supertypes in five compact columns, fewer when the widest name does
+  not fit (LAY-006). Keep the shared English-only Search criterion in the top-right
   of the Printings popup rather than consuming primary Search-row width.
   _Verification:_ **AUTO**.
 - **LAY-008 — MUST:** Keep the primary Search rows on one uniform vertical-spacing
@@ -1906,6 +1977,33 @@ every feature together and is exempt.
   LAY-009 keeps the testable structure: section membership, the single outer
   scrollbar, and the seven scrollbar-free Sample Hand rows.
   _Verification:_ **MANUAL**.
+- **LAY-011 — MUST:** Keep Search, Clear, Add Mainboard, Add Sideboard and at least
+  `RESULTS_MIN_ROWS` (six) Results rows on screen at every window size, however tall
+  the filters are. The standard form and the Advanced panel live in one `ScrollZone`
+  (`ui/components.py`) above a pinned block that holds the boundary line, the action
+  row and the Results table. Tk's packer gives space in pack order, so the pinned
+  block MUST be packed BEFORE the zone, and the Results table MUST request exactly
+  `RESULTS_MIN_ROWS` rows (`height=RESULTS_MIN_ROWS`): its minimum is then
+  guaranteed, it grows with any spare height, and the zone, packed last, asks for its
+  natural height and is squeezed only when it has to be. The zone is created before
+  the pinned block so Tab visits the filters first. Its scrollbar gutter is ALWAYS
+  reserved, so the width of the form never shifts and the chip rows cannot reflow as
+  a bar appears; with nothing to scroll the bar is disabled and draws nothing (its own
+  idle style paints only the surface), and it draws, gold, only once the content
+  overflows. A gap of `ScrollZone.BAR_GAP` (6 px at 100%, scaled with the display) MUST
+  separate the controls from the bar so the two never touch. Clicking
+  Advanced open MUST scroll the Advanced button to the top of the zone; clicking it
+  closed MUST return the zone to its first row; restoring a saved workspace MUST NOT
+  move the view. Either move MUST land once: opening waits until the zone has been
+  resized for the taller form and then jumps against that size, and closing goes to
+  the top before Tk clamps the view; deciding the jump against the old height flashed
+  the Advanced button at the top of the pane before it dropped to its place. The wheel over any ttk spinbox or combobox in the zone, such as
+  Power or Released, MUST scroll the zone and MUST NOT edit the field. Keyboard focus
+  on a control scrolled out of view MUST scroll it into view, and row hover MUST
+  count only the visible viewport. A zone scrolled deep whose content then shrinks
+  MUST NOT be left blank past the end. Before this rule, opening Advanced pushed
+  Search and Results off the pane at every window size tested, and at 1366x768 the
+  Results table had no room at all. _Verification:_ **WINDOWS**.
 - **BEH-001 — MUST:** Preserve every existing command callback, filter function,
   Tk variable, event binding, protocol handler, and search meaning during a
   presentation-only change, comparing manifests with the pre-change source.
@@ -2137,8 +2235,11 @@ every feature together and is exempt.
   _Verification:_ **WINDOWS**.
 - **VER-003 — MUST:** Run `tests/test_ui_component_contract.py` after a shared
   component or ownership change. _Verification:_ **AUTO**.
-- **VER-004 — MUST:** Run `tests/test_ui_visual_contract.py` after a UI token,
-  style, component, or layout change. _Verification:_ **AUTO**.
+- **VER-004 — MUST:** Run `tests/test_ui_visual_contract.py` and
+  `tests/test_ui_rendering_contract.py` after a UI token, style, component, or
+  layout change. The first reads style definitions and source; the second measures
+  what real widgets draw, which is where the label-font override hid.
+  _Verification:_ **AUTO**.
 - **VER-005 — MUST:** Run `tests/test_project_guardrails.py` after changing this
   file, dependency metadata, build orchestration, tests, or packaging.
   _Verification:_ **AUTO**.
@@ -2232,16 +2333,18 @@ the behavior it governs, update its test in the same change (CHG-007).
 | PRN-* | `tests/test_printing_architecture.py` |
 | BGJ-* | `tests/test_background_jobs_architecture.py` |
 | TBL-* | `tests/test_table_architecture.py` |
-| UI-001 through UI-008, WIN-001 through WIN-009 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py` |
+| UI-001 through UI-008, WIN-001 through WIN-009 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_ui_rendering_contract.py` |
+| UI-012 through UI-017 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_ui_rendering_contract.py` |
 | WIN-010, LAY-010 | manual Windows inspection under VER-007 |
 | UI-009 | `tests/test_project_guardrails.py`, `tests/test_trusted_filter_contract.py` |
-| UI-010 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_search_architecture.py` |
+| UI-010 | `tests/test_ui_component_contract.py`, `tests/test_ui_visual_contract.py`, `tests/test_search_architecture.py`, `tests/test_ui_rendering_contract.py` |
 | UI-011 | `tests/test_ui_component_contract.py`, `tests/test_deck_ui_architecture.py` |
-| CLR-*, TYP-*, SIZ-*, LAY-* | `tests/test_ui_visual_contract.py`, `windows_tests/test_ui_geometry_windows.py` |
+| CLR-*, TYP-*, SIZ-*, LAY-* | `tests/test_ui_visual_contract.py`, `tests/test_ui_rendering_contract.py`, `windows_tests/test_ui_geometry_windows.py`, `windows_tests/test_app_startup_windows.py` |
 | BEH-*, callback safety | `tests/test_ui_callback_safety.py`, `tests/test_ui_component_contract.py` |
 | DATA-*, VER-009, VER-013 | `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_taxonomy_printings.py`, `tests/test_future_magic.py`, `tests/test_card_comparison.py`, `tests/test_taxonomy_audit_contract.py`; full upstream evidence: `.github/workflows/taxonomy-audit.yml` → `tests/taxonomy_audit.py --current` |
 | PORT-001 through PORT-005, PORT-007 | `tests/test_portability_contract.py`, `tests/test_hardening_regressions.py` |
 | PORT-006, single-instance | `windows_tests/test_single_instance_windows.py`, `tests/test_portability_contract.py` |
-| SIZ-003, SIZ-004, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py` |
+| SIZ-003, SIZ-004, LAY-004, VER-006 simulated Tk scaling | `windows_tests/test_ui_geometry_windows.py`, `windows_tests/test_app_startup_windows.py` |
+| WIN-011, LAY-011, real-application layout fit at 100/125/150% | `windows_tests/test_app_startup_windows.py`, `tests/test_ui_rendering_contract.py` |
 | BLD-*, REL-* | `tests/test_project_guardrails.py`, `tests/test_hardening_regressions.py` |
 | BLD-004 packaged smoke | `windows_tests/smoke_packaged_windows.py` |

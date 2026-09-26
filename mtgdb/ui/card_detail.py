@@ -17,7 +17,8 @@ from mtgdb.images.service import (
     card_face_image_url,
     card_viewable_faces,
 )
-from mtgdb.ui.components import AppButton, format_display_name
+from mtgdb.ui.components import (
+    AppButton, autohide_scrollbar, card_count_text, format_display_name)
 from mtgdb.ui.tokens import (
     CARD_PREVIEW_PORTRAIT_SIZE,
     CARD_ZOOM_BASE_PORTRAIT_SIZE,
@@ -956,7 +957,7 @@ class _ResultsGalleryWindow:
 
     def _render(self):
         count = self._total_count()
-        title = f"RESULTS GALLERY | {count:,} CARDS"
+        title = f"RESULTS GALLERY | {card_count_text(count)}"
         self.title_label.configure(text=title)
         try:
             self.top.title(title)
@@ -1708,23 +1709,28 @@ class CardDetailMixin:
     def _build_card_pane(self, parent):
         header = ttk.Frame(parent, style="Preview.TFrame")
         header.pack(fill="x", pady=(0, 8))
+        # The row shares the fixed center column's width (LAY-001), so every
+        # button is content-sized (width=0): clam's default minimum of eleven
+        # characters made five buttons ask for 465 px of a 442 px row at 100%,
+        # and Gallery vanished entirely at 125% (SIZ-003).
         self.card_zoom_btn = AppButton(
-            header, text="Zoom", role="compact", command=self._open_card_zoom)
+            header, text="Zoom", role="compact", width=0,
+            command=self._open_card_zoom)
         self.card_zoom_btn.pack(side="right")
         self.card_rotate_btn = AppButton(
-            header, text="Rotate", role="compact",
+            header, text="Rotate", role="compact", width=0,
             command=self._rotate_card_preview)
         self.card_rotate_btn.pack(side="right", padx=(0, 6))
         self.card_flip_btn = AppButton(
-            header, text="Flip", role="compact",
+            header, text="Flip", role="compact", width=0,
             command=self._flip_card_preview)
         self.card_flip_btn.pack(side="right", padx=(0, 6))
         self.card_legality_btn = AppButton(
-            header, text="Legality", role="compact",
+            header, text="Legality", role="compact", width=0,
             command=self._open_card_legality)
         self.card_legality_btn.pack(side="right", padx=(0, 6))
         self.card_gallery_btn = AppButton(
-            header, text="Gallery", role="compact_primary",
+            header, text="Gallery", role="compact_primary", width=0,
             command=self._request_results_gallery)
         self.card_gallery_btn.pack(side="right", padx=(0, 6))
         self._set_card_preview_actions(False)
@@ -1916,7 +1922,7 @@ class CardDetailMixin:
         scroll = ttk.Scrollbar(
             list_shell, orient="vertical", command=formats.yview,
             style="Dark.Vertical.TScrollbar")
-        formats.configure(yscrollcommand=scroll.set)
+        formats.configure(yscrollcommand=autohide_scrollbar(scroll))
         formats.grid(row=0, column=0, sticky="nsew")
         scroll.grid(row=0, column=1, sticky="ns")
         self._register_scrollable(formats)
@@ -1932,7 +1938,7 @@ class CardDetailMixin:
         self._sync_preview_legality()
         self._present_hidden_popup(
             popup, preferred_width=390, preferred_height=360,
-            min_width=330, min_height=260, lock_size=True)
+            min_width=330, min_height=260, lock_size=True, fit_content=True)
 
     def _clear_preview_legality_popup(self, popup):
         if self._preview_legality_popup is popup:

@@ -31,14 +31,15 @@ PALETTE = {
     "input": "#111317",
     "bar": "#C39A4A",
     "bar_land": "#777C86",
+    # Status TEXT colours (CLR-007).  Each clears 4.5:1 on `surface` and on
+    # `surface2`, which the darker deck-stats greens/reds it replaced did not.
+    # `bad` is the one red for every error, unavailable and over-limit message.
     "good": "#74B78A",
     "bad": "#D57474",
-    "deck_good": "#2E7D32",
-    "deck_bad": "#C0392B",
-    # Dimmed partner for deck_bad.  The bounded over-limit comparison flash
-    # pulses between the two so the alerting text stays red the whole time
-    # instead of dropping to another hue mid-pulse.
-    "deck_bad_dim": "#6E2A24",
+    # Brighter partner for `bad`.  The bounded over-limit comparison flash
+    # pulses between the two, so the alerting text stays a legible red the
+    # whole time instead of dropping to a dim colour mid-pulse.
+    "bad_bright": "#F09292",
     # "Working" status colours.  A brighter/dimmer gold pair the inline status
     # pulse alternates between, so a busy indicator stays warm-gold the whole
     # time and reads as working -- never the red used for errors/unavailable.
@@ -63,6 +64,21 @@ MANA_NAMES = {
     "G": "Green", "C": "Colorless",
 }
 
+# The one definition of each mana colour (CLR-008).  The drawn mana pips and the
+# deck-stats colour segments both read these, so a colour cannot drift between
+# the symbol a card shows and the bar that counts it.
+MANA_FILL = {"W": "#EDE3B0", "U": "#2E77B5", "B": "#4B4B4B",
+             "R": "#C0392B", "G": "#3C8D40", "C": "#AEA69B"}
+MANA_BORDER = {"W": "#C9BC7E", "U": "#20567F", "B": "#2C2C2C",
+               "R": "#8C2C22", "G": "#2B6630", "C": "#8A8377"}
+# Drawn glyphs: the colourless diamond, and the grey pip for any symbol the
+# bundled sheet lacks.
+MANA_COLORLESS_GLYPH_FILL = "#34383D"
+MANA_COLORLESS_GLYPH_OUTLINE = "#1D2024"
+MANA_FALLBACK_FILL = "#CAC5C0"
+MANA_FALLBACK_OUTLINE = "#9A948E"
+MANA_FALLBACK_TEXT = "#0D0F0F"
+
 DECK_TYPE_SEGMENT_COLORS = {
     "Creatures": "#4E79A7", "Instants": "#59A14F",
     "Sorceries": "#F28E2B", "Artifacts": "#9C755F",
@@ -70,9 +86,9 @@ DECK_TYPE_SEGMENT_COLORS = {
     "Battles": "#E15759", "Other": "#BAB0AC",
 }
 DECK_COLOR_SEGMENT_COLORS = {
-    "W": "#EDE3B0", "U": "#2E77B5", "B": "#4B4B4B",
-    "R": "#C0392B", "G": "#3C8D40", "Multi": "#C9A94E",
-    "Colorless": "#AEA69B",
+    "W": MANA_FILL["W"], "U": MANA_FILL["U"], "B": MANA_FILL["B"],
+    "R": MANA_FILL["R"], "G": MANA_FILL["G"], "Multi": "#C9A94E",
+    "Colorless": MANA_FILL["C"],
 }
 
 # Typography is role-based so new controls do not invent local font tuples.
@@ -87,7 +103,6 @@ FONT_PANE_TITLE = (FONT_FAMILY, 15, "bold")
 # growing it (the row is as tall as its buttons), so showing it never reflows.
 FONT_ACTIVITY = (FONT_FAMILY, 14, "bold")
 FONT_DIALOG_TITLE = (FONT_FAMILY, 15, "bold")
-FONT_PROGRESS_TITLE = (FONT_FAMILY, 15, "bold")
 FONT_CONTROL_GLYPH = (FONT_FAMILY, 11, "bold")
 
 # Control padding values are logical Tk units and scale with the Tk DPI setting.

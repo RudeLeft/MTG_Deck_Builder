@@ -435,8 +435,9 @@ def main():
         "comparison selected count matches the exact mixed-source union": mixed_selection_count == 3,
         "comparison selected label sits beside COMPARE with explicit wording": (
             'text="COMPARE | 0 CARDS SELECTED"' in controls_source
-            and 'text=f"COMPARE | {selected_count} CARDS SELECTED{over_limit_note}"'
-                in controls_source),
+            and 'text=(f"COMPARE | {card_count_text(selected_count)} "'
+                in controls_source
+            and 'f"SELECTED{over_limit_note}"))' in controls_source),
         "an over-limit selection appends the explicit too-many wording": (
             'COMPARISON_OVER_LIMIT_NOTE = " (TOO MANY CARDS SELECTED)"'
                 in controls_source

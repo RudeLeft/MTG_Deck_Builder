@@ -215,9 +215,9 @@ def main():
         "form and helper typography use Segoe UI role tokens": (
             T.FONT_BODY == ("Segoe UI", 10)
             and T.FONT_HELPER == ("Segoe UI", 9)),
-        "pane, dialog, and progress titles share one size": (
-            T.FONT_PANE_TITLE[1] == T.FONT_DIALOG_TITLE[1]
-            == T.FONT_PROGRESS_TITLE[1] == 15),
+        "pane and dialog titles share one size, and progress dialogs reuse the dialog title": (
+            T.FONT_PANE_TITLE[1] == T.FONT_DIALOG_TITLE[1] == 15
+            and not hasattr(T, "FONT_PROGRESS_TITLE")),
         "all color-filter mana pips share one display size": (
             T.FILTER_PIP_SIZE == 22),
         "Sideboard action uses larger standard density and stays content-sized": bool(

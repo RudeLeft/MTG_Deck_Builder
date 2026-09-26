@@ -10,6 +10,7 @@ from mtgdb.search.results import (
     CompactResultSelection, ResultPreparationWorker, SearchResultStore,
 )
 from mtgdb.ui.card_detail import _ResultsGalleryWindow
+from mtgdb.ui.components import card_count_text
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 
 
@@ -215,7 +216,7 @@ class SearchResultsMixin:
         visible = self._result_store.visible_count
         filtered = bool(self._table_filters.get("results"))
         count = visible if filtered else total
-        return f"RESULTS | {count:,} CARDS"
+        return f"RESULTS | {card_count_text(count)}"
 
     def _render_results_count(self):
         """Idle RESULTS header paint (the PulseStatus restore target)."""
@@ -285,11 +286,9 @@ class SearchResultsMixin:
 
     def _result_visible_capacity(self):
         tv = self.results_tv
+        # Before the table is laid out its height option is only the minimum
+        # request (LAY-011); the row pool starts from the size it grows to.
         fallback = 16
-        try:
-            fallback = max(1, int(tv.cget("height")))
-        except (tk.TclError, TypeError, ValueError):
-            pass
         try:
             height = int(tv.winfo_height())
             rowheight = int(ttk.Style(tv).lookup("Treeview", "rowheight") or 20)

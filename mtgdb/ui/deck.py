@@ -6,8 +6,10 @@ from tkinter import messagebox, ttk
 from mtgdb.deck.model import Deck
 from mtgdb.deck.sessions import DeckSession
 from mtgdb.ui.components import (
-    AppButton, AppEntry, ClassicButton, deck_board_label, format_display_name)
+    AppButton, AppEntry, ClassicButton, card_count_text, deck_board_label,
+    format_display_name)
 from mtgdb.ui.search_checklist import open_search_checklist
+from mtgdb.ui.styles import scaled_pixels
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 from mtgdb.ui.tokens import (
     FONT_CONTROL_GLYPH, FONT_HELPER, FONT_HELPER_BOLD, PALETTE,
@@ -232,7 +234,11 @@ class DeckEditorMixin:
     def _build_deck_pane(self, parent):
         # Browser-style tab strip.  Tabs switch DeckSession state while the
         # Mainboard/Sideboard widgets below remain a single shared UI.
-        self._deck_tab_bar = tk.Frame(parent, bg=PALETTE["surface2"], height=34)
+        # 34 px at 100%: the bar is fixed so tabs never reflow the pane, but
+        # the tab text and the "+" glyph grow with display scaling, so the
+        # height has to follow it or they clip at 125% and above.
+        self._deck_tab_bar = tk.Frame(
+            parent, bg=PALETTE["surface2"], height=scaled_pixels(self, 34))
         self._deck_tab_bar.pack(fill="x", pady=(0, 7))
         self._deck_tab_bar.pack_propagate(False)
         self._render_deck_tabs()
@@ -367,9 +373,11 @@ class DeckEditorMixin:
         main = getattr(self, "mainboard_header_lbl", None)
         side = getattr(self, "sideboard_header_lbl", None)
         if main is not None:
-            main.configure(text=f"MAINBOARD | {self.deck.total('main')} CARDS")
+            main.configure(
+                text=f"MAINBOARD | {card_count_text(self.deck.total('main'))}")
         if side is not None:
-            side.configure(text=f"SIDEBOARD | {self.deck.total('side')} CARDS")
+            side.configure(
+                text=f"SIDEBOARD | {card_count_text(self.deck.total('side'))}")
 
     def _make_deck_tree(self, parent, view, height=8):
         ordinary = tuple(c for c in TABLE_COLUMN_ORDER

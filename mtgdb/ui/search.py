@@ -6,14 +6,14 @@ import datetime
 import math
 import logging
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import font as tkfont, messagebox, ttk
 
 from mtgdb.database.constants import COLORS
 from mtgdb.search.models import SearchCriteria
 from mtgdb.ui.autocomplete import AutocompleteEntry
 from mtgdb.ui.components import (
     ActivityIndicator, AppButton, AppCombobox, AppSpinbox, ClassicCheckbutton,
-    PulseStatus, TokenBubbleEntry, format_display_name,
+    PulseStatus, ScrollZone, TokenBubbleEntry, format_display_name,
 )
 from mtgdb.ui.search_checklist import open_search_checklist
 from mtgdb.ui.search_filters import (
@@ -21,16 +21,24 @@ from mtgdb.ui.search_filters import (
     filter_tooltip,
 )
 from mtgdb.ui.search_printings import SearchPrintingFilter
+from mtgdb.ui.styles import scaled_pixels
 from mtgdb.ui.tables import TABLE_COLUMNS, TABLE_COLUMN_ORDER
 from mtgdb.ui.tokens import (
-    MANA_NAMES, PALETTE,
+    FONT_BODY, MANA_NAMES, PALETTE,
 )
 
 log = logging.getLogger("mtg")
 
+# Rows the Results table is always given, however tall the filters are.
+RESULTS_MIN_ROWS = 6
 CARD_TYPE_MIN_COLUMNS = 4
 CARD_TYPE_MAX_COLUMNS = 5
 SUPERTYPE_COLUMNS = 5
+# Column counts a chip row may use, widest first.  A pane too narrow for the
+# default falls back to fewer, wider cells instead of cutting "Legendary" or
+# "Planeswalker" in half (LAY-006).
+CARD_TYPE_COLUMN_OPTIONS = (CARD_TYPE_MAX_COLUMNS, CARD_TYPE_MIN_COLUMNS, 3, 2)
+SUPERTYPE_COLUMN_OPTIONS = (SUPERTYPE_COLUMNS, 4, 3, 2)
 CARD_TYPE_LOADING_SLOTS = CARD_TYPE_MIN_COLUMNS * 3
 SUPERTYPE_LOADING_SLOTS = SUPERTYPE_COLUMNS
 CHIP_GRID_X_GAP = 4
@@ -52,6 +60,11 @@ ADVANCED_SECTION_HEADING_PADY = (6, 1)
 # rows above them, so the control column does not step in and out.
 FILTER_LABEL_WIDTH = 144
 FILTER_LABEL_GAP = 10
+# The labels of the always-visible rows, so the label rail can be sized from the
+# widest label of the whole form (see _filter_label_width).
+STANDARD_FILTER_LABELS = (
+    "Card Name", "Supertype", "Card Type", "Subtype", "Mana Color", "Power",
+    "Toughness")
 # Style B association rail: a two-pixel center-weighted fade that occupies only
 # unused space inside the fixed label column.  It never changes control rails.
 ASSOCIATION_RAIL_TEXT_GAP = 8
@@ -67,7 +80,9 @@ SEARCH_RESULTS_BOUNDARY_HEIGHT = 2
 ASSOCIATION_RAIL_HOVER_MAX_BLEND = 1.0
 MODE_CONTROL_GAP = SECONDARY_CONTROL_GAP
 MODE_CHOICE_COLUMNS = 3
-MANA_CHOICE_GAP = 8
+# 6 px, not 8: the scrolling filter zone's reserved gutter left 543 px at 1080p and 100%,
+# and all six colours need 544 with an 8 px gap -- one pixel short of one line.
+MANA_CHOICE_GAP = 6
 # Every numeric range uses the same fixed mini-grid so Min / to / Max fields
 # line up regardless of whether the widgets are spinboxes or year comboboxes.
 RANGE_FIELD_WIDTH_PX = 64
@@ -163,9 +178,41 @@ def _association_rail_color(position, active=False):
         curve * ASSOCIATION_RAIL_MAX_BLEND)
 
 
-def _pack_mana_choice(widget):
-    """Keep W/U/B/R/G/C choices compact and aligned across Search mana rows."""
-    widget.pack(side="left", padx=(0, MANA_CHOICE_GAP))
+def _grid_mana_choices(widgets, columns):
+    """Place the W/U/B/R/G/C choices row-major in *columns* columns.
+
+    One row while the pane is wide enough, so the three mana rows stay compact
+    and aligned; a narrow pane wraps them to two rows of three instead of
+    letting the later colours be squeezed out and become unclickable (WIN-009).
+    """
+    for index, widget in enumerate(widgets):
+        widget.grid(
+            row=index // columns, column=index % columns, sticky="w",
+            padx=(0, MANA_CHOICE_GAP))
+
+
+def _mana_choice_required_width(widgets, columns):
+    """Width of a row-major grid whose column widths are its widest choices."""
+    widths = [int(widget.winfo_reqwidth()) for widget in widgets]
+    columns_width = sum(max(widths[column::columns]) for column in range(columns))
+    return columns_width + MANA_CHOICE_GAP * (columns - 1)
+
+
+def _fit_mana_choice_columns(widgets, available_width, current, margin=8):
+    """Most columns (one row first) whose grid fits *available_width*.
+
+    Taking more columns than the row has now needs *margin* pixels of headroom,
+    so a pane sitting on the edge cannot flip between two arrangements.
+    """
+    count = len(widgets)
+    options = tuple(sorted({count, min(3, count), min(2, count)}, reverse=True))
+    for columns in options:
+        needed = _mana_choice_required_width(widgets, columns)
+        if columns > current:
+            needed += margin
+        if needed <= available_width:
+            return columns
+    return options[-1]
 
 
 def _chip_layout_widget(widget):
@@ -181,7 +228,29 @@ def _row_major_grid_required_width(widgets, columns):
         return 0
     widest = max(
         int(_chip_layout_widget(widget).winfo_reqwidth()) for widget in widgets)
-    return (widest * columns) + (CHIP_GRID_X_GAP * (columns - 1))
+    # Uniform columns are equal as COLUMNS, padding included, so the columns with
+    # a gap on both sides (every middle one) leave their chip up to
+    # CHIP_GRID_X_GAP narrower than an outer one.  Sizing the row by the widest
+    # padded column is what keeps "Phenomenon" whole in a middle cell.
+    padding = max(sum(_chip_grid_padx(column, columns)) for column in range(columns))
+    return columns * (widest + padding)
+
+
+def _fit_chip_columns(widgets, available_width, options, current, margin=8):
+    """Largest column count in *options* (widest first) whose grid fits.
+
+    Chips share one cell width -- the widest chip's -- so a long name such as
+    "Enchantment" sets the width of every cell.  Growing past *current* needs
+    *margin* pixels of headroom, so a pane on the edge cannot flip between two
+    layouts; shrinking happens as soon as the row would not fit.
+    """
+    for columns in options:
+        needed = _row_major_grid_required_width(widgets, columns)
+        if columns > current:
+            needed += margin
+        if needed <= available_width:
+            return columns
+    return options[-1]
 
 
 class SearchFeatureMixin:
@@ -303,12 +372,16 @@ class SearchFeatureMixin:
             pointer_x, pointer_y = self.winfo_pointerxy()
         except tk.TclError:
             return
+        # A row scrolled out of the filter zone keeps its nominal position, which
+        # can lie over the pinned Results area: only the visible viewport counts.
+        zone = getattr(self, "_filter_zone", None)
+        in_view = zone is None or zone.holds_pointer(pointer_x, pointer_y)
         for region in getattr(self, "_search_row_hover_regions", ()):
             parent = region["parent"]
             band = region["band"]
             active = False
             try:
-                if parent.winfo_ismapped():
+                if in_view and parent.winfo_ismapped():
                     self._position_search_row_hover_region(region)
                     left = band.winfo_rootx()
                     top = band.winfo_rooty()
@@ -341,6 +414,30 @@ class SearchFeatureMixin:
             lambda _event: self.after_idle(self._sync_search_row_hover),
             add="+")
 
+    def _filter_label_width(self):
+        """Width of the one primary label rail shared by every Search row (LAY-007).
+
+        144 px at 100% display scaling, multiplied by the scaling so it grows with
+        the label font, and never narrower than the widest label of the form: a
+        label wider than its rail used to push that row's control off the rail.
+        """
+        width = getattr(self, "_filter_label_px", None)
+        if width is None:
+            width = scaled_pixels(self, FILTER_LABEL_WIDTH)
+            try:
+                font = tkfont.Font(root=self, font=FONT_BODY)
+                labels = STANDARD_FILTER_LABELS + tuple(
+                    entry["label"]
+                    for _category, entries in advanced_filters()
+                    for entry in entries
+                    if getattr(self, f"_build_filter_{entry['key']}", None))
+                width = max(width, max(
+                    font.measure(text) for text in labels) + FILTER_LABEL_GAP)
+            except (tk.TclError, KeyError, TypeError):
+                pass
+            self._filter_label_px = width
+        return width
+
     def _build_search_row_label(
             self, parent, text, *, row, pady, tooltip_key=None, tooltip_text=None):
         """Build a primary label and overlay a zero-geometry Style B fade rail.
@@ -355,7 +452,7 @@ class SearchFeatureMixin:
             padx=(0, FILTER_LABEL_GAP), pady=pady)
 
         label.update_idletasks()
-        available = FILTER_LABEL_WIDTH - FILTER_LABEL_GAP
+        available = self._filter_label_width() - FILTER_LABEL_GAP
         rail_width = (available - int(label.winfo_reqwidth())
                       - ASSOCIATION_RAIL_TEXT_GAP)
         if rail_width >= ASSOCIATION_RAIL_MIN_WIDTH:
@@ -398,6 +495,9 @@ class SearchFeatureMixin:
         self._card_type_catalog = list(warm_catalogs.get("card_types") or ())
         self._card_type_chip_widgets = ()
         self._card_type_chip_columns = CARD_TYPE_MIN_COLUMNS
+        self._property_chip_widgets = ()
+        self._supertype_chip_columns = SUPERTYPE_COLUMNS
+        self._mana_choice_rows = []
         self.q_card_type_mode = tk.StringVar(value="any")
 
         self.property_vars = {}
@@ -485,10 +585,26 @@ class SearchFeatureMixin:
             setattr(self, name, None)
 
     def _build_search_pane(self, parent):
+        """Build the Search pane: a scrolling filter zone above a pinned block.
+
+        The filter zone (the form and the Advanced panel) scrolls; the block below
+        it -- boundary, Search/Clear/Add and the Results table, which is asked to
+        keep at least ``RESULTS_MIN_ROWS`` rows -- never moves off the pane (LAY-011).
+        Tk's packer gives space in pack order, so the pinned block is packed first
+        and the zone, created first for the Tab order, is packed last and takes
+        whatever is left.
+        """
         self._search_row_hover_regions = []
-        form = ttk.Frame(parent)
+        zone = ScrollZone(parent, scroll_step=scaled_pixels(parent, 48))
+        self._filter_zone = zone
+        pinned = ttk.Frame(parent)
+        self._search_pinned_block = pinned
+        register = getattr(self, "_register_scrollable", None)
+        if register is not None:
+            register(zone.canvas, target=zone.wheel_target())
+        form = ttk.Frame(zone.inner)
         form.pack(fill="x")
-        form.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)
+        form.columnconfigure(0, minsize=self._filter_label_width())
         form.columnconfigure(1, weight=1, uniform="search_control")
         form.columnconfigure(2, minsize=76)
         form.columnconfigure(3, weight=1, uniform="search_control")
@@ -501,11 +617,57 @@ class SearchFeatureMixin:
         self._build_standard_stats_filter(form, row=6)
         for row in (0, 2, 3, 4, 5, 6, 7):
             self._register_search_row_hover(form, row, last_column=3)
-        self._build_advanced_filter_zone(parent)
+        self._build_advanced_filter_zone(zone.inner)
         self._bind_search_row_hover_tracking()
         self._bind_search_outside_click_selection_cleanup()
-        self._build_search_actions(parent)
-        self._build_results_table(parent)
+        self._bind_filter_zone_focus_reveal()
+        self._guard_filter_zone_wheel()
+        self._build_search_actions(pinned)
+        self._build_results_table(pinned)
+        pinned.pack(side="bottom", fill="both", expand=True)
+        zone.pack(side="top", fill="x")
+
+    def _bind_filter_zone_focus_reveal(self):
+        """Tabbing into a control that is scrolled out of view brings it into view."""
+        if getattr(self, "_filter_zone_focus_bound", False):
+            return
+        self._filter_zone_focus_bound = True
+        self.bind_all("<FocusIn>", self._reveal_focused_filter, add="+")
+
+    FILTER_ZONE_WHEEL_GUARDED = ("TSpinbox", "TCombobox")
+
+    def _guard_filter_zone_wheel(self):
+        """Make the wheel scroll the zone, not edit the field under the pointer.
+
+        A ttk spinbox and combobox step their value on the wheel, so once the zone
+        scrolls, turning the wheel over Power or Released would scroll AND change
+        the filter.  A widget-level binding runs first and ends the event, so
+        those fields hand the wheel to the zone instead (LAY-011).
+        """
+        zone = self._filter_zone
+        pending = [zone.inner]
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if widget.winfo_class() in self.FILTER_ZONE_WHEEL_GUARDED:
+                for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                    widget.bind(sequence, self._scroll_filter_zone_from_field)
+
+    def _scroll_filter_zone_from_field(self, event):
+        units = self._wheel_units(event)
+        if units:
+            try:
+                self._filter_zone.scroll_units(units)
+            except tk.TclError:
+                pass
+        return "break"
+
+    def _reveal_focused_filter(self, event):
+        zone = getattr(self, "_filter_zone", None)
+        widget = getattr(event, "widget", None)
+        if zone is None or widget is None or not zone.contains(widget):
+            return
+        zone.reveal(widget)
 
 
     def _filter_chip(self, parent, text, variable, command=None, **options):
@@ -611,6 +773,8 @@ class SearchFeatureMixin:
             row=2, column=1, columnspan=3, sticky="ew", pady=SEARCH_ROW_PADY)
         self._property_chip_frame = ttk.Frame(super_box)
         self._property_chip_frame.pack(fill="x")
+        self._property_chip_frame.bind(
+            "<Configure>", self._layout_supertype_chips, add="+")
         self._render_supertype_chips()
         self._build_mode_row(
             super_box, self.q_supertype_mode, "supertypes")
@@ -681,7 +845,6 @@ class SearchFeatureMixin:
                 kw["compound"] = "left"
             check = ttk.Checkbutton(colorbox, **kw)
             self._color_checks[c] = check
-            _pack_mana_choice(check)
             if c != "C":
                 self._add_standard_filter_tooltip(check, "colors")
             if c == "C":
@@ -694,9 +857,12 @@ class SearchFeatureMixin:
                     "with White, Blue, Black, Red, or Green in this filter. This is not "
                     "the same as producing colorless mana; use Mana Produced for that.",
                     wraplength=410)
+        self._register_mana_choice_row(
+            colorbox, self._color_checks.values())
         scope = ttk.Frame(colorwrap)
         scope.pack(fill="x", pady=MODE_ROW_PADY)
-        scope.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        scope.columnconfigure(
+            0, minsize=scaled_pixels(scope, MATCH_MODE_LABEL_WIDTH))
         ttk.Label(scope, text=COLOR_SCOPE_LABEL, style="Muted.TLabel").grid(
             row=0, column=0, sticky="w")
         scope_help = {
@@ -725,7 +891,8 @@ class SearchFeatureMixin:
             self._add_tooltip(radio, scope_help[value], wraplength=390)
         colormode = ttk.Frame(colorwrap)
         colormode.pack(fill="x", pady=MODE_ROW_PADY)
-        colormode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        colormode.columnconfigure(
+            0, minsize=scaled_pixels(colormode, MATCH_MODE_LABEL_WIDTH))
         ttk.Label(
             colormode, text=MATCH_MODE_LABEL, style="Muted.TLabel").grid(
                 row=0, column=0, sticky="w")
@@ -811,7 +978,6 @@ class SearchFeatureMixin:
                 kw["compound"] = "left"
             produced = ttk.Checkbutton(box, **kw)
             self._produces_checks[color] = produced
-            _pack_mana_choice(produced)
             produced_help = (
                 f"{MANA_NAMES[color]}: filter for cards that can produce "
                 f"{MANA_NAMES[color].lower()} mana. "
@@ -825,9 +991,11 @@ class SearchFeatureMixin:
                   "selected mana colors."
             )
             self._add_tooltip(produced, produced_help, wraplength=410)
+        self._register_mana_choice_row(box, self._produces_checks.values())
         mode = ttk.Frame(wrap)
         mode.pack(fill="x", pady=MODE_ROW_PADY)
-        mode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        mode.columnconfigure(
+            0, minsize=scaled_pixels(mode, MATCH_MODE_LABEL_WIDTH))
         ttk.Label(mode, text=MATCH_MODE_LABEL, style="Muted.TLabel").grid(
             row=0, column=0, sticky="w")
         help_text = {
@@ -1243,8 +1411,8 @@ class SearchFeatureMixin:
                 kw["compound"] = "left"
             check = ttk.Checkbutton(pips, **kw)
             self._pip_checks[color] = check
-            _pack_mana_choice(check)
             self._add_tooltip(check, self.PIP_SELECTION_HELP, wraplength=380)
+        self._register_mana_choice_row(pips, self._pip_checks.values())
         self._build_mode_row(
             box, self.q_pip_mode, "mana-symbol colors",
             meanings={
@@ -1257,7 +1425,8 @@ class SearchFeatureMixin:
             })
         row = ttk.Frame(box)
         row.pack(fill="x", pady=MODE_ROW_PADY)
-        row.columnconfigure(0, minsize=SECONDARY_LABEL_WIDTH)
+        row.columnconfigure(
+            0, minsize=scaled_pixels(row, SECONDARY_LABEL_WIDTH))
         ttk.Label(row, text="Minimum", style="Muted.TLabel").grid(
             row=0, column=0, sticky="w")
         self.q_pip_min = AppSpinbox(row, from_=1, to=9, width=3)
@@ -1484,6 +1653,7 @@ class SearchFeatureMixin:
 
         header = ttk.Frame(parent)
         header.pack(fill="x", pady=ADVANCED_HEADER_PADY)
+        self._advanced_header = header
         self._advanced_btn = AppButton(
             header, text=self.ADVANCED_COLLAPSED_TEXT, role="search_section",
             command=self._toggle_advanced_filters)
@@ -1512,7 +1682,7 @@ class SearchFeatureMixin:
                     continue
                 frame = ttk.Frame(self._advanced_host)
                 frame.pack(fill="x")
-                frame.columnconfigure(0, minsize=FILTER_LABEL_WIDTH)
+                frame.columnconfigure(0, minsize=self._filter_label_width())
                 frame.columnconfigure(1, weight=1)
                 self._build_search_row_label(
                     frame, entry["label"], row=0, pady=ADVANCED_ROW_PADY,
@@ -1529,23 +1699,25 @@ class SearchFeatureMixin:
         if expanded == self._advanced_expanded and expand is not None:
             return
         self._advanced_expanded = expanded
+        # The host is the last thing packed in the filter zone, so packing it
+        # again lands it under the Advanced button; no anchor widget is needed.
         if expanded:
-            # Advanced is built before the actions row, so the anchor it packs
-            # above may not exist yet. A missing anchor must not be the kind of
-            # AttributeError that only a real window reveals.
-            anchor = getattr(self, "_search_results_boundary", None)
-            if anchor is None or not anchor.winfo_exists():
-                anchor = getattr(self, "_search_actions_frame", None)
-            if anchor is not None and anchor.winfo_exists():
-                self._advanced_host.pack(fill="x", before=anchor)
-            else:
-                self._advanced_host.pack(fill="x")
+            self._advanced_host.pack(fill="x")
         else:
             self._advanced_host.pack_forget()
         if self._advanced_btn is not None:
             self._advanced_btn.configure(
                 text=(self.ADVANCED_EXPANDED_TEXT if expanded
                       else self.ADVANCED_COLLAPSED_TEXT))
+        # A click (not a workspace restore) moves the view: opening puts the
+        # Advanced button at the top of the scrolling zone so the panel that just
+        # appeared is what is on screen; closing returns to the first row.
+        zone = getattr(self, "_filter_zone", None)
+        if zone is not None and expand is None:
+            if expanded:
+                zone.scroll_to(self._advanced_header)
+            else:
+                zone.scroll_to_top()
         # Collapsing shortens the form, so the Results viewport has to follow
         # it back up rather than stay scrolled to where the taller panel was.
         self._reset_results_viewport()
@@ -1638,7 +1810,8 @@ class SearchFeatureMixin:
         mode = ttk.Frame(parent)
         mode.pack(fill="x", pady=MODE_ROW_PADY)
         resolved_choices = tuple(choices or self.MODE_ROW_CHOICES)
-        mode.columnconfigure(0, minsize=MATCH_MODE_LABEL_WIDTH)
+        mode.columnconfigure(
+            0, minsize=scaled_pixels(mode, MATCH_MODE_LABEL_WIDTH))
         title = ttk.Label(mode, text=MATCH_MODE_LABEL, style="Muted.TLabel")
         title.grid(row=0, column=0, sticky="w")
         meanings = dict(meanings or {}) or {
@@ -1676,12 +1849,19 @@ class SearchFeatureMixin:
             loading_placeholders=SUPERTYPE_LOADING_SLOTS,
             force_placeholders=force_placeholders,
             empty_label="No Supertypes in this scope")
+        # A fresh render is gridded in the default columns; fit it to the pane.
+        # At idle, once the new chips have a requested width to measure: an
+        # unchanged frame size fires no <Configure> to do it for us.
+        self._supertype_chip_columns = SUPERTYPE_COLUMNS
+        self.after_idle(self._layout_supertype_chips)
 
     def _build_filter_supertypes(self, parent):
         box = ttk.Frame(parent)
         box.grid(row=0, column=1, sticky="ew", pady=ADVANCED_ROW_PADY)
         self._property_chip_frame = ttk.Frame(box)
         self._property_chip_frame.pack(fill="x")
+        self._property_chip_frame.bind(
+            "<Configure>", self._layout_supertype_chips, add="+")
         self._render_supertype_chips()
         self._build_mode_row(
             box, self.q_supertype_mode, "supertypes")
@@ -1868,56 +2048,103 @@ class SearchFeatureMixin:
             widgets.append(chip)
         return tuple(widgets)
 
+    def _layout_chip_grid(self, frame, widgets, current, options, uniform):
+        """Re-grid *widgets* into the widest column count that fits *frame*.
+
+        Returns the new column count, or None when nothing had to change (or the
+        frame has no width yet).  Only geometry changes -- never filter state.
+        """
+        if frame is None or not widgets:
+            return None
+        available_width = int(frame.winfo_width())
+        if available_width <= 1:
+            return None
+        desired = _fit_chip_columns(widgets, available_width, options, current)
+        if desired == current:
+            return None
+        for index, widget in enumerate(widgets):
+            if not widget.winfo_exists():
+                return None
+            layout_widget = _chip_layout_widget(widget)
+            if not layout_widget.winfo_exists():
+                return None
+            # The single "No Card Types in this scope" chip spans the row so
+            # it reads as an intentional placeholder, not one narrow chip.
+            if getattr(widget, "_mtg_empty_scope_placeholder", False):
+                layout_widget.grid_configure(
+                    row=0, column=0, columnspan=max(1, desired), sticky="ew",
+                    padx=_chip_grid_padx(0, 1), pady=_chip_grid_pady(0, 1))
+                continue
+            chip_row = index // desired
+            chip_column = index % desired
+            chip_rows = max(1, math.ceil(len(widgets) / desired))
+            layout_widget.grid_configure(
+                row=chip_row, column=chip_column, sticky="ew", columnspan=1,
+                padx=_chip_grid_padx(chip_column, desired),
+                pady=_chip_grid_pady(chip_row, chip_rows))
+        for column in range(max(options)):
+            frame.columnconfigure(
+                column, weight=(1 if column < desired else 0),
+                uniform=(uniform if column < desired else ""))
+        return desired
+
     def _layout_card_type_chips(self, _event=None):
         """Use responsive columns only after layout motion settles."""
         if getattr(self, "_window_in_motion", False):
             return
-        frame = getattr(self, "_card_type_chip_frame", None)
-        widgets = tuple(getattr(self, "_card_type_chip_widgets", ()))
-        if frame is None or not widgets:
-            return
         try:
-            available_width = int(frame.winfo_width())
-            if available_width <= 1:
-                return
-            desired = CARD_TYPE_MIN_COLUMNS
-            required = _row_major_grid_required_width(widgets, CARD_TYPE_MAX_COLUMNS)
-            current = getattr(self, "_card_type_chip_columns", CARD_TYPE_MIN_COLUMNS)
-            margin = 8
-            if current == CARD_TYPE_MAX_COLUMNS:
-                if required - margin <= available_width:
-                    desired = CARD_TYPE_MAX_COLUMNS
-            elif required + margin <= available_width:
-                desired = CARD_TYPE_MAX_COLUMNS
-            if desired == getattr(self, "_card_type_chip_columns", None):
-                return
-            for index, widget in enumerate(widgets):
-                if not widget.winfo_exists():
-                    return
-                layout_widget = _chip_layout_widget(widget)
-                if not layout_widget.winfo_exists():
-                    return
-                # The single "No Card Types in this scope" chip spans the row so
-                # it reads as an intentional placeholder, not one narrow chip.
-                if getattr(widget, "_mtg_empty_scope_placeholder", False):
-                    layout_widget.grid_configure(
-                        row=0, column=0, columnspan=max(1, desired), sticky="ew",
-                        padx=_chip_grid_padx(0, 1), pady=_chip_grid_pady(0, 1))
-                    continue
-                chip_row = index // desired
-                chip_column = index % desired
-                chip_rows = max(1, math.ceil(len(widgets) / desired))
-                layout_widget.grid_configure(
-                    row=chip_row, column=chip_column, sticky="ew", columnspan=1,
-                    padx=_chip_grid_padx(chip_column, desired),
-                    pady=_chip_grid_pady(chip_row, chip_rows))
-            for column in range(CARD_TYPE_MAX_COLUMNS):
-                frame.columnconfigure(
-                    column, weight=(1 if column < desired else 0),
-                    uniform=("search-card-type-chip" if column < desired else ""))
-            self._card_type_chip_columns = desired
+            desired = self._layout_chip_grid(
+                getattr(self, "_card_type_chip_frame", None),
+                tuple(getattr(self, "_card_type_chip_widgets", ())),
+                getattr(self, "_card_type_chip_columns", CARD_TYPE_MIN_COLUMNS),
+                CARD_TYPE_COLUMN_OPTIONS, "search-card-type-chip")
         except tk.TclError:
             return
+        if desired is not None:
+            self._card_type_chip_columns = desired
+
+    def _layout_supertype_chips(self, _event=None):
+        """Fit the Supertype chips to the pane, like the Card Type chips."""
+        if getattr(self, "_window_in_motion", False):
+            return
+        try:
+            desired = self._layout_chip_grid(
+                getattr(self, "_property_chip_frame", None),
+                tuple(getattr(self, "_property_chip_widgets", ())),
+                getattr(self, "_supertype_chip_columns", SUPERTYPE_COLUMNS),
+                SUPERTYPE_COLUMN_OPTIONS, "search-supertype-chip")
+        except tk.TclError:
+            return
+        if desired is not None:
+            self._supertype_chip_columns = desired
+
+    def _register_mana_choice_row(self, frame, widgets):
+        """Grid one W/U/B/R/G/C row and keep it fitting its pane (WIN-009)."""
+        widgets = tuple(widgets)
+        _grid_mana_choices(widgets, len(widgets))
+        self._mana_choice_rows.append(
+            {"frame": frame, "widgets": widgets, "columns": len(widgets)})
+        frame.bind("<Configure>", self._layout_mana_choice_rows, add="+")
+
+    def _layout_mana_choice_rows(self, _event=None):
+        """Wrap any mana row that no longer fits on one line; unwrap when it does."""
+        if getattr(self, "_window_in_motion", False):
+            return
+        for row in getattr(self, "_mana_choice_rows", ()):
+            frame, widgets = row["frame"], row["widgets"]
+            try:
+                if not frame.winfo_exists():
+                    continue
+                available_width = int(frame.winfo_width())
+                if available_width <= 1:
+                    continue
+                desired = _fit_mana_choice_columns(
+                    widgets, available_width, row["columns"])
+                if desired != row["columns"]:
+                    _grid_mana_choices(widgets, desired)
+                    row["columns"] = desired
+            except tk.TclError:
+                continue
 
     def _build_search_actions(self, parent):
         # A visual-only boundary separates filter construction above from the
@@ -2017,8 +2244,11 @@ class SearchFeatureMixin:
         table.pack(fill="both", expand=True, pady=(0, 8))
         ordinary = tuple(c for c in TABLE_COLUMN_ORDER
                          if c != "cost" and "results" in TABLE_COLUMNS[c]["views"])
+        # height is the REQUEST, and the pinned block is packed before the filter
+        # zone, so this is the guaranteed minimum; the table grows past it when
+        # the window has room (LAY-011).
         self.results_tv = ttk.Treeview(table, columns=ordinary,
-                                       show="tree headings", height=16,
+                                       show="tree headings", height=RESULTS_MIN_ROWS,
                                        selectmode="extended")
         self._setup_table_columns(self.results_tv, "results")
         self.results_tv.tag_configure("odd", background=PALETTE["stripe"])
@@ -2958,7 +3188,7 @@ class SearchFeatureMixin:
             empty_label="No Card Types in this scope")
         for value, variable in self.card_type_vars.items():
             variable.set(value in pending["card_types"])
-        self._layout_card_type_chips()
+        self.after_idle(self._layout_card_type_chips)
 
         self._render_supertype_chips(
             force_placeholders=not supertype_authority_available)

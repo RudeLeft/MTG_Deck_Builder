@@ -10,8 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from mtgdb.printing.service import PrintJob
 from mtgdb.ui.tokens import (
-    FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD,
-    FONT_PROGRESS_TITLE, PALETTE,
+    FONT_BODY, FONT_BODY_BOLD, FONT_HELPER, FONT_HELPER_BOLD, PALETTE,
 )
 
 
@@ -49,14 +48,13 @@ class PrintingMixin:
         shell = tk.Frame(
             popup, bg=palette["surface"], padx=28, pady=24)
         shell.pack(fill="both", expand=True, padx=1, pady=1)
-        tk.Label(
-            shell, text="PRINT DECK", bg=palette["surface"],
-            fg=palette["accent"], font=FONT_HELPER_BOLD
+        ttk.Label(
+            shell, text="PRINT DECK", style="DialogTitle.TLabel"
         ).pack(anchor="w")
         tk.Label(
             shell, text="Creating high-quality proxy sheets",
             bg=palette["surface"], fg=palette["text"],
-            font=FONT_PROGRESS_TITLE
+            font=FONT_BODY_BOLD, anchor="w"
         ).pack(anchor="w", pady=(3, 7))
         tk.Label(
             shell,
@@ -67,7 +65,7 @@ class PrintingMixin:
                 "High-resolution PNG images are cached locally for future "
                 "prints."),
             bg=palette["surface"], fg=palette["muted"], font=FONT_BODY,
-            justify="left", wraplength=620
+            justify="left", anchor="w", wraplength=620
         ).pack(anchor="w", fill="x", pady=(0, 16))
 
         box = tk.Frame(
@@ -103,9 +101,9 @@ class PrintingMixin:
             bg=palette["surface"], fg=palette["muted"], font=FONT_HELPER
         ).pack(anchor="w", pady=(13, 0))
         self._present_hidden_popup(
-            popup, preferred_width=700,
-            preferred_height=max(350, popup.winfo_reqheight()),
-            min_width=640, min_height=330, lock_size=True, grab=True)
+            popup, preferred_width=700, preferred_height=350,
+            min_width=640, min_height=330, lock_size=True, grab=True,
+            fit_content=True)
 
     def _cancel_print_popup_close(self):
         pending = self._print_close_after

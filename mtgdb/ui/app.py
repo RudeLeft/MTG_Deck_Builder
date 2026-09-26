@@ -411,7 +411,8 @@ class DeckBuilderApp(
         except (tk.TclError, AttributeError):
             pass
         for callback_name in (
-                "_layout_card_type_chips", "_result_tree_configured",
+                "_layout_card_type_chips", "_layout_supertype_chips",
+                "_layout_mana_choice_rows", "_result_tree_configured",
                 "_settle_stats_canvas_layout", "_schedule_curve_redraw",
                 "_layout_comparison_actions", "_layout_deck_actions"):
             callback = getattr(self, callback_name, None)
