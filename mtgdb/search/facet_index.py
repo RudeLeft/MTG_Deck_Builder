@@ -195,11 +195,23 @@ class FacetIndex:
             buf[i >> 3] |= 1 << (i & 7)
 
         def mark_colors(value, store, empty_buf, i):
+            """Mark each WUBRG(+C) member present, and whether none of them are.
+
+            "Empty" must mean the same thing the stored bitmask column and the
+            SQL builder's own emptiness guard (``produced_mask != 0``) mean:
+            no RECOGNIZED colour is present, not merely that the raw string is
+            non-empty.  A card whose Scryfall ``produced_mana`` held a token
+            outside W/U/B/R/G/C (a real one: "Sole Performer", produced_mana
+            "T") had a non-empty raw string but produced_mask 0, so the index
+            counted it as "not empty" while the SQL guard correctly excluded
+            it -- "Mana Produced: Within" then predicted counts SQL did not.
+            """
             members = _comma_members(value)
-            if not members:
+            recognized = [member for member in members if member in _PRODUCED_MEMBERS]
+            if not recognized:
                 mark(empty_buf, i)
                 return
-            for member in members:
+            for member in recognized:
                 store.set(member, i)
 
         for i, row in enumerate(rows):

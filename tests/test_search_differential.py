@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import search_diff_harness as H
 from mtgdb.database.semantics import pip_minimum_threshold
+from mtgdb.search.context import _predict_colors
 
 
 JACE = "Jace, Vryn's Prodigy // Jace, Telepath Unbound"
@@ -183,6 +184,72 @@ LIMDUL = "Lim-D\u00fbl the Necromancer"
 SCHOLAR = "Civilized Scholar // Homicidal Brute"
 MDFC = "Spell Then Land // Test Land"
 BURN_FREEZE = "Burn // Freeze"
+
+
+def _produces_emptiness_checks(harness):
+    """A card whose Scryfall data names a producible-mana token outside
+    W/U/B/R/G/C must be read as producing NOTHING on every engine, exactly as
+    the stored ``produced_mask`` column and the SQL builder's own
+    ``produced_mask != 0`` guard already read it -- not as "some colour" and
+    not as "no colour but still non-empty" (which used to let it slip past
+    Mana Produced "Within"/"Includes" as if it validly produced nothing OF the
+    selected colours). "Sole Performer" is that real card, added to the
+    corpus after a live-database differential sweep found the facet index
+    disagreeing with SQL on exactly this shape of row.
+    """
+    from mtgdb.search.models import SearchCriteria
+
+    def crit(**fields):
+        return SearchCriteria.from_mapping({"content_types": ("card",), **fields})
+
+    def parity(**fields):
+        criteria = crit(**fields)
+        reference = H.reference_capture(harness, criteria)
+        fast = H.fast_capture(harness, criteria)
+        if fast is None:
+            return None
+        return (fast["count"] == reference["count"]
+                and not H.compare_context(reference["context"], fast["context"]))
+
+    within_b = crit(produces=("B",), produces_mode="within")
+    _cols, rows = harness.db.search_projection(
+        connection=harness.reader, columns=("name",), **within_b.query_arguments())
+    sql_names = {row[0] for row in rows}
+    index_ids = harness.facet_result_ids(within_b)
+    index_has_sole_performer = False
+    if index_ids is not None:
+        _cols, id_rows = harness.db.search_projection(
+            connection=harness.reader, columns=("id", "name"),
+            **within_b.query_arguments())
+        # search_projection already applies the SQL filter; check membership
+        # directly against the index's own id set instead.
+        all_ids_cols, all_rows = harness.db.search_projection(
+            connection=harness.reader, columns=("id", "name"), content_types=("card",))
+        index_has_sole_performer = any(
+            name == "Sole Performer" and row_id in index_ids
+            for row_id, name in all_rows)
+
+    # SRCH-055 covers colours/identity/produces alike; colours/identity never
+    # carry a token outside WUBRGC in real Scryfall data (unlike produced_mana),
+    # so this branch of _predict_colors -- the SQLite worker's own predictive
+    # counts, not the facet index -- is exercised directly with a synthetic row
+    # rather than through the corpus.
+    garbage_rows = [{"color_identity": "T"}, {"color_identity": "W"}]
+    garbage_colourless = _predict_colors(
+        garbage_rows, "color_identity", ("W", "U", "B", "R", "G", "C"),
+        (), "within", produced=False)
+
+    return {
+        "a producible-mana token outside WUBRGC reads as producing nothing, on both engines": (
+            "Sole Performer" not in sql_names and not index_has_sole_performer
+            and parity(produces=("B",), produces_mode="within") is True
+            and parity(produces=("C",), produces_mode="includes") is True
+            and parity(cmc_min=2.0, cmc_max=8.0, power_min=5.0,
+                       produces=("B",), produces_mode="within") is True),
+        "a colour-identity token outside WUBRGC reads as colourless, not as some colour": (
+            garbage_colourless.get("C") == 1 and garbage_colourless.get("W") == 1
+            and garbage_colourless.get("U", 0) == 0),
+    }
 
 
 def _names_colors_and_text_checks(harness):
@@ -365,6 +432,7 @@ def main():
 
         either_face = _either_face_checks(harness)
         either_face.update(_names_colors_and_text_checks(harness))
+        either_face.update(_produces_emptiness_checks(harness))
 
         checks = {
             "battery exercises both fast and fallback paths": (

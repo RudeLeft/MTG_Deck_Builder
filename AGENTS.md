@@ -879,6 +879,23 @@ every feature together and is exempt.
   seam between the two halves of a split card or two faces of any card; separate
   words still combine across the whole card. Whole-word matching within a face is
   deliberately unchanged. _Verification:_ **AUTO**.
+- **SRCH-055 — MUST:** Read a card's colours, colour identity, and producible mana
+  as EMPTY when none of their comma-joined members is a recognized W/U/B/R/G/C
+  token, on every engine alike — matching `color_mask()`, the stored
+  `colors_mask`/`identity_mask`/`produced_mask` columns it fills, and the SQL
+  builder's own `produced_mask != 0` guard against Mana Produced "Within"/
+  "Includes" otherwise matching every card that produces nothing. A real printed
+  card's Scryfall `produced_mana` named a token outside those six letters (a
+  joke ability, not real mana); the stored mask correctly read it as producing
+  nothing, but the facet index's own emptiness check (`mark_colors` in
+  `search/facet_index.py`) read "the raw string is non-empty" instead of "no
+  recognized colour is present" and let the card slip through live Mana
+  Produced counts and results SQL did not. The SQLite context worker's own
+  predictive counts (`_predict_colors`/`_color_match` in `search/context.py`)
+  carried the identical flaw in their own emptiness check, unreachable through
+  today's data only because no real card's `colors`/`color_identity` yet
+  carries such a token; both read the same filtered, recognized-only member set.
+  _Verification:_ **AUTO**.
 
 ## Database internals architecture
 
@@ -2321,7 +2338,7 @@ the behavior it governs, update its test in the same change (CHG-007).
 | Rule group | Enforcing test |
 | --- | --- |
 | LAYER-*, NAM-*, DOC-*, CHG-007, import matrix, ownership/feature/module-map tables, build/release wiring | `tests/test_project_guardrails.py`, `tests/test_agent_routing_contract.py` |
-| SRCH-* | `tests/test_search_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_future_magic.py`, `tests/test_hardening_regressions.py`, `tests/test_multiselect_interactions.py` |
+| SRCH-* | `tests/test_search_architecture.py`, `tests/test_performance_architecture.py`, `tests/test_trusted_filter_contract.py`, `tests/test_search_printings_cascade.py`, `tests/test_future_magic.py`, `tests/test_hardening_regressions.py`, `tests/test_multiselect_interactions.py`, `tests/test_search_differential.py` (the SQL builder / bitset index / SQLite worker three-way differential; SRCH-052 through SRCH-055 in particular) |
 | DBI-* | `tests/test_database_internals_architecture.py`, `tests/test_integrity_regressions.py`, `tests/test_hardening_regressions.py` |
 | DBS-* | `tests/test_database_sync_architecture.py`, `tests/test_hardening_regressions.py` |
 | VER-010 through VER-012, VER-014 | `tests/test_project_guardrails.py`, `tests/test_deck_architecture.py`, `tests/test_database_internals_architecture.py`, `windows_tests/test_*.py` |

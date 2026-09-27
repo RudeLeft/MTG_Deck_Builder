@@ -149,6 +149,19 @@ def build_corpus():
         cmc=2.0, mana_cost="{R/W}{R/W}", colors=["R", "W"],
         color_identity=["R", "W"], oracle_text="Choose one — deal 4 damage."))
 
+    # Real data (found by a live-database differential sweep) carries a printed
+    # card whose Scryfall ``produced_mana`` names a token outside W/U/B/R/G/C
+    # (a joke ability that "adds" something that is not mana). The stored
+    # ``produced_mask`` column -- and so the SQL builder's own emptiness guard
+    # -- correctly reads that as producing nothing; the facet index used to
+    # read "raw string is non-empty" instead and let it slip through Mana
+    # Produced "Within"/"Includes" as if it were a real colourless producer.
+    add(_printings("oddmana", "Sole Performer", "Creature — Performer", [
+        ("unf", "funny", "uncommon", "2022-04-01", "en")],
+        cmc=4.0, mana_cost="{2}{G}{G}", colors=["G"], color_identity=["G"],
+        power="2", toughness="2", produced_mana=["T"],
+        oracle_text="{T}: Add {T}{T}. Activate only once each turn."))
+
     add(_printings("phyrexian", "Gut Shot", "Instant", [
         ("nph", "expansion", "common", "2015-05-01", "en")],
         cmc=1.0, mana_cost="{R/P}", colors=["R"], color_identity=["R"],

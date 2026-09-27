@@ -380,6 +380,14 @@ def _color_match(card_members, selected, mode, *, produced=False):
     return card_members.issubset(target)
 
 
+# Recognized W/U/B/R/G/C domain for the colours/identity/produced-mana fields
+# (SRCH-055): a stray token outside it -- a real printed card's Scryfall
+# ``produced_mana`` named one -- must read as producing/being NOTHING, exactly
+# as ``color_mask()`` and the stored bitmask columns already read it, not as
+# "some value, so not empty."
+_RECOGNIZED_COLOR_MEMBERS = frozenset((*COLORS, "C"))
+
+
 def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
     # Single pass: a card's colour members are parsed once, then every
     # candidate is tallied from that set. The candidate-outer form re-parsed
@@ -389,11 +397,12 @@ def _predict_colors(rows, field, vocabulary, selected, mode, *, produced=False):
     targets = {candidate: (selected | {candidate}) for candidate in vocabulary}
     result = {candidate: 0 for candidate in vocabulary}
     for row in rows:
-        members = _comma_members(row.get(field))
+        members = _comma_members(row.get(field)) & _RECOGNIZED_COLOR_MEMBERS
         if field == "colors":
             # A two-faced card's own colours are the colours of every face
             # together (SRCH-052): the front's plus the back's (NULL = no back).
-            members = members | _comma_members(row.get("back_colors"))
+            members = members | (
+                _comma_members(row.get("back_colors")) & _RECOGNIZED_COLOR_MEMBERS)
         for candidate in vocabulary:
             if not _color_match(members, targets[candidate], mode, produced=produced):
                 continue
