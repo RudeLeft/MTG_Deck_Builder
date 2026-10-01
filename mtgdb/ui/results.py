@@ -50,6 +50,7 @@ class SearchResultsMixin:
         self._result_selected_ids = CompactResultSelection(self._result_store)
         self._result_focus_id = None
         self._result_selection_anchor_id = None
+        self._result_click_additive = False
         self._result_selection_sync = False
         self._result_selection_sync_after = None
         self._result_tree_configure_after = None
@@ -586,6 +587,19 @@ class SearchResultsMixin:
         except (IndexError, TypeError, ValueError):
             return None
 
+    def _on_result_button_press(self, event):
+        """Record the modifier held at click time for _on_result_select.
+
+        <<TreeviewSelect>> fires after Tk has already merged the click into
+        its own selection, with no way to tell a plain click from a Ctrl- or
+        Shift-click from tv.selection() alone -- both can end up selecting
+        just one visible row. Captured here, one step earlier, the same way
+        _result_apply_keyboard_target already reads the modifier for
+        keyboard navigation.
+        """
+        state = getattr(event, "state", 0)
+        self._result_click_additive = bool(state & 0x0001) or bool(state & 0x0004)
+
     def _on_result_select(self, _event=None):
         if self._result_selection_sync:
             return
@@ -596,6 +610,18 @@ class SearchResultsMixin:
             focused = tv.focus()
         except tk.TclError:
             return
+        if not self._result_click_additive:
+            # A plain click (or a plain-click-started drag) replaces the
+            # WHOLE logical selection, not just the rows currently on
+            # screen. Without this, a card selected earlier and then
+            # scrolled out of view stayed selected forever -- invisibly --
+            # and silently rode along into whatever "Add to deck" action
+            # came next. Reconciliation below still only ever re-adds rows
+            # Tk currently reports selected, so this is safe to do
+            # unconditionally; a Ctrl/Shift click leaves it alone so
+            # multi-select-across-scroll keeps working.
+            self._result_selected_ids.clear()
+        self._result_click_additive = False
         live_ids = {
             card_id for slot in self._result_live_slots
             for card_id in [self._result_id_for_iid(slot)] if card_id

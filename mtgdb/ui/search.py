@@ -2264,6 +2264,7 @@ class SearchFeatureMixin:
         hsb.grid(row=1, column=0, sticky="ew")
         table.rowconfigure(0, weight=1)
         table.columnconfigure(0, weight=1)
+        self.results_tv.bind("<ButtonPress-1>", self._on_result_button_press, add="+")
         self.results_tv.bind("<<TreeviewSelect>>", self._on_result_select)
         self.results_tv.bind("<Double-1>", lambda e: self._add_to_deck("main"))
         self.results_tv.bind("<Button-3>", self._show_result_context_menu)

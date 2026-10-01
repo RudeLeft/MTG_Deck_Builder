@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -159,6 +160,24 @@ class _CompareBatchHarness(SearchResultsMixin, DeckEditorMixin, ComparisonFeatur
         return None
 
 
+class _SelectionReconcileHarness(_CompareBatchHarness):
+    """Adds the live-slot/anchor state _on_result_select and
+    _on_result_button_press consult directly, which the base comparison
+    harness never needs for its own tests."""
+
+    def __init__(self, cards):
+        super().__init__(cards)
+        self._result_live_slots = []
+        self._result_slot_sources = {}
+        self._result_click_additive = False
+        self._result_selection_anchor_id = None
+        self._active_search_signature = None
+        self._last_result_preview_selection = None
+        self.shown = []
+
+    def _show_card(self, card):
+        self.shown.append(card)
+
 
 class _GalleryAddHarness(SearchResultsMixin, DeckEditorMixin, ComparisonFeatureMixin):
     """Drive the Results Gallery right-click -> Add-to-deck path off Tk.
@@ -217,10 +236,57 @@ def _card(card_id, name):
     }
 
 
+def _offscreen_selection_reconcile_scenario():
+    """A plain click on Results must clear a selection scrolled out of view.
+
+    Reproduces the reported bug exactly: Ctrl-click several cards, scroll far
+    enough that none of them are part of the live Treeview row pool any more,
+    then plain-click a different, newly-visible card. _on_result_select only
+    ever reconciled the live pool (which card ids are/aren't part of it) --
+    ids selected earlier but no longer live were never touched, so they
+    stayed selected forever and silently rode along into the next "Add to
+    deck" action. A Ctrl- or Shift-click must still preserve them.
+    """
+    card_a = _card("a", "Alpha")
+    card_b = _card("b", "Beta")
+    card_c = _card("c", "Gamma")
+    harness = _SelectionReconcileHarness((card_a, card_b, card_c))
+
+    # a and b were selected earlier; the user then scrolled so only slot "0"
+    # is still part of the live row pool, now rebound to show card c.
+    harness._result_selected_ids = {"a", "b"}
+    harness._result_focus_id = "b"
+    harness._result_selection_anchor_id = "b"
+    harness._result_live_slots = ["0"]
+    harness._result_slot_sources = {"0": 2}  # source index 2 == card_c
+    harness.results_tv = _Tree(("0",))  # plain click lands on slot "0"
+
+    harness._on_result_button_press(SimpleNamespace(state=0))  # no modifier
+    harness._on_result_select()
+    plain_click_replaces_offscreen_selection = harness._result_selected_ids == {"c"}
+
+    # Same starting point, but this time Ctrl is held: the off-screen
+    # multi-selection must survive instead of being discarded.
+    harness._result_selected_ids = {"a", "b"}
+    harness.results_tv = _Tree(("0",))
+    harness._on_result_button_press(SimpleNamespace(state=0x0004))  # Control
+    harness._on_result_select()
+    ctrl_click_preserves_offscreen_selection = (
+        harness._result_selected_ids == {"a", "b", "c"})
+
+    return (
+        plain_click_replaces_offscreen_selection,
+        ctrl_click_preserves_offscreen_selection,
+    )
+
+
 def main():
     card_a = _card("a", "Alpha")
     card_b = _card("b", "Beta")
     card_c = _card("c", "Gamma")
+
+    (plain_click_replaces_offscreen_selection,
+     ctrl_click_preserves_offscreen_selection) = _offscreen_selection_reconcile_scenario()
 
     result_harness = _ResultHarness((card_a, card_b))
     result_harness._add_to_deck("main")
@@ -419,6 +485,10 @@ def main():
     )
 
     checks = {
+        "a plain Results click replaces a selection scrolled out of view": (
+            plain_click_replaces_offscreen_selection),
+        "a Ctrl-click on Results still preserves an off-screen multi-selection": (
+            ctrl_click_preserves_offscreen_selection),
         "highlighted Search rows bulk-add to Mainboard without losing selection": result_bulk_add,
         "highlighted Search rows bulk-add to comparison without losing selection": result_bulk_compare,
         "Gallery right-click adds the clicked card resolved by id, not the live window": gallery_add_clicked_card,
