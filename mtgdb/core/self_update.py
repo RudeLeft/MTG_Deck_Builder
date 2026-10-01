@@ -23,7 +23,7 @@ import shutil
 import time
 import zipfile
 
-# The built portable app ships as ``MTG_Deck_Builder-<tag>-windows.zip`` whose
+# The built portable app ships as ``Proxic_Deck_Builder-<tag>-windows.zip`` whose
 # single top-level folder is the program directory (the ``.exe`` plus
 # ``_internal``). The source zip ends ``-source.zip`` and is not installable, so
 # the asset match must be this exact suffix, never a bare ``.zip``.
@@ -31,8 +31,8 @@ WINDOWS_ASSET_SUFFIX = "-windows.zip"
 # The release also carries a checksums file so a download can be verified even
 # when GitHub does not attach an asset ``digest``.
 SUMS_ASSET_NAME = "SHA256SUMS.txt"
-PROGRAM_EXE = "MTGDeckBuilder.exe"
-PROGRAM_DIRNAME = "MTGDeckBuilder"
+PROGRAM_EXE = "ProxicDeckBuilder.exe"
+PROGRAM_DIRNAME = "ProxicDeckBuilder"
 DATA_DIRNAME = "data"
 
 _UPDATE_DIRNAME = "_update"
@@ -60,7 +60,7 @@ def staged_dir(data_dir):
 
 
 def staged_program_dir(data_dir):
-    """The extracted program folder (``.../staged/MTGDeckBuilder``)."""
+    """The extracted program folder (``.../staged/ProxicDeckBuilder``)."""
     return os.path.join(staged_dir(data_dir), PROGRAM_DIRNAME)
 
 
@@ -173,8 +173,8 @@ def verify_zip(path, expected_digest=None):
     """True when the file is an intact zip with the right hash and program exe.
 
     Rejects a wrong digest, a corrupt archive, or one that does not contain the
-    expected ``MTGDeckBuilder/MTGDeckBuilder.exe``, so an unexpected or damaged
-    asset can never be staged as if it were a real build.
+    expected ``ProxicDeckBuilder/ProxicDeckBuilder.exe``, so an unexpected or
+    damaged asset can never be staged as if it were a real build.
     """
     if not digest_matches(path, expected_digest):
         return False

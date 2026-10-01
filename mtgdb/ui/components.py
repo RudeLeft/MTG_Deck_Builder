@@ -1,4 +1,4 @@
-"""Reusable, behavior-neutral UI components for MTG Deck Builder."""
+"""Reusable, behavior-neutral UI components for Proxic Deck Builder."""
 
 import logging
 import time

@@ -1,4 +1,4 @@
-"""Shared visual tokens for MTG Deck Builder.
+"""Shared visual tokens for Proxic Deck Builder.
 
 This module contains appearance values only.  Search, filter, deck, comparison,
 and database behavior deliberately remain in their feature modules.

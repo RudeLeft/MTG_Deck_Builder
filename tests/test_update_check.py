@@ -15,7 +15,7 @@ def _version_with_stale_metadata():
     """Resolve app_version() with two bundled dist-info folders on the path.
 
     The in-app swap copies additively and never purges, so after an update the
-    old ``mtg_deck_builder-<old>.dist-info`` sits beside the new one inside
+    old ``proxic_deck_builder-<old>.dist-info`` sits beside the new one inside
     ``_internal``. ``importlib.metadata.version`` returns the *first* match --
     alphabetically the older version -- which made an upgraded 1.2.0 build
     report itself as 1.1.0 and re-offer the very update it had just installed.
@@ -25,13 +25,13 @@ def _version_with_stale_metadata():
     import os
     import sys
     import tempfile
-    root = tempfile.mkdtemp(prefix="mtg-stale-meta-")
+    root = tempfile.mkdtemp(prefix="proxic-stale-meta-")
     try:
         for value in ("9.1.0", "9.2.0"):
-            folder = os.path.join(root, f"mtg_deck_builder-{value}.dist-info")
+            folder = os.path.join(root, f"proxic_deck_builder-{value}.dist-info")
             os.makedirs(folder)
             with open(os.path.join(folder, "METADATA"), "w", encoding="utf-8") as f:
-                f.write(f"Metadata-Version: 2.1\nName: mtg-deck-builder\n"
+                f.write(f"Metadata-Version: 2.1\nName: proxic-deck-builder\n"
                         f"Version: {value}\n")
         sys.path.insert(0, root)
         try:
@@ -58,13 +58,13 @@ def _version_with_one_corrupt_dist_info():
     import os
     import sys
     import tempfile
-    root = tempfile.mkdtemp(prefix="mtg-corrupt-meta-")
+    root = tempfile.mkdtemp(prefix="proxic-corrupt-meta-")
     try:
-        good = os.path.join(root, "mtg_deck_builder-9.3.0.dist-info")
+        good = os.path.join(root, "proxic_deck_builder-9.3.0.dist-info")
         os.makedirs(good)
         with open(os.path.join(good, "METADATA"), "w", encoding="utf-8") as f:
-            f.write("Metadata-Version: 2.1\nName: mtg-deck-builder\nVersion: 9.3.0\n")
-        bad = os.path.join(root, "mtg_deck_builder-9.0.0.dist-info")
+            f.write("Metadata-Version: 2.1\nName: proxic-deck-builder\nVersion: 9.3.0\n")
+        bad = os.path.join(root, "proxic_deck_builder-9.0.0.dist-info")
         os.makedirs(bad)
         # Malformed bytes (not merely missing) so reading .version raises
         # rather than returning a falsy/None value.

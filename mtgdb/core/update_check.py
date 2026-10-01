@@ -14,9 +14,9 @@ import re
 # The application's own release feed and human-readable releases page. This is
 # the app's identity, not user-facing vocabulary.
 LATEST_RELEASE_URL = (
-    "https://api.github.com/repos/RudeLeft/MTG_Deck_Builder/releases/latest")
+    "https://api.github.com/repos/RudeLeft/Proxic_Deck_Builder/releases/latest")
 RELEASES_PAGE_URL = (
-    "https://github.com/RudeLeft/MTG_Deck_Builder/releases/latest")
+    "https://github.com/RudeLeft/Proxic_Deck_Builder/releases/latest")
 
 _VERSION_RE = re.compile(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 

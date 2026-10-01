@@ -543,7 +543,7 @@ def _release_contract_checks(tmp):
             RuntimeError,
             lambda: release.validate_archive(
                 archive, expected_members={Path("one.txt"), Path("two.txt")}))
-    stable_root = release.ARCHIVE_ROOT == "MTG_Deck_Builder"
+    stable_root = release.ARCHIVE_ROOT == "Proxic_Deck_Builder"
     return versions_aligned, exact_mismatch_rejected, stable_root
 
 

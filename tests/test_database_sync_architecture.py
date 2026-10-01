@@ -352,7 +352,7 @@ def _database_review_checks():
         fresh.close()
         results["deep damage is reported, then rebuilt from Scryfall on the next launch"] = (
             passes_startup_probe and first_error is not None
-            and "next time MTG Deck Builder starts" in str(first_error)
+            and "next time Proxic Deck Builder starts" in str(first_error)
             and asked_for_rebuild
             and Path(path + ".corrupt").exists() and not sentinel.exists()
             and due == "first_launch" and rebuilt_total == len(cards))

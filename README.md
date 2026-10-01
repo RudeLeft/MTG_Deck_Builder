@@ -1,4 +1,4 @@
-# MTG Deck Builder
+# Proxic Deck Builder
 
 A fast, portable desktop deck builder for **Magic: The Gathering**. Search the
 full card pool with rich live filters, build and analyze decks, compare printings
@@ -9,10 +9,10 @@ settings stay on your machine.
 
 ## Download & run (Windows)
 
-1. Download the latest `MTG_Deck_Builder-*-windows.zip` from the
-   [**Releases page**](https://github.com/RudeLeft/MTG_Deck_Builder/releases/latest).
-2. Unzip it and keep the `MTGDeckBuilder` folder together.
-3. Run `MTGDeckBuilder.exe`.
+1. Download the latest `Proxic_Deck_Builder-*-windows.zip` from the
+   [**Releases page**](https://github.com/RudeLeft/Proxic_Deck_Builder/releases/latest).
+2. Unzip it and keep the `ProxicDeckBuilder` folder together.
+3. Run `ProxicDeckBuilder.exe`.
 
 **First-run Windows warning:** the app isn't code-signed, so Windows
 SmartScreen may show *"Windows protected your PC."* This is expected for a new
@@ -80,7 +80,7 @@ python -m mtgdb
 
 To build the standalone Windows executable yourself, run `build_windows.bat`. It
 creates an isolated build environment, runs the project's checks, and produces
-the portable app in `dist/MTGDeckBuilder/`.
+the portable app in `dist/ProxicDeckBuilder/`.
 
 The test suite is a set of standalone scripts under `tests/`. For fast local
 iteration, run them all in parallel:
@@ -110,7 +110,7 @@ Policy does **not** authorize creating proxy cards, so personal proxies are
 strictly between you and the law in your area — use this feature responsibly and
 at your own risk.
 
-MTG Deck Builder is unofficial Fan Content permitted under the
+Proxic Deck Builder is unofficial Fan Content permitted under the
 [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). Not
 approved/endorsed by Wizards. Portions of the materials used are property of
 Wizards of the Coast. ©Wizards of the Coast LLC.

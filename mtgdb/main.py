@@ -1,8 +1,8 @@
 r"""
-MTG Deck Builder — entry point.
+Proxic Deck Builder — entry point.
 
 Run from source:   python -m mtgdb
-Or build a Windows .exe with build_windows.bat / MTGDeckBuilder.spec.
+Or build a Windows .exe with build_windows.bat / ProxicDeckBuilder.spec.
 
 Card data and images are provided by Scryfall (https://scryfall.com). This app
 caches Scryfall's bulk data locally and searches it offline, per Scryfall's
@@ -10,15 +10,15 @@ guidelines. It is not affiliated with Scryfall or Wizards of the Coast.
 
 Where data is stored
 --------------------
-MTG Deck Builder is intentionally portable. Runtime files are stored only
+Proxic Deck Builder is intentionally portable. Runtime files are stored only
 inside the program folder:
 
-    MTGDeckBuilder\MTGDeckBuilder.exe
-    MTGDeckBuilder\data\cards.db
-    MTGDeckBuilder\data\card_images\
-    MTGDeckBuilder\data\card_images\print_png\
-    MTGDeckBuilder\data\ui_preferences.json
-    MTGDeckBuilder\data\mtg_deckbuilder.log
+    ProxicDeckBuilder\ProxicDeckBuilder.exe
+    ProxicDeckBuilder\data\cards.db
+    ProxicDeckBuilder\data\card_images\
+    ProxicDeckBuilder\data\card_images\print_png\
+    ProxicDeckBuilder\data\ui_preferences.json
+    ProxicDeckBuilder\data\proxic_deckbuilder.log
 
 The program does not fall back to AppData, the user profile, or Windows Temp.
 If its own folder is not writable, startup fails instead of relocating data.
@@ -35,15 +35,15 @@ from mtgdb.database.db import CardDB
 from mtgdb.ui.app import DeckBuilderApp
 
 LOG_NAME = "mtg"
-LOG_FILE = "mtg_deckbuilder.log"
+LOG_FILE = "proxic_deckbuilder.log"
 
 # Keep the Windows mutex handle alive for the lifetime of the process.
 _SINGLE_INSTANCE_HANDLE = None
-_SINGLE_INSTANCE_NAME = r"Local\MTGDeckBuilder_SingleInstance_v1"
+_SINGLE_INSTANCE_NAME = r"Local\ProxicDeckBuilder_SingleInstance_v1"
 
 
 def acquire_single_instance():
-    """Allow only one MTG Deck Builder process per Windows login session.
+    """Allow only one Proxic Deck Builder process per Windows login session.
 
     A named Windows mutex is kernel-managed, needs no cleanup file, survives
     crashes safely, and avoids races where two processes start simultaneously.
@@ -95,9 +95,9 @@ def notify_already_running():
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         user32.MessageBoxW(
             None,
-            "MTG Deck Builder is already running.\n\n"
+            "Proxic Deck Builder is already running.\n\n"
             "Only one instance can be open at a time.",
-            "MTG Deck Builder",
+            "Proxic Deck Builder",
             0x00000040,  # MB_ICONINFORMATION
         )
     except Exception:
@@ -138,7 +138,7 @@ def resolve_data_dir():
         probe.unlink()
     except OSError as exc:
         raise RuntimeError(
-            "MTG Deck Builder must be run from a writable folder. "
+            "Proxic Deck Builder must be run from a writable folder. "
             f"Could not write to: {base}"
         ) from exc
     return base
@@ -179,7 +179,7 @@ def main():
     data_dir = resolve_data_dir()
     log_path = setup_logging(data_dir)
     log = logging.getLogger(LOG_NAME)
-    log.info("=== MTG Deck Builder starting ===")
+    log.info("=== Proxic Deck Builder starting ===")
     log.info("version: %s", app_version())
     log.info("data folder: %s", data_dir)
     log.info("python: %s  frozen: %s", sys.version.split()[0],

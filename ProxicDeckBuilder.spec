@@ -1,26 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# Portable ONEDIR build for MTG Deck Builder.
+# Portable ONEDIR build for Proxic Deck Builder.
 #
 # IMPORTANT:
 # This intentionally does NOT build a one-file executable. PyInstaller one-file
 # apps extract bundled files into Windows Temp at runtime. ONEDIR keeps Python,
-# Tkinter, Pillow, and assets inside dist\MTGDeckBuilder\ so runtime files stay
+# Tkinter, Pillow, and assets inside dist\ProxicDeckBuilder\ so runtime files stay
 # within the application folder.
 #
 # Build:
-#     pyinstaller MTGDeckBuilder.spec --noconfirm
+#     pyinstaller ProxicDeckBuilder.spec --noconfirm
 #
 # Result:
-#     dist\MTGDeckBuilder\MTGDeckBuilder.exe
-#     dist\MTGDeckBuilder\_internal\...
+#     dist\ProxicDeckBuilder\ProxicDeckBuilder.exe
+#     dist\ProxicDeckBuilder\_internal\...
 #
 # UPX is deliberately disabled. It was previously requested but never installed,
 # so it silently did nothing; and UPX-compressed Python/Tk executables are a
 # well-known antivirus false-positive trigger for very little size saving.
 #
 # The application itself creates only:
-#     dist\MTGDeckBuilder\data\...
+#     dist\ProxicDeckBuilder\data\...
 
 # Version metadata is read from pyproject.toml so the shipped .exe reports the
 # same version as the project manifest and can never drift from it.  Without
@@ -48,12 +48,12 @@ version_info = VSVersionInfo(
                       subtype=0x0, date=(0, 0)),
     kids=[
         StringFileInfo([StringTable("040904B0", [
-            StringStruct("CompanyName", "MTG Deck Builder"),
+            StringStruct("CompanyName", "Proxic Deck Builder"),
             StringStruct("FileDescription", str(_project["description"])),
             StringStruct("FileVersion", _version),
-            StringStruct("InternalName", "MTGDeckBuilder"),
-            StringStruct("OriginalFilename", "MTGDeckBuilder.exe"),
-            StringStruct("ProductName", "MTG Deck Builder"),
+            StringStruct("InternalName", "ProxicDeckBuilder"),
+            StringStruct("OriginalFilename", "ProxicDeckBuilder.exe"),
+            StringStruct("ProductName", "Proxic Deck Builder"),
             StringStruct("ProductVersion", _version),
         ])]),
         VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
@@ -68,7 +68,7 @@ a = Analysis(
     # Bundle the distribution metadata so mtgdb.core.version.app_version() can
     # read the version at runtime in the frozen build (used for the startup log
     # and the update check).
-    datas=[('assets', 'assets')] + copy_metadata('mtg-deck-builder'),
+    datas=[('assets', 'assets')] + copy_metadata('proxic-deck-builder'),
     hiddenimports=['reportlab.pdfgen.canvas', 'reportlab.lib.pagesizes', 'reportlab.lib.utils'],
     hookspath=[],
     hooksconfig={},
@@ -85,7 +85,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='MTGDeckBuilder',
+    name='ProxicDeckBuilder',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -107,5 +107,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='MTGDeckBuilder',
+    name='ProxicDeckBuilder',
 )

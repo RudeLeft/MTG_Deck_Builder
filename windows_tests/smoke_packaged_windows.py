@@ -1,6 +1,6 @@
 r"""
 Windows-only smoke test for the packaged ONEDIR build.
-After `pyinstaller MTGDeckBuilder.spec --noconfirm`, run:
+After `pyinstaller ProxicDeckBuilder.spec --noconfirm`, run:
     python windows_tests\smoke_packaged_windows.py
 
 Verifies the portable-storage guarantee: the packaged app must create and use
@@ -28,7 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 WATCHED_LOCATIONS = ("APPDATA", "LOCALAPPDATA", "TEMP")
-APP_NAME_MARKERS = ("mtgdeckbuilder", "mtg_deck")
+APP_NAME_MARKERS = ("proxicdeckbuilder", "proxic_deck")
 STARTUP_TIMEOUT_SECONDS = 60
 SETTLE_SECONDS = 5
 
@@ -104,14 +104,14 @@ def main():
     if sys.platform != "win32":
         print("SKIP: packaged smoke test is Windows-only.")
         return 0
-    exe = os.path.join(ROOT, "dist", "MTGDeckBuilder", "MTGDeckBuilder.exe")
+    exe = os.path.join(ROOT, "dist", "ProxicDeckBuilder", "ProxicDeckBuilder.exe")
     if not os.path.exists(exe):
         print(f"FAIL: build not found at {exe}. Build first with PyInstaller.")
         return 1
 
     app_dir = os.path.dirname(exe)
     data_dir = os.path.join(app_dir, "data")
-    log_path = os.path.join(data_dir, "mtg_deckbuilder.log")
+    log_path = os.path.join(data_dir, "proxic_deckbuilder.log")
     shutil.rmtree(data_dir, ignore_errors=True)
 
     due = seed_current_database(data_dir)

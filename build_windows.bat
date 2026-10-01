@@ -1,12 +1,12 @@
 @echo off
 REM ====================================================================
-REM  Build a portable Windows folder for the MTG Deck Builder.
+REM  Build a portable Windows folder for Proxic Deck Builder.
 REM
 REM  Prerequisite: Python 3.11+ installed and on PATH.
 REM    Get it from https://www.python.org/downloads/  (tick "Add to PATH").
 REM
 REM  Put ALL the project files in one folder, then double-click this file.
-REM  When it finishes, your program is at:  dist\MTGDeckBuilder\MTGDeckBuilder.exe
+REM  When it finishes, your program is at:  dist\ProxicDeckBuilder\ProxicDeckBuilder.exe
 REM ====================================================================
 
 setlocal
@@ -25,14 +25,14 @@ if not exist "mtgdb\__main__.py"        set "MISSING=%MISSING% mtgdb\__main__.py
 if not exist "mtgdb\ui\components.py"   set "MISSING=%MISSING% mtgdb\ui\components.py"
 if not exist "mtgdb\database\db.py"     set "MISSING=%MISSING% mtgdb\database\db.py"
 if not exist "assets\magic_icon.ico"  set "MISSING=%MISSING% assets\magic_icon.ico"
-if not exist "MTGDeckBuilder.spec"      set "MISSING=%MISSING% MTGDeckBuilder.spec"
+if not exist "ProxicDeckBuilder.spec"   set "MISSING=%MISSING% ProxicDeckBuilder.spec"
 if defined MISSING (
     echo *** Missing file^(s^):%MISSING%
     echo.
     echo The mtgdb package and build config must be together in THIS folder:
     echo     mtgdb\  ^(the application package^)
     echo     assets\magic_icon.ico
-    echo     pyproject.toml  MTGDeckBuilder.spec  build_windows.bat
+    echo     pyproject.toml  ProxicDeckBuilder.spec  build_windows.bat
     echo.
     echo They probably got separated when downloaded. Put them all in one
     echo folder ^(or unzip the provided zip^), then run this again.
@@ -46,7 +46,7 @@ echo === [1/7] Cleaning up any previous build ===
 REM A previously-built app that's still running locks its own .exe and makes
 REM the next build fail with "Access is denied". Close it first, then clear
 REM the old output folders so nothing is stale or locked.
-taskkill /f /im MTGDeckBuilder.exe >nul 2>&1
+taskkill /f /im ProxicDeckBuilder.exe >nul 2>&1
 if exist "build" rmdir /s /q "build"
 if exist "dist"  rmdir /s /q "dist"
 REM Rebuild the dependency environment too. A reused build-venv silently keeps
@@ -84,7 +84,7 @@ set "BUILD_STAGE=[3/7] Installing dependencies"
 echo === [3/7] Installing dependencies (Pillow + ReportLab + PyInstaller) ===
 python -m pip install --upgrade pip || goto :err
 python -m pip install ".[build]" || goto :err
-if exist "mtg_deck_builder.egg-info" rmdir /s /q "mtg_deck_builder.egg-info"
+if exist "proxic_deck_builder.egg-info" rmdir /s /q "proxic_deck_builder.egg-info"
 
 echo.
 echo.
@@ -106,8 +106,8 @@ python windows_tests\test_self_update_swap_windows.py || goto :err
 
 echo.
 set "BUILD_STAGE=[6/7] PyInstaller build"
-echo === [6/7] Building portable MTGDeckBuilder folder ===
-pyinstaller MTGDeckBuilder.spec --noconfirm || goto :err
+echo === [6/7] Building portable ProxicDeckBuilder folder ===
+pyinstaller ProxicDeckBuilder.spec --noconfirm || goto :err
 
 echo.
 set "BUILD_STAGE=[7/7] Packaged portability smoke test"
@@ -117,8 +117,8 @@ python windows_tests\smoke_packaged_windows.py || goto :err
 echo.
 echo =====================================================================
 echo  Success!  Your self-contained program is here:
-echo      %CD%\dist\MTGDeckBuilder\MTGDeckBuilder.exe
-echo  Copy the ENTIRE dist\MTGDeckBuilder folder to another PC.
+echo      %CD%\dist\ProxicDeckBuilder\ProxicDeckBuilder.exe
+echo  Copy the ENTIRE dist\ProxicDeckBuilder folder to another PC.
 echo  Keep the folder together so the app remains fully portable.
 echo =====================================================================
 echo.
@@ -130,9 +130,9 @@ echo.
 echo *** Build failed during %BUILD_STAGE%. ***
 echo Review the error immediately above this message for the exact cause.
 echo.
-echo If you saw "Access is denied" on MTGDeckBuilder.exe:
+echo If you saw "Access is denied" on ProxicDeckBuilder.exe:
 echo   - The app is probably still running. Close its window, and check
-echo     Task Manager ^(Ctrl+Shift+Esc^) for MTGDeckBuilder.exe -^> End task.
+echo     Task Manager ^(Ctrl+Shift+Esc^) for ProxicDeckBuilder.exe -^> End task.
 echo   - Or your antivirus is scanning the new .exe. Wait a few seconds and
 echo     run this again, or add this folder as an antivirus exclusion.
 echo.

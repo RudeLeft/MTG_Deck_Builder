@@ -141,7 +141,7 @@ class DeckBuilderApp(
 
         # The running version in the title bar, so a user (or a bug report)
         # can see at a glance which build this is.
-        self.title(f"MTG Deck Builder v{app_version()}")
+        self.title(f"Proxic Deck Builder v{app_version()}")
         self.geometry("1380x860")
         self.minsize(1170, 700)
 

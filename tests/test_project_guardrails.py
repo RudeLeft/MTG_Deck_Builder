@@ -325,7 +325,7 @@ def main():
     ]
 
     build_script = (ROOT / "build_windows.bat").read_text(encoding="utf-8")
-    spec_source = (ROOT / "MTGDeckBuilder.spec").read_text(encoding="utf-8")
+    spec_source = (ROOT / "ProxicDeckBuilder.spec").read_text(encoding="utf-8")
     main_source = (ROOT / "mtgdb" / "main.py").read_text(encoding="utf-8")
     smoke_source = (
         ROOT / "windows_tests" / "smoke_packaged_windows.py").read_text(
@@ -511,23 +511,23 @@ def main():
 
     local_compile = build_script.find(
         "python -m compileall -q mtgdb tests windows_tests package_release.py")
-    local_cleanup = build_script.find('rmdir /s /q "mtg_deck_builder.egg-info"')
+    local_cleanup = build_script.find('rmdir /s /q "proxic_deck_builder.egg-info"')
     local_tests = build_script.find("tests\\test_*.py")
     local_single = build_script.find("test_single_instance_windows.py")
     local_geometry = build_script.find("test_ui_geometry_windows.py")
     local_startup = build_script.find("test_app_startup_windows.py")
-    local_build = build_script.find("pyinstaller MTGDeckBuilder.spec")
+    local_build = build_script.find("pyinstaller ProxicDeckBuilder.spec")
     local_smoke = build_script.find("smoke_packaged_windows.py")
 
     cloud_compile = workflow.find(
         "python -m compileall -q mtgdb tests windows_tests package_release.py")
     cloud_cleanup = workflow.find(
-        'Remove-Item -Recurse -Force "mtg_deck_builder.egg-info"')
+        'Remove-Item -Recurse -Force "proxic_deck_builder.egg-info"')
     cloud_tests = workflow.find('Filter "test_*.py"')
     cloud_single = workflow.find("test_single_instance_windows.py")
     cloud_geometry = workflow.find("test_ui_geometry_windows.py")
     cloud_startup = workflow.find("test_app_startup_windows.py")
-    cloud_build = workflow.find("pyinstaller MTGDeckBuilder.spec")
+    cloud_build = workflow.find("pyinstaller ProxicDeckBuilder.spec")
     cloud_smoke = workflow.find("smoke_packaged_windows.py")
     cloud_upload = workflow.find("actions/upload-artifact")
 
@@ -1224,7 +1224,7 @@ def main():
             and "python-version: '3.14'" in workflow),
         "BLD-007 packaged build ships the program without runtime data": (
             "shutil.rmtree(data_dir" in smoke_source
-            and "!dist/MTGDeckBuilder/data/" in workflow),
+            and "!dist/ProxicDeckBuilder/data/" in workflow),
         "BLD-008 packaged smoke test performs no network refresh": (
             "def seed_current_database(" in smoke_source
             and "due_reason()" in smoke_source
@@ -1243,7 +1243,7 @@ def main():
             app_version() == pyproject["project"]["version"]
             and 'log.info("version: %s", app_version())' in main_source
             and "%(module)" in main_source
-            and "copy_metadata('mtg-deck-builder')" in spec_source),
+            and "copy_metadata('proxic-deck-builder')" in spec_source),
         "REL-007 release membership has a ceiling, not only a floor": (
             bool(P.ALLOWED_ROOT_FILES)
             and bool(P.ALLOWED_TOP_LEVEL_DIRECTORIES)
@@ -1261,7 +1261,7 @@ def main():
         "VER-011 tests clean up every temporary directory they create": (
             _unmanaged_temp_directories() == []),
         "source archive uses stable root and exact membership validation": (
-            P.ARCHIVE_ROOT == "MTG_Deck_Builder"
+            P.ARCHIVE_ROOT == "Proxic_Deck_Builder"
             and "actual != expected" in (ROOT / "package_release.py").read_text(encoding="utf-8")
             and "expected_members=members" in (ROOT / "package_release.py").read_text(encoding="utf-8")),
         "PORT verification map covers portable storage and user paths": (

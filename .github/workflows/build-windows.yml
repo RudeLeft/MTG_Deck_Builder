@@ -53,8 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install ".[build]"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path "mtg_deck_builder.egg-info") {
-            Remove-Item -Recurse -Force "mtg_deck_builder.egg-info"
+          if (Test-Path "proxic_deck_builder.egg-info") {
+            Remove-Item -Recurse -Force "proxic_deck_builder.egg-info"
           }
 
       - name: Run compilation and cross-platform guardrails
@@ -82,7 +82,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build the portable app
-        run: pyinstaller MTGDeckBuilder.spec --noconfirm
+        run: pyinstaller ProxicDeckBuilder.spec --noconfirm
 
       - name: Sign the executable (only when signing secrets are set)
         if: ${{ env.WINDOWS_CERT_BASE64 != '' }}
@@ -97,7 +97,7 @@ jobs:
           if (-not $signtool) { Write-Error "signtool.exe not found"; exit 1 }
           & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD `
             /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            "dist/MTGDeckBuilder/MTGDeckBuilder.exe"
+            "dist/ProxicDeckBuilder/ProxicDeckBuilder.exe"
           $rc = $LASTEXITCODE
           Remove-Item $pfx -Force
           if ($rc -ne 0) { exit $rc }
@@ -108,20 +108,20 @@ jobs:
       - name: Upload the portable app as an artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MTGDeckBuilder-windows
-          # The smoke test removes dist/MTGDeckBuilder/data after it runs. This
+          name: ProxicDeckBuilder-windows
+          # The smoke test removes dist/ProxicDeckBuilder/data after it runs. This
           # exclusion is a second line of defence: a runtime database or a saved
           # session must never be published inside the program artifact.
           path: |
-            dist/MTGDeckBuilder/
-            !dist/MTGDeckBuilder/data/
+            dist/ProxicDeckBuilder/
+            !dist/ProxicDeckBuilder/data/
           if-no-files-found: error
           retention-days: 30
 
       - name: Build the source release zip
         shell: pwsh
         env:
-          SOURCE_ZIP: release_dist/MTG_Deck_Builder-${{ github.ref_name }}-source.zip
+          SOURCE_ZIP: release_dist/Proxic_Deck_Builder-${{ github.ref_name }}-source.zip
         run: |
           # Every release gate already ran in the steps above, so build the
           # source zip by reusing package_release's membership rules and zipping
@@ -146,8 +146,8 @@ jobs:
       - name: Package the portable app as a versioned zip
         shell: pwsh
         run: |
-          $zip = "release_dist/MTG_Deck_Builder-${{ github.ref_name }}-windows.zip"
-          Compress-Archive -Path "dist/MTGDeckBuilder" -DestinationPath $zip -CompressionLevel Optimal
+          $zip = "release_dist/Proxic_Deck_Builder-${{ github.ref_name }}-windows.zip"
+          Compress-Archive -Path "dist/ProxicDeckBuilder" -DestinationPath $zip -CompressionLevel Optimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generate release checksums
@@ -167,7 +167,7 @@ jobs:
       - name: Upload the release zips as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MTGDeckBuilder-release-zips
+          name: ProxicDeckBuilder-release-zips
           path: |
             release_dist/*.zip
             release_dist/SHA256SUMS.txt
@@ -202,10 +202,10 @@ jobs:
 
           ## Download and run
 
-          - Windows app (no Python needed): MTG_Deck_Builder-$tag-windows.zip
-            Unzip, open the MTGDeckBuilder folder, run MTGDeckBuilder.exe. Keep the
+          - Windows app (no Python needed): Proxic_Deck_Builder-$tag-windows.zip
+            Unzip, open the ProxicDeckBuilder folder, run ProxicDeckBuilder.exe. Keep the
             folder together; it is fully portable and stores its data beside the app.
-          - Source (Python 3.11+): MTG_Deck_Builder-$tag-source.zip
+          - Source (Python 3.11+): Proxic_Deck_Builder-$tag-source.zip
             Run: pip install .   then   python -m mtgdb
 
           Verify your download against SHA256SUMS.txt (e.g. ``sha256sum -c``).
@@ -214,9 +214,9 @@ jobs:
           when its storage format changed (a one-time re-download of card data).
           "@
           gh release create "$tag" `
-            "release_dist/MTG_Deck_Builder-$tag-windows.zip" `
-            "release_dist/MTG_Deck_Builder-$tag-source.zip" `
+            "release_dist/Proxic_Deck_Builder-$tag-windows.zip" `
+            "release_dist/Proxic_Deck_Builder-$tag-source.zip" `
             "release_dist/SHA256SUMS.txt" `
-            --title "MTG Deck Builder $tag" `
+            --title "Proxic Deck Builder $tag" `
             --notes "$notes"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

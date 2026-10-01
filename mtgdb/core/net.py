@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-USER_AGENT = "MTGDeckBuilder/1.0"
+USER_AGENT = "ProxicDeckBuilder/1.0"
 # Wizards currently fronts magic.wizards.com with browser-oriented CDN/WAF
 # behavior. Use a browser-compatible UA for those ordinary document requests
 # while keeping the identifying application UA for Scryfall API traffic.

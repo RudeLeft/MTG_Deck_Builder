@@ -34,9 +34,9 @@ def main():
     main_source = (ROOT / "mtgdb/main.py").read_text(encoding="utf-8")
 
     release = {"assets": [
-        {"name": "MTG_Deck_Builder-v1.2.0-source.zip",
+        {"name": "Proxic_Deck_Builder-v1.2.0-source.zip",
          "browser_download_url": "https://example/src.zip", "size": 10},
-        {"name": "MTG_Deck_Builder-v1.2.0-windows.zip",
+        {"name": "Proxic_Deck_Builder-v1.2.0-windows.zip",
          "browser_download_url": "https://example/win.zip", "size": 20,
          "digest": "sha256:abc"},
         {"name": "SHA256SUMS.txt",
@@ -191,10 +191,10 @@ def main():
         su.select_checksums_url(release) == "https://example/SHA256SUMS.txt"
         and su.select_checksums_url({"assets": []}) is None)
     sums = (
-        "0" * 64 + "  MTG_Deck_Builder-v1.2.0-source.zip\n"
-        + "a" * 64 + " *MTG_Deck_Builder-v1.2.0-windows.zip\n")
+        "0" * 64 + "  Proxic_Deck_Builder-v1.2.0-source.zip\n"
+        + "a" * 64 + " *Proxic_Deck_Builder-v1.2.0-windows.zip\n")
     checks["expected_sha256 reads the entry for the right asset"] = (
-        su.expected_sha256(sums, "MTG_Deck_Builder-v1.2.0-windows.zip") == "a" * 64
+        su.expected_sha256(sums, "Proxic_Deck_Builder-v1.2.0-windows.zip") == "a" * 64
         and su.expected_sha256(sums, "missing.zip") is None
         and su.expected_sha256("", "x") is None)
 

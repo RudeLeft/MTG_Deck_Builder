@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-ARCHIVE_ROOT = "MTG_Deck_Builder"
+ARCHIVE_ROOT = "Proxic_Deck_Builder"
 
 DOCUMENT_SUFFIXES = {
     ".md", ".markdown", ".mdown", ".mkd", ".txt", ".rst", ".adoc",
@@ -32,7 +32,7 @@ REQUIRED_RELEASE_MEMBERS = {
     Path(".gitattributes"),
     Path(".gitignore"),
     Path("AGENTS.md"),
-    Path("MTGDeckBuilder.spec"),
+    Path("ProxicDeckBuilder.spec"),
     Path("assets/magic_icon.ico"),
     Path("build_windows.bat"),
     Path("mtgdb/__init__.py"),
@@ -133,7 +133,7 @@ ALLOWED_ROOT_FILES = {
     Path("AGENTS.md"),
     Path("LICENSE"),
     Path("README.md"),
-    Path("MTGDeckBuilder.spec"),
+    Path("ProxicDeckBuilder.spec"),
     Path("build_windows.bat"),
     Path("package_release.py"),
     Path("pyproject.toml"),

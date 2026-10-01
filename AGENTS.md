@@ -1,4 +1,4 @@
-# MTG Deck Builder — Agent Operating Contract
+# Proxic Deck Builder — Agent Operating Contract
 
 This file is the complete and authoritative operating contract for every AI
 agent and developer who inspects, changes, tests, builds, or packages this
@@ -142,7 +142,7 @@ mtgdb/
 assets/                  # application icon and bundled mana symbols
 tests/                   # cross-platform functional, architecture, contract gates
 windows_tests/           # Windows single-instance, packaged smoke, simulated Tk-scaling geometry
-MTGDeckBuilder.spec      # portable PyInstaller ONEDIR definition and asset list
+ProxicDeckBuilder.spec   # portable PyInstaller ONEDIR definition and asset list
 pyproject.toml           # Python version, runtime deps, build deps, package discovery
 build_windows.bat        # local Windows verification + build orchestration
 .github/workflows/build-windows.yml  # cloud Windows verification/build/artifact
@@ -177,7 +177,7 @@ which dependency directions are legal.
 | Mana symbols / cost images | `mtgdb/ui/mana.py`, `mtgdb/ui/assets.py` | `assets/mana/*` |
 | Window / platform | `mtgdb/ui/window.py`, `mtgdb/ui/assets.py` | `mtgdb/main.py` |
 | App shell & shared services | `mtgdb/ui/app.py` | `mtgdb/core/*`, `mtgdb/search/controller.py`, `mtgdb/search/repository.py`, `mtgdb/database/db.py`, `mtgdb/database/sync.py`, `mtgdb/images/service.py`, `mtgdb/printing/service.py`, `mtgdb/deck/model.py`, `mtgdb/deck/sessions.py`, `mtgdb/comparison/models.py` |
-| Startup / packaging | — | `mtgdb/__main__.py`, `mtgdb/main.py`, `MTGDeckBuilder.spec`, `pyproject.toml`, `build_windows.bat`, `.github/workflows/build-windows.yml`, `.github/workflows/taxonomy-audit.yml`, `package_release.py` |
+| Startup / packaging | — | `mtgdb/__main__.py`, `mtgdb/main.py`, `ProxicDeckBuilder.spec`, `pyproject.toml`, `build_windows.bat`, `.github/workflows/build-windows.yml`, `.github/workflows/taxonomy-audit.yml`, `package_release.py` |
 
 Data-shape routing: when a Search or configurable Results/Table request needs a card field that is not already stored, inspect `mtgdb/database/schema.py` and `mtgdb/database/bulk_import.py` first, then update the Search/table owners. UI or Search modules must not synthesize a missing stored Scryfall field.
 
@@ -310,7 +310,7 @@ have at least two routing examples.
 | `mtgdb/preferences/repository.py` | change persistent table/UI preference keys or migration<br>change atomic preference writes while preserving unrelated keys | `mtgdb/ui/tables.py`; `mtgdb/ui/table_filters.py` | No Tk imports and no feature behavior beyond preference persistence. |
 | `mtgdb/ui/tokens.py` | change palette/typography/spacing constants<br>change shared control, comparison, or icon metrics | `mtgdb/ui/styles.py`; `mtgdb/ui/components.py`; `mtgdb/ui/window.py` | Do not create widgets or hard-code feature behavior here. |
 | `mtgdb/ui/styles.py` | change ttk theme registration or named widget/surface styles such as borderless `Preview.TFrame`<br>change ttk state-dependent appearance such as hover/disabled/selected styling | `mtgdb/ui/tokens.py`; `mtgdb/ui/components.py`; owning feature UI | Layout behavior and feature callbacks belong in components/features. |
-| `mtgdb/ui/assets.py` | change source/frozen bundled-asset resolution<br>change shared PIL availability/fallback handling | `mtgdb/ui/mana.py`; `mtgdb/ui/window.py`; `MTGDeckBuilder.spec` | Do not own image downloading or feature-specific rendering. |
+| `mtgdb/ui/assets.py` | change source/frozen bundled-asset resolution<br>change shared PIL availability/fallback handling | `mtgdb/ui/mana.py`; `mtgdb/ui/window.py`; `ProxicDeckBuilder.spec` | Do not own image downloading or feature-specific rendering. |
 | `mtgdb/ui/components.py` | add a reusable behavior-neutral button/field/control wrapper<br>change tooltip, classic-Tk wrapper, or shared display-vocabulary behavior used across screens | `mtgdb/ui/tokens.py`; `mtgdb/ui/styles.py`; consuming UI modules | Feature-specific state/callback semantics stay with the feature owner. |
 | `mtgdb/ui/autocomplete.py` | change autocomplete popup keyboard/focus/dismissal mechanics<br>change `AutocompleteEntry` suggestion/commit behavior | `mtgdb/ui/components.py`; consuming Search UI | Keep popup mechanics centralized; do not duplicate them in individual screens. |
 | `mtgdb/ui/tables.py` | add/change a shared Results/Mainboard/Sideboard column definition or display delegation<br>change column visibility menu, heading, reset, or drag/reorder behavior | `mtgdb/ui/table_filters.py`; `mtgdb/preferences/repository.py`; `mtgdb/search/repository.py` | A card-data Results column also requires the narrow Search projection to expose the field. |
@@ -2192,7 +2192,7 @@ every feature together and is exempt.
   `[project.optional-dependencies].build`; never create `requirements.txt`.
   _Verification:_ **AUTO**.
 - **BLD-002 — MUST:** Discover the `mtgdb` package in `pyproject.toml` and keep
-  `MTGDeckBuilder.spec` as the authoritative ONEDIR layout and asset list, with
+  `ProxicDeckBuilder.spec` as the authoritative ONEDIR layout and asset list, with
   `mtgdb/main.py` as the entry script. _Verification:_ **AUTO**.
 - **BLD-003 — MUST:** Update `pyproject.toml`, `build_windows.bat`, and the
   GitHub workflow together when dependency or entry behavior changes.
@@ -2209,7 +2209,7 @@ every feature together and is exempt.
   three scales.
   _Verification:_ **WINDOWS**.
 - **BLD-007 — MUST:** Ship the packaged build as the program only. The
-  packaged smoke test MUST remove `dist/MTGDeckBuilder/data` after it runs and
+  packaged smoke test MUST remove `dist/ProxicDeckBuilder/data` after it runs and
   the cloud artifact step MUST exclude that directory, so no card database,
   cached image, log, or saved workspace session is ever published inside the
   application artifact. _Verification:_ **AUTO**.
@@ -2322,7 +2322,7 @@ every feature together and is exempt.
   project root cannot ship. _Verification:_ **AUTO**.
 - **REL-004 — MUST:** Test the completed ZIP for corruption, require its members
   to exactly equal the computed source-release member set, and use the stable
-  `MTG_Deck_Builder/` archive root before replacing the requested output path.
+  `Proxic_Deck_Builder/` archive root before replacing the requested output path.
   _Verification:_ **AUTO**.
 - **REL-005 — MUST:** Keep all Windows build and smoke gates before the cloud
   artifact-upload step and make every gate release-blocking. _Verification:_ **AUTO**.

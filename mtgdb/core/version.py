@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-_DISTRIBUTION = "mtg-deck-builder"
+_DISTRIBUTION = "proxic-deck-builder"
 _FALLBACK = "0.0.0"
 _VERSION_PART = re.compile(r"\d+")
 
@@ -24,7 +24,7 @@ def _version_key(text):
 def app_version():
     """Return the running application version, or ``0.0.0`` when unknown.
 
-    A frozen build carries its version as a ``mtg_deck_builder-<v>.dist-info``
+    A frozen build carries its version as a ``proxic_deck_builder-<v>.dist-info``
     folder inside ``_internal``. The in-app update copies the new build over
     the old one *additively* (it never purges, so a failed copy can never
     delete the working install), which leaves the previous version's folder

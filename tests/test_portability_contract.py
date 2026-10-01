@@ -29,7 +29,7 @@ def main():
             else:
                 unwritable_fails_clearly = False
 
-    spec = (ROOT / "MTGDeckBuilder.spec").read_text(encoding="utf-8")
+    spec = (ROOT / "ProxicDeckBuilder.spec").read_text(encoding="utf-8")
     deck_files = (ROOT / "mtgdb/ui/deck_files.py").read_text(encoding="utf-8")
     printing_ui = (ROOT / "mtgdb/ui/printing.py").read_text(encoding="utf-8")
     onedir = (

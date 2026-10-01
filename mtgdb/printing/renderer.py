@@ -85,7 +85,7 @@ def render_print_template(placements, output_path, deck_name="MTG Deck",
     os.close(descriptor)
     pdf = canvas.Canvas(temporary_path, pagesize=letter, pageCompression=1)
     pdf.setTitle(f"{deck_name or 'MTG Deck'} - Print Template")
-    pdf.setAuthor("MTG Deck Builder")
+    pdf.setAuthor("Proxic Deck Builder")
 
     try:
         total = len(placements)

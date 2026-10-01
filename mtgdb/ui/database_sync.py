@@ -110,7 +110,7 @@ class DatabaseSyncMixin:
         ).pack(anchor="w", pady=(3, 8))
 
         intro = (
-            "MTG Deck Builder keeps a complete Scryfall card database locally so "
+            "Proxic Deck Builder keeps a complete Scryfall card database locally so "
             "searches are fast and continue to work offline. "
             + sync_reason_text(reason))
         tk.Label(
@@ -151,7 +151,7 @@ class DatabaseSyncMixin:
 
         tk.Label(
             shell,
-            text="Please keep MTG Deck Builder open while this finishes. "
+            text="Please keep Proxic Deck Builder open while this finishes. "
                  "No action is required.",
             bg=p["surface"], fg=p["muted"],
             font=FONT_HELPER, justify="left", anchor="w"
@@ -450,7 +450,7 @@ class DatabaseSyncMixin:
             return
         messagebox.showerror(
             "Database update failed",
-            "MTG Deck Builder couldn't refresh the local card database.\n\n"
+            "Proxic Deck Builder couldn't refresh the local card database.\n\n"
             f"Details: {msg}\n\n"
             "Your existing local database has been left available when possible.\n"
             "You can retry from Database > Update Database."

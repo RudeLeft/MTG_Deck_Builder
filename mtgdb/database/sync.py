@@ -368,7 +368,7 @@ class DatabaseSyncService:
         log.error("The card database file is damaged: %s", exc)
         return DatabaseDamagedError(
             f"{DAMAGED_DATABASE_MESSAGE} ({exc}). It will be rebuilt from Scryfall "
-            "the next time MTG Deck Builder starts -- please close and reopen "
+            "the next time Proxic Deck Builder starts -- please close and reopen "
             "the app.")
 
     def _catalogs_incomplete(self):
