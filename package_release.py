@@ -33,7 +33,7 @@ REQUIRED_RELEASE_MEMBERS = {
     Path(".gitignore"),
     Path("AGENTS.md"),
     Path("ProxicDeckBuilder.spec"),
-    Path("assets/magic_icon.ico"),
+    Path("assets/proxic_icon.ico"),
     Path("build_windows.bat"),
     Path("mtgdb/__init__.py"),
     Path("mtgdb/__main__.py"),

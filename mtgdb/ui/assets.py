@@ -18,7 +18,7 @@ except Exception:
     ImageTk = None
     HAVE_PIL = False
 
-APP_ICON_FILE = "magic_icon.ico"
+APP_ICON_FILE = "proxic_icon.ico"
 
 
 def _asset_path(name):

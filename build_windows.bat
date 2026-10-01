@@ -24,14 +24,14 @@ if not exist "mtgdb\ui\app.py"          set "MISSING=%MISSING% mtgdb\ui\app.py"
 if not exist "mtgdb\__main__.py"        set "MISSING=%MISSING% mtgdb\__main__.py"
 if not exist "mtgdb\ui\components.py"   set "MISSING=%MISSING% mtgdb\ui\components.py"
 if not exist "mtgdb\database\db.py"     set "MISSING=%MISSING% mtgdb\database\db.py"
-if not exist "assets\magic_icon.ico"  set "MISSING=%MISSING% assets\magic_icon.ico"
+if not exist "assets\proxic_icon.ico"  set "MISSING=%MISSING% assets\proxic_icon.ico"
 if not exist "ProxicDeckBuilder.spec"   set "MISSING=%MISSING% ProxicDeckBuilder.spec"
 if defined MISSING (
     echo *** Missing file^(s^):%MISSING%
     echo.
     echo The mtgdb package and build config must be together in THIS folder:
     echo     mtgdb\  ^(the application package^)
-    echo     assets\magic_icon.ico
+    echo     assets\proxic_icon.ico
     echo     pyproject.toml  ProxicDeckBuilder.spec  build_windows.bat
     echo.
     echo They probably got separated when downloaded. Put them all in one

@@ -96,7 +96,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/magic_icon.ico',
+    icon='assets/proxic_icon.ico',
     version=version_info,
 )
 
