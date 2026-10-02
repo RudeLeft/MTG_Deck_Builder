@@ -191,7 +191,7 @@ jobs:
             $changes = git log "${prev}..${tag}" --no-merges --pretty=format:"- %s" |
               Where-Object { $_ -and ($_ -notmatch 'Bump version') }
           } else {
-            $changes = @("- Initial release.")
+            $changes = @("- Initial public release.")
           }
           if (-not $changes) { $changes = @("- Maintenance and internal improvements.") }
           $changesText = ($changes -join "`n")
