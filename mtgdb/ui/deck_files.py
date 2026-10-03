@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from mtgdb.deck.arena_support import (
     load_supported_names, unsupported_deck_names,
@@ -14,6 +14,8 @@ from mtgdb.deck.file_jobs import submit_deck_file_job
 from mtgdb.deck.io import deck_from_text, read_deck_text, save_deck_text
 from mtgdb.deck.model import Deck
 from mtgdb.ui.assets import ARENA_SUPPORTED_CARDS_FILE, _asset_path
+from mtgdb.ui.components import AppButton, autohide_scrollbar
+from mtgdb.ui.tokens import FONT_BODY, PALETTE
 
 log = logging.getLogger("mtg")
 
@@ -21,6 +23,26 @@ log = logging.getLogger("mtg")
 # reason: a dialog is not a report, and a deck of unknown cards would make
 # one taller than the screen.
 ARENA_WARNING_NAME_LIMIT = 30
+ARENA_WARNING_HEADING = "DECK SAVED"
+ARENA_WARNING_WINDOW_TITLE = "Deck Saved"
+ARENA_WARNING_LEAD = (
+    "The following cards in your deck are not in the Proxic Arena card pool "
+    "and will not play properly")
+ARENA_WARNING_CLOSING = "The rest of the deck will play without issue."
+
+
+def arena_warning_text(unsupported):
+    """Return the notice's lead line, listed names, overflow count, and closing.
+
+    The wording lives apart from the widgets so the sentences can be checked
+    without a Tk root. The lead carries no count and so needs no subject/verb
+    agreement, and it does not repeat that the deck was saved: the dialog's
+    own heading says that, and both together read it twice.
+    """
+    shown = list(unsupported[:ARENA_WARNING_NAME_LIMIT])
+    return (
+        ARENA_WARNING_LEAD, shown, len(unsupported) - len(shown),
+        ARENA_WARNING_CLOSING)
 
 
 class DeckFileWorkflowMixin:
@@ -210,28 +232,90 @@ class DeckFileWorkflowMixin:
         """Name the saved deck's cards Proxic Arena will not find on import.
 
         Shown after the write, so it reports rather than interrupts: the deck
-        is already on disk and the rest of it imports normally. A deck Arena
-        can play in full says nothing at all.
+        is already on disk and the rest of it plays normally. A deck Arena can
+        play in full says nothing at all.
         """
         if not unsupported:
             return
-        shown = list(unsupported[:ARENA_WARNING_NAME_LIMIT])
-        remaining = len(unsupported) - len(shown)
-        listing = "\n".join(shown)
-        if remaining:
-            listing += f"\n+{remaining} more"
-        # Subject and verb are chosen together: a count that pluralizes while
-        # the verb stays fixed reads as "1 card ... aren't".
-        counted = (
-            "1 card in this deck isn't" if len(unsupported) == 1
-            else f"{len(unsupported)} cards in this deck aren't")
         log.info(
             "Deck carries %d name(s) Proxic Arena cannot play", len(unsupported))
-        messagebox.showwarning(
-            "Not playable in Proxic Arena",
-            f"Saved. {counted} in Proxic Arena's card pool and won't "
-            f"import:\n\n{listing}\n\n"
-            "The rest of the deck will import normally.")
+        self._show_arena_warning_dialog(*arena_warning_text(unsupported))
+
+
+    def _show_arena_warning_dialog(self, lead, shown, remaining, closing):
+        """Present the notice as an app-owned dark dialog, not a native one.
+
+        A native `messagebox` paints the host platform's own grey chrome and
+        reads as a different application beside the charcoal/gold popups, the
+        way comparison notices did before CMP-012. This mirrors the Basic
+        Format Check dialog: one gold `DialogTitle.TLabel`, a bordered dark
+        list whose scrollbar appears only when it overflows (UI-016), and a
+        single compact secondary `Close` (UI-012).
+        """
+        p = PALETTE
+        popup = self._create_hidden_popup(
+            ARENA_WARNING_WINDOW_TITLE, transient=self)
+        popup.configure(bg=p["border"])
+        popup.protocol("WM_DELETE_WINDOW", popup.destroy)
+
+        shell = tk.Frame(popup, bg=p["surface"], padx=18, pady=16)
+        shell.pack(fill="both", expand=True, padx=1, pady=1)
+
+        ttk.Label(
+            shell, text=ARENA_WARNING_HEADING, style="DialogTitle.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
+
+        # UI-017: a left-justified classic label is anchored west, or the text
+        # block is centered inside a label wider than itself.
+        tk.Label(
+            shell, text=lead, bg=p["surface"], fg=p["text"], font=FONT_BODY,
+            justify="left", anchor="w", wraplength=520
+        ).pack(anchor="w", fill="x", pady=(0, 10))
+
+        list_shell = tk.Frame(
+            shell, bg=p["border"], highlightthickness=1,
+            highlightbackground=p["border"])
+        list_shell.pack(fill="both", expand=True)
+        list_shell.rowconfigure(0, weight=1)
+        list_shell.columnconfigure(0, weight=1)
+
+        names = tk.Listbox(
+            list_shell, activestyle="none", exportselection=False,
+            background=p["input"], foreground=p["text"],
+            selectbackground=p["accent"],
+            selectforeground=p["on_accent"],
+            highlightthickness=0, relief="flat", bd=0,
+            height=min(max(len(shown), 3), 12),
+            font=FONT_BODY)
+        scroll = ttk.Scrollbar(
+            list_shell, orient="vertical", command=names.yview,
+            style="Dark.Vertical.TScrollbar")
+        names.configure(yscrollcommand=autohide_scrollbar(scroll))
+        names.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        self._register_scrollable(names)
+
+        for name in shown:
+            names.insert("end", f"  {name}")
+        if remaining:
+            # Counted rather than dropped silently.
+            names.insert("end", f"  +{remaining} more")
+
+        tk.Label(
+            shell, text=closing, bg=p["surface"], fg=p["text"], font=FONT_BODY,
+            justify="left", anchor="w", wraplength=520
+        ).pack(anchor="w", fill="x", pady=(10, 0))
+
+        foot = tk.Frame(shell, bg=p["surface"])
+        foot.pack(fill="x", pady=(12, 0))
+        AppButton(
+            foot, text="Close", role="compact", command=popup.destroy
+        ).pack(side="right")
+
+        popup.bind("<Escape>", lambda _e: popup.destroy())
+        self._present_hidden_popup(
+            popup, preferred_width=560, preferred_height=420,
+            min_width=460, min_height=300, grab=True, fit_content=True)
 
 
     def _json_safe_value(self, value):

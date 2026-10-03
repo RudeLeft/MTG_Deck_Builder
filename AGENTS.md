@@ -1183,7 +1183,23 @@ every feature together and is exempt.
   completed save into a reported failure. The check MUST run on the deck-file worker beside
   the save rather than on Tk (DUI-017). The warning MUST NOT fire for a deck
   Proxic Arena can play in full, and MUST NOT fire on JSON export, which is a
-  backup rather than a Proxic Arena import path. _Verification:_ **AUTO**.
+  backup rather than a Proxic Arena import path. The notice MUST be an
+  app-owned dark dialog rather than a native `messagebox`, for the reason
+  CMP-012 gives for comparison notices: the platform's own grey chrome reads
+  as a different application beside the charcoal/gold popups. It MUST take
+  the same shape as the Basic Format Check dialog -- created hidden-first
+  (WIN-006), heading through the shared gold `DialogTitle.TLabel` (UI-014),
+  colours from `PALETTE` alone (CLR-001), a bordered dark list whose scrollbar
+  appears only on overflow (UI-016), and one compact secondary `Close`
+  (UI-012) -- and its size MUST be raised to what its own widgets request
+  (WIN-011). Its wording MUST be composed apart from its widgets so the
+  sentences are gated without a Tk root, MUST NOT restate in its body that the
+  deck was saved, which the heading already says, and MUST cap the listed names
+  at `ARENA_WARNING_NAME_LIMIT` while counting the remainder rather than
+  dropping it. A lead sentence that carries the count MUST agree in number,
+  because a count that pluralizes against a fixed verb reads as "1 card ...
+  are not"; the current lead names no count and so reads the same however many
+  cards are listed. _Verification:_ **AUTO**.
 - **DECK-011 — MUST:** Apply deck-construction checks only for explicitly
   verified format profiles. Current Brawl and Competitive Brawl MUST use exactly
   100 cards, singleton construction, and no sideboard; Commander/Commander 1v1

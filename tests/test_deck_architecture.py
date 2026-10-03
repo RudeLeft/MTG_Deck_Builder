@@ -846,6 +846,33 @@ def main():
             # JSON export is a backup, not an Arena import path.
             and "_warn_unsupported_in_arena" not in
             sources_by_name["mtgdb/ui/deck_files.py"].split("def _export_all_decks_json")[1]),
+        "the Arena notice is an app-owned dark dialog, not a native one": (
+            # A native messagebox paints the host platform's grey chrome
+            # and reads as a different application beside the
+            # charcoal/gold popups, the way comparison notices did before
+            # CMP-012.
+            "def _show_arena_warning_dialog(" in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "self._create_hidden_popup(" in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "self._present_hidden_popup(" in sources_by_name["mtgdb/ui/deck_files.py"]
+            and 'style="DialogTitle.TLabel"' in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "PALETTE" in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "autohide_scrollbar(" in sources_by_name["mtgdb/ui/deck_files.py"]
+            and 'AppButton(' in sources_by_name["mtgdb/ui/deck_files.py"]
+            and 'text="Close", role="compact"' in sources_by_name["mtgdb/ui/deck_files.py"]
+            # The notice never routes through tkinter.messagebox. Open Deck,
+            # Paste and JSON export still use it for their own failures, so
+            # the prohibition is scoped to this method's own body, and to
+            # calls (`messagebox.`) rather than the word, which its docstring
+            # names to say what it is not.
+            and "messagebox." not in sources_by_name[
+                "mtgdb/ui/deck_files.py"].split(
+                    "def _show_arena_warning_dialog")[1].split(
+                        "\n    def ")[0]
+            # The save path reaches the dialog, not a native warning.
+            and "messagebox" not in sources_by_name[
+                "mtgdb/ui/deck_files.py"].split(
+                    "def _warn_unsupported_in_arena")[1].split(
+                        "\n    def ")[0]),
         "the Arena asset location belongs to the shared asset owner": (
             'ARENA_SUPPORTED_CARDS_FILE = "arena/supported_cards.json"'
             in (ROOT / "mtgdb/ui/assets.py").read_text(encoding="utf-8")

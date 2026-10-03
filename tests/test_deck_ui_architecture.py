@@ -60,60 +60,42 @@ def _own_returns(function):
     return found
 
 
-def _arena_warning_agreement_check():
-    """DECK-012: the warning's subject and verb agree at every count.
+def _arena_warning_sentences_check():
+    """DECK-012: the notice's sentences, composed apart from its widgets.
 
-    Exercised through the real mixin method with a recording dialog stub,
-    because the defect this catches -- "1 card ... aren't" -- lives in the
-    sentence rather than in any value a structural check can see.
+    Checked here without a Tk root. The lead carries no count, so it reads the
+    same however many cards are listed and needs no subject/verb agreement --
+    the defect an earlier count-carrying lead could produce was "1 card ...
+    are not", which lives in the sentence rather than in any value a
+    structural check can see.
     """
-    from mtgdb.ui import deck_files as module
-    from mtgdb.ui.deck_files import (
-        ARENA_WARNING_NAME_LIMIT, DeckFileWorkflowMixin,
-    )
+    from mtgdb.ui.deck_files import ARENA_WARNING_NAME_LIMIT, arena_warning_text
 
-    class _Recorder:
-        def __init__(self):
-            self.messages = []
-
-        def showwarning(self, title, message):
-            self.messages.append((title, message))
-
-    class _Harness(DeckFileWorkflowMixin):
-        pass
-
-    harness = _Harness()
-    recorder = _Recorder()
-    original = module.messagebox
-    try:
-        module.messagebox = recorder
-        harness._warn_unsupported_in_arena([])
-        quiet_when_playable = recorder.messages == []
-        harness._warn_unsupported_in_arena(["Subgoyf"])
-        harness._warn_unsupported_in_arena(
-            ["Subgoyf", "Cecily, Haunted Mage", "Sly Spy"])
-        overflowing = [f"Card {index}" for index in range(
-            ARENA_WARNING_NAME_LIMIT + 5)]
-        harness._warn_unsupported_in_arena(overflowing)
-    finally:
-        module.messagebox = original
-
-    one = recorder.messages[0][1]
-    three = recorder.messages[1][1]
-    many = recorder.messages[2][1]
+    expected_lead = (
+        "The following cards in your deck are not in the Proxic Arena card "
+        "pool and will not play properly")
+    one_lead, one_shown, one_rest, one_closing = arena_warning_text(["Subgoyf"])
+    many = ["Subgoyf", "Cecily, Haunted Mage", "Sly Spy"]
+    many_lead, many_shown, many_rest, _closing = arena_warning_text(many)
+    overflowing = [
+        f"Card {index}" for index in range(ARENA_WARNING_NAME_LIMIT + 5)]
+    over_lead, over_shown, over_rest, _over_closing = arena_warning_text(
+        overflowing)
     return (
-        quiet_when_playable
-        and len(recorder.messages) == 3
-        and "1 card in this deck isn't" in one
-        and "aren't" not in one
-        and "1 cards" not in one
-        and "3 cards in this deck aren't" in three
-        and "isn't" not in three
-        # The listing is capped, and the remainder is counted rather than
-        # dropped silently.
-        and many.count("Card ") == ARENA_WARNING_NAME_LIMIT
-        and "+5 more" in many
-        and f"{len(overflowing)} cards in this deck aren't" in many)
+        one_lead == expected_lead
+        and one_shown == ["Subgoyf"]
+        and one_rest == 0
+        and one_closing == "The rest of the deck will play without issue."
+        # One sentence at every count, so no agreement can drift.
+        and many_lead == expected_lead
+        and over_lead == expected_lead
+        and many_shown == many
+        and many_rest == 0
+        # The heading says the deck was saved; the lead does not repeat it.
+        and not one_lead.startswith("Deck Saved")
+        # The listing is capped and the remainder counted, not dropped.
+        and len(over_shown) == ARENA_WARNING_NAME_LIMIT
+        and over_rest == 5)
 
 
 def _submitters_claiming_success(ui_directory):
@@ -442,7 +424,6 @@ def main():
         def __init__(self, path):
             self.path = path
             self.errors = []
-            self.warnings = []
 
         def asksaveasfilename(self, **_kwargs):
             return self.path
@@ -453,9 +434,6 @@ def main():
         def showerror(self, title, message):
             self.errors.append((title, message))
 
-        def showwarning(self, title, message):
-            # DECK-012 reports a card Proxic Arena cannot play through this.
-            self.warnings.append((title, message))
 
     def _close_dirty_session_saving_to(path):
         """Close a dirty session that saves to `path`; report what survived."""
@@ -464,6 +442,11 @@ def main():
         session = DeckSession(deck=deck, path=None, dirty=True)
         harness = _CloseHarness([session])
         dialogs = _Dialogs(path)
+        # DECK-012 presents its notice as an app-owned Toplevel, so the
+        # dialog itself is stubbed here rather than tkinter.messagebox.
+        arena_notices = []
+        harness._show_arena_warning_dialog = (
+            lambda *args: arena_notices.append(args))
         saved_dialog = df_module.filedialog
         saved_error = df_module.messagebox
         saved_confirm = deck_module.messagebox
@@ -476,7 +459,7 @@ def main():
             df_module.filedialog = saved_dialog
             df_module.messagebox = saved_error
             deck_module.messagebox = saved_confirm
-        return closed, harness, dialogs
+        return closed, harness, dialogs, arena_notices
 
     # VER-011 registered cleanup rather than a context manager: without the
     # fix the save runs on a worker thread that outlives this block, and a
@@ -487,9 +470,9 @@ def main():
     # it fails inside save_deck_text rather than in the dialog.
     blocker = Path(_close_dir) / "blocker.txt"
     blocker.write_text("not a directory", encoding="utf-8")
-    failed_closed, failed_harness, failed_dialogs = (
+    failed_closed, failed_harness, failed_dialogs, failed_notices = (
         _close_dirty_session_saving_to(str(blocker / "deck.txt")))
-    good_closed, good_harness, good_dialogs = (
+    good_closed, good_harness, good_dialogs, good_notices = (
         _close_dirty_session_saving_to(
             str(Path(_close_dir) / "good deck.txt")))
     good_file_written = (Path(_close_dir) / "good deck.txt").is_file()
@@ -554,14 +537,18 @@ def main():
         # DECK-012. The test deck holds a card Proxic Arena has no script for,
         # so the warning fires -- and the save still completed and the session
         # still closed, because the warning reports rather than interrupts.
-        "the unplayable-card warning agrees in number at every count":
-            _arena_warning_agreement_check(),
+        "the unplayable-card notice reads the same at every count":
+            _arena_warning_sentences_check(),
         "an unplayable card warns without disturbing the completed save": (
             session_closes_after_a_real_write
-            and len(good_dialogs.warnings) == 1
-            and good_dialogs.warnings[0][0] == "Not playable in Proxic Arena"
-            and "Test Card" in good_dialogs.warnings[0][1]
-            and good_dialogs.errors == []),
+            and len(good_notices) == 1
+            and good_notices[0][1] == ["Test Card"]
+            and good_notices[0][0].startswith("The following cards in your deck")
+            and good_dialogs.errors == []
+            # A failed write never reaches the notice: there is no saved deck
+            # to report on.
+            and failed_notices == []
+            and len(failed_dialogs.errors) == 1),
         "no UI method reports submitted background work as finished": (
             _submitters_claiming_success(ROOT / "mtgdb" / "ui") == []),
         "failed save is reported as not written and keeps the session": (
