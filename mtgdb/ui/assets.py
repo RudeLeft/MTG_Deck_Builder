@@ -19,6 +19,9 @@ except Exception:
     HAVE_PIL = False
 
 APP_ICON_FILE = "proxic_icon.ico"
+# Generated list of the card names Proxic Arena can play (DECK-012). Named
+# here so asset locations stay in one owner; the deck-file workflow reads it.
+ARENA_SUPPORTED_CARDS_FILE = "arena/supported_cards.json"
 
 
 def _asset_path(name):

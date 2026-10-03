@@ -86,6 +86,7 @@ mtgdb/
   deck/                  # deck domain (Tk-free, no sqlite)
     model.py             #   Deck: exact-printing entries, quantities, board mutations
     io.py                #   portable TXT serialization, atomic save + section parsing
+    arena_support.py     #   normalized Proxic Arena card-name keys + a deck's unplayable names
     file_jobs.py         #   Tk-free background submission for deck import/save/export file work
     analysis.py          #   stats, type classification, mana, probability, curves, hands
     legality.py          #   verified basic construction profiles, copy limits, legality normalization/status
@@ -139,7 +140,7 @@ mtgdb/
     mana.py              #   mana pip/symbol assets and Tk image composition
     updates.py           #   UpdateCheckMixin: background release check + dismissible banner
     window.py            #   WindowServicesMixin: geometry, dark titlebars, scroll, DPI, icons
-assets/                  # application icon and bundled mana symbols
+assets/                  # application icon, bundled mana symbols, generated Proxic Arena name list
 tests/                   # cross-platform functional, architecture, contract gates
 windows_tests/           # Windows single-instance, packaged smoke, simulated Tk-scaling geometry
 ProxicDeckBuilder.spec   # portable PyInstaller ONEDIR definition and asset list
@@ -165,7 +166,7 @@ which dependency directions are legal.
 | Search | `mtgdb/ui/search.py`, `mtgdb/ui/search_printings.py`, `mtgdb/ui/search_checklist.py`, `mtgdb/ui/set_filters.py`, `mtgdb/ui/table_filters.py`, `mtgdb/ui/results.py`, `mtgdb/ui/tables.py` | `mtgdb/search/models.py`, `mtgdb/search/repository.py`, `mtgdb/search/controller.py`, `mtgdb/search/results.py`, `mtgdb/search/catalogs.py`, `mtgdb/search/context.py`, `mtgdb/search/facet_index.py`, `mtgdb/database/db.py`, `mtgdb/database/constants.py`, `mtgdb/database/search_queries.py`, `mtgdb/database/taxonomy.py` |
 | Card preview & images | `mtgdb/ui/card_detail.py`, `mtgdb/ui/styles.py`, `mtgdb/ui/tokens.py` | `mtgdb/images/service.py`, `mtgdb/core/cache_names.py`, `mtgdb/core/net.py`, `mtgdb/database/constants.py`, `mtgdb/deck/legality.py` |
 | Deck editing | `mtgdb/ui/deck.py`, `mtgdb/ui/tables.py`, `mtgdb/ui/search.py`, `mtgdb/ui/search_checklist.py`, `mtgdb/ui/comparison_controls.py` | `mtgdb/deck/model.py`, `mtgdb/deck/sessions.py` |
-| Deck file open/save/import/export | `mtgdb/ui/deck_files.py`, `mtgdb/ui/set_filters.py` | `mtgdb/deck/io.py`, `mtgdb/deck/file_jobs.py`, `mtgdb/database/db.py`, `mtgdb/database/queries.py`, `mtgdb/database/taxonomy.py` |
+| Deck file open/save/import/export | `mtgdb/ui/deck_files.py`, `mtgdb/ui/set_filters.py` | `mtgdb/deck/io.py`, `mtgdb/deck/file_jobs.py`, `mtgdb/deck/arena_support.py`, `mtgdb/database/db.py`, `mtgdb/database/queries.py`, `mtgdb/database/taxonomy.py` |
 | Deck statistics | `mtgdb/ui/deck_stats.py`, `mtgdb/ui/comparison.py`, `mtgdb/ui/comparison_controls.py` | `mtgdb/deck/analysis.py`, `mtgdb/deck/legality.py` |
 | Comparison | `mtgdb/ui/comparison.py`, `mtgdb/ui/comparison_controls.py`, `mtgdb/ui/deck.py`, `mtgdb/ui/deck_stats.py` | `mtgdb/comparison/models.py`, `mtgdb/images/service.py` |
 | Printing | `mtgdb/ui/printing.py` | `mtgdb/printing/service.py`, `mtgdb/printing/renderer.py`, `mtgdb/core/background_jobs.py`, `mtgdb/core/cache_names.py`, `mtgdb/core/net.py` |
@@ -215,6 +216,7 @@ only in the module that owns X.
 | `mtgdb/deck/analysis.py` | Statistics, type classification, mana requirements/sources, probability, curves, sample hands |
 | `mtgdb/deck/legality.py` | Verified basic format construction profiles, Oracle-text/basic-land copy-limit handling, shared Scryfall legality normalization, and banned/restricted/not-legal status checks |
 | `mtgdb/deck/sessions.py` | Typed open-deck sessions, active-index lifecycle, dirty state, default-session enforcement |
+| `mtgdb/deck/arena_support.py` | The normalized Proxic Arena card-name key, reading the generated playable-name asset, and deciding which of a deck's names Proxic Arena holds no card script for |
 | `mtgdb/database/authorities.py` | Declarative registry of upstream Scryfall catalogs the application understands, their semantic roles, subtype applicability, and compatibility metadata keys; never value whitelists |
 | `mtgdb/database/constants.py` | Shared database/search semantics: colors, trusted content classes, known/playable legality statuses, known layout classes, and preferred rarity display order |
 | `mtgdb/database/db.py` | Stable `CardDB` façade, metadata/catalog composition, lifecycle delegation, public API |
@@ -292,6 +294,7 @@ have at least two routing examples.
 | `mtgdb/deck/analysis.py` | change mana curve/type/source statistics<br>change draw probability or sample-hand calculations | `mtgdb/ui/deck_stats.py`; `mtgdb/deck/model.py` | Keep presentation and format-legality policy out of analysis. |
 | `mtgdb/deck/legality.py` | change verified format deck-size/sideboard rules or unsupported-format behavior<br>change copy-limit, legality-payload normalization, banned/restricted/not-legal, or missing-status checks | `mtgdb/ui/deck_stats.py`; `mtgdb/ui/card_detail.py`; `mtgdb/database/constants.py` | This is a basic legality engine, not UI or general deck statistics; its format profiles MUST NOT authorize Search Format vocabulary. |
 | `mtgdb/deck/sessions.py` | change active-deck switching/default-session rules<br>change dirty-state or open-session lifecycle | `mtgdb/deck/model.py`; `mtgdb/ui/deck.py`; `mtgdb/ui/workspace.py` | Do not persist workspace files or manipulate widgets here. |
+| `mtgdb/deck/arena_support.py` | change which names count as playable in Proxic Arena<br>change how a saved decklist is checked against the Proxic Arena card pool | `mtgdb/ui/deck_files.py`; `mtgdb/ui/assets.py`; `mtgdb/deck/model.py` | Name keys only: the asset file's location belongs to `ui/assets.py` and the warning's wording to the deck-file workflow, and nothing here judges format legality or deck construction. |
 | `mtgdb/database/authorities.py` | change which Scryfall catalogs/concepts this build understands<br>change subtype-family applicability or compatibility metadata keys | `mtgdb/database/sync.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/schema.py` | Registry entries describe authority semantics only; never add Card Type/Subtype/Mechanic values here and never auto-interpret an unknown endpoint. |
 | `mtgdb/database/constants.py` | change color/content/layout vocabulary<br>change known/playable-legality semantics or preferred rarity ordering | `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py`; `mtgdb/database/semantics.py`; `mtgdb/deck/legality.py` | Do not hardcode allowed Card Types, Supertypes, set groupings, Subtypes, Mechanics, Formats, Sets, Set Types, or Rarity membership here. Familiar rarity values MAY define display order only when unknown observed rarities remain accepted. |
 | `mtgdb/database/db.py` | add or change a stable public `CardDB` façade method<br>change database mixin composition or connection/lifecycle delegation | `mtgdb/database/schema.py`; `mtgdb/database/queries.py`; `mtgdb/database/search_queries.py`; `mtgdb/database/taxonomy.py` | Do not implement SQL/query algorithms directly in the façade. |
@@ -1148,6 +1151,39 @@ every feature together and is exempt.
   _Verification:_ **AUTO**.
 - **DECK-010 — MUST NOT:** Implement deck calculations, TXT parsing, or legality
   rules in any UI module. _Verification:_ **AUTO**.
+- **DECK-012 — MUST:** Tell the user which of a saved deck's cards Proxic
+  Arena cannot play, and keep every part of that answer in its owner. Proxic
+  Arena resolves a card by name alone, so a name it has no card script for is
+  not a failed cast but a card it never finds, and a deck exported from here
+  silently loses it. `deck/arena_support.py` owns the lookup key and the
+  comparison; `ui/assets.py` owns the asset's location; `ui/deck_files.py`
+  owns the warning. The key MUST mirror Proxic Arena's own lookup — accents
+  stripped, lowercased, apostrophes and commas dropped, every other run of
+  non-alphanumeric characters one underscore — and MUST compare a stored
+  multi-face name by its FRONT face, which is the face Proxic Arena files the
+  card under. Both apostrophe spellings are dropped although Proxic Arena
+  drops only one, because two spellings of one name MUST NOT read as two
+  cards. The playable names ship as the generated
+  `assets/arena/supported_cards.json` (the `version` field is
+  `arena_support.ASSET_VERSION`): the two applications are separate projects
+  and neither reads the other's tree at runtime, so this asset is regenerated
+  from the Proxic Arena card scripts whenever those scripts are updated, and
+  a reader MUST decline an asset whose version it does not recognize rather
+  than guess at its contents. `tests/arena_support_refresh.py` MUST remain
+  the one way that asset is regenerated, deriving its keys from
+  `deck/arena_support.py` rather than restating the rule, taking the Arena
+  tree as an overridable argument so this repository never depends on the
+  other project's location, offering a write-nothing `--check` comparison, and
+  refusing to replace a complete asset with a near-empty one when that tree is
+  wrong or unreadable. It reads a tree outside this repository, so it MUST
+  stay outside the `test_*.py` name the release suite runs and its contract
+  MUST be gated without executing it. A missing, unreadable, or unrecognized asset
+  MUST report nothing instead of raising: the check runs after the decklist is
+  durably written, so neither the check nor a broken asset MUST turn a
+  completed save into a reported failure. The check MUST run on the deck-file worker beside
+  the save rather than on Tk (DUI-017). The warning MUST NOT fire for a deck
+  Proxic Arena can play in full, and MUST NOT fire on JSON export, which is a
+  backup rather than a Proxic Arena import path. _Verification:_ **AUTO**.
 - **DECK-011 — MUST:** Apply deck-construction checks only for explicitly
   verified format profiles. Current Brawl and Competitive Brawl MUST use exactly
   100 cards, singleton construction, and no sideboard; Commander/Commander 1v1

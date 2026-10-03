@@ -37,6 +37,8 @@ SOURCE_MARKERS = {
     "mtgdb/deck/file_jobs.py": ("def submit_deck_file_job(", "spawn_daemon("),
     "mtgdb/deck/analysis.py": ("def deck_stats(", "def sample_hand("),
     "mtgdb/deck/legality.py": ("_FORMAT_RULES =", "def legality_problems("),
+    "mtgdb/deck/arena_support.py": (
+        "def normalize_card_name(", "def unsupported_deck_names("),
     "mtgdb/deck/sessions.py": ("class DeckSession", "class DeckSessionManager"),
     "mtgdb/database/authorities.py": ("CATALOG_AUTHORITIES =", "SUBTYPE_AUTHORITIES ="),
     "mtgdb/database/constants.py": ("CONTENT_TYPES =", "PLAYABLE_LEGALITY_STATUSES"),

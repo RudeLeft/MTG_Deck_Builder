@@ -29,6 +29,10 @@ from mtgdb.core.format_names import FORMAT_WORD_LABELS, format_display_name
 from mtgdb.deck.analysis import front_face, is_land
 from mtgdb.deck.io import read_deck_text
 from mtgdb.deck.model import BOARDS, Deck
+from mtgdb.deck.arena_support import (
+    ASSET_VERSION, front_face_name, load_supported_names,
+    normalize_card_name, unsupported_deck_names,
+)
 
 
 def _card(card_id, name, *, oracle_id=None, type_line="Creature",
@@ -266,6 +270,156 @@ def _probability_guard_check():
         # Asking for at least one copy is still the ordinary calculation.
         and math.isclose(hyper_at_least(60, 4, 7, want=1),
                          1 - math.comb(56, 7) / math.comb(60, 7)))
+
+
+def _arena_name_key_check():
+    """DECK-012: the lookup key mirrors Proxic Arena's own name rule.
+
+    Every expectation is written out rather than derived from the function
+    under test (VER-010), because a key computed by calling the same code it
+    checks moves with any defect it should have caught.
+    """
+    curly = normalize_card_name("Yawgmoth\u2019s Will")
+    return (
+        normalize_card_name("Lightning Bolt") == "lightning_bolt"
+        and normalize_card_name("Jace, the Mind Sculptor")
+        == "jace_the_mind_sculptor"
+        # Accents are stripped, so a deck naming Eowyn either way still matches.
+        and normalize_card_name("\u00c9owyn, Lady of Rohan")
+        == "eowyn_lady_of_rohan"
+        # A comma inside a number is dropped rather than made a separator.
+        and normalize_card_name("Borrowing 100,000 Arrows")
+        == "borrowing_100000_arrows"
+        and normalize_card_name("Yawgmoth's Will") == "yawgmoths_will"
+        # Both apostrophe spellings reach one key; two spellings of one name
+        # must not read as two cards.
+        and curly == "yawgmoths_will"
+        and normalize_card_name("Mothers of Runes  --  Promo")
+        == "mothers_of_runes_promo"
+        and normalize_card_name("") == ""
+        and normalize_card_name("???") == ""
+        # A stored multi-face name is filed under its front face.
+        and front_face_name("Delver of Secrets // Insectile Aberration")
+        == "Delver of Secrets"
+        and front_face_name("Lightning Bolt") == "Lightning Bolt"
+        and normalize_card_name(front_face_name(
+            "Delver of Secrets // Insectile Aberration")) == "delver_of_secrets")
+
+
+def _arena_unavailable_asset_check():
+    """DECK-012: an unusable asset reports nothing instead of raising."""
+    directory = tempfile.mkdtemp(prefix="mtg-arena-asset-")
+    atexit.register(shutil.rmtree, directory, True)
+    missing = Path(directory) / "absent.json"
+    wrong_version = Path(directory) / "wrong_version.json"
+    wrong_version.write_text(
+        json.dumps({"version": ASSET_VERSION + 1, "names": ["lightning_bolt"]}),
+        encoding="utf-8")
+    malformed = Path(directory) / "malformed.json"
+    malformed.write_text("{not json", encoding="utf-8")
+    not_a_list = Path(directory) / "shape.json"
+    not_a_list.write_text(
+        json.dumps({"version": ASSET_VERSION, "names": "lightning_bolt"}),
+        encoding="utf-8")
+
+    deck = Deck("Arena Unknown", "modern")
+    deck.add(_card("unknown", "Totally Unknown Card"), "main", 1)
+    return (
+        load_supported_names(missing) == frozenset()
+        and load_supported_names(wrong_version) == frozenset()
+        and load_supported_names(malformed) == frozenset()
+        and load_supported_names(not_a_list) == frozenset()
+        # No names known means nothing is claimed unplayable.
+        and unsupported_deck_names(deck, frozenset()) == []
+        and unsupported_deck_names(deck, load_supported_names(missing)) == [])
+
+
+def _arena_deck_report_check():
+    """DECK-012: only the names Proxic Arena has no script for are reported."""
+    supported = frozenset({
+        "lightning_bolt", "delver_of_secrets", "yawgmoths_will"})
+    deck = Deck("Arena Mixed", "modern")
+    deck.add(_card("bolt", "Lightning Bolt"), "main", 4)
+    # Matched on the front face, which is the face Arena files it under.
+    deck.add(
+        _card("delver", "Delver of Secrets // Insectile Aberration"), "main", 4)
+    # The apostrophe spelling differs from the key's source name.
+    deck.add(_card("will", "Yawgmoth\u2019s Will"), "main", 1)
+    deck.add(_card("cecily", "Cecily, Haunted Mage"), "main", 1)
+    deck.add(_card("subgoyf", "Subgoyf"), "side", 2)
+    # The same unplayable card in both boards is one reported name.
+    deck.add(_card("subgoyf-alt", "Subgoyf"), "main", 1)
+    reported = unsupported_deck_names(deck, supported)
+
+    nameless = Deck("Arena Nameless", "modern")
+    nameless.add(_card("blank", ""), "main", 1)
+
+    clean = Deck("Arena Clean", "modern")
+    clean.add(_card("bolt-only", "Lightning Bolt"), "main", 4)
+    return (
+        reported == ["Cecily, Haunted Mage", "Subgoyf"]
+        # A deck Arena can play in full says nothing at all.
+        and unsupported_deck_names(clean, supported) == []
+        # A stored entry with no name cannot be reported as a missing card.
+        and unsupported_deck_names(nameless, supported) == [])
+
+
+def _arena_shipped_asset_check():
+    """DECK-012: the shipped asset is loadable and already normalized."""
+    path = ROOT / "assets/arena/supported_cards.json"
+    if not path.is_file():
+        return False
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    names = load_supported_names(path)
+    return (
+        payload["version"] == ASSET_VERSION
+        and payload["name_count"] == len(payload["names"])
+        and len(names) == payload["name_count"]
+        and len(names) > 1000
+        # Keys ship already normalized, so a lookup needs no second pass.
+        and all(normalize_card_name(name) == name
+                for name in sorted(names)[:500])
+        and "lightning_bolt" in names)
+
+
+def _arena_refresh_script_check():
+    """DECK-012: the refresh tool's contract, checked without the Arena tree.
+
+    It reads a tree outside this repository, so this check never runs it: it
+    establishes that the tool exists, compiles, derives its keys from the one
+    runtime owner instead of a second spelling of the rule, refuses to replace
+    a complete asset with a near-empty one, and stays outside the `test_*.py`
+    pattern the release suite runs.
+    """
+    script = ROOT / "tests/arena_support_refresh.py"
+    if not script.is_file() or script.name.startswith("test_"):
+        return False
+    source = script.read_text(encoding="utf-8")
+    try:
+        compile(source, str(script), "exec")
+    except SyntaxError:
+        return False
+    return (
+        # One owner for the key rule and the asset's version and location.
+        "from mtgdb.deck.arena_support import" in source
+        and "normalize_card_name" in source
+        and "front_face_name" in source
+        and "ASSET_VERSION" in source
+        and "ARENA_SUPPORTED_CARDS_FILE" in source
+        # Names come from the scripts' own Name: lines, never from filenames,
+        # because a filename is a lossy spelling that cannot be reversed.
+        and 'NAME_PREFIX = "Name:"' in source
+        and "<Unsupported Variant>" in source
+        # A credible-size floor, so an unreadable or wrong tree cannot quietly
+        # replace a complete asset with a handful of names.
+        and "MINIMUM_CREDIBLE_NAMES" in source
+        # A compare-only mode, which is the question to ask after an Arena bump.
+        and '"--check"' in source
+        # The Arena tree's location is an overridable default, never a fixed
+        # dependency of this repository on the other project's path.
+        and '"--cardsfolder"' in source
+        # .gitattributes pins LF for this tree, so the asset is written with it.
+        and r'newline="\n"' in source)
 
 
 def _import_roots(source):
@@ -509,7 +663,8 @@ def main():
         name: (ROOT / name).read_text(encoding="utf-8")
         for name in (
             "mtgdb/deck/model.py", "mtgdb/deck/io.py", "mtgdb/deck/analysis.py",
-            "mtgdb/deck/legality.py", "mtgdb/ui/app.py", "mtgdb/ui/deck.py",
+            "mtgdb/deck/legality.py", "mtgdb/deck/arena_support.py",
+            "mtgdb/ui/app.py", "mtgdb/ui/deck.py",
             "mtgdb/ui/deck_files.py", "mtgdb/ui/deck_stats.py")
     }
     imports = {
@@ -661,9 +816,42 @@ def main():
             "tkinter" not in imports[name] and "sqlite3" not in imports[name]
             for name in (
                 "mtgdb/deck/model.py", "mtgdb/deck/io.py", "mtgdb/deck/analysis.py",
-                "mtgdb/deck/legality.py")),
+                "mtgdb/deck/legality.py", "mtgdb/deck/arena_support.py")),
         "model owns no parser, probability, randomness, or legality imports": (
             not ({"re", "json", "math", "random"} & imports["mtgdb/deck/model.py"])),
+        "Arena lookup keys mirror the Proxic Arena name rule":
+            _arena_name_key_check(),
+        "an unusable Arena name asset reports nothing rather than raising":
+            _arena_unavailable_asset_check(),
+        "a saved deck reports only the names Proxic Arena cannot play":
+            _arena_deck_report_check(),
+        "the shipped Arena name asset is loadable and pre-normalized":
+            _arena_shipped_asset_check(),
+        "the Arena name asset has a refresh tool with a safe contract":
+            _arena_refresh_script_check(),
+        "the Arena check runs off Tk and cannot fail a written deck": (
+            # The decklist is durably written before the check runs, and
+            # the check's own failure returns no names rather than raising
+            # through the job, where it would report a completed save as a
+            # failure.
+            "save_deck_text(path, detached)"
+            in sources_by_name["mtgdb/ui/deck_files.py"]
+            and 'submit_deck_file_job(save_and_check, name="mtg-deck-save")'
+            in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "self._warn_unsupported_in_arena(unsupported)"
+            in sources_by_name["mtgdb/ui/deck_files.py"]
+            and sources_by_name["mtgdb/ui/deck_files.py"].index("save_deck_text(path, detached)")
+            < sources_by_name["mtgdb/ui/deck_files.py"].index(
+                "unsupported_deck_names(detached, supported)")
+            # JSON export is a backup, not an Arena import path.
+            and "_warn_unsupported_in_arena" not in
+            sources_by_name["mtgdb/ui/deck_files.py"].split("def _export_all_decks_json")[1]),
+        "the Arena asset location belongs to the shared asset owner": (
+            'ARENA_SUPPORTED_CARDS_FILE = "arena/supported_cards.json"'
+            in (ROOT / "mtgdb/ui/assets.py").read_text(encoding="utf-8")
+            and "arena/supported_cards.json" not in sources_by_name["mtgdb/ui/deck_files.py"]
+            and "arena/supported_cards.json" not in
+            sources_by_name["mtgdb/deck/arena_support.py"]),
         "production UI imports each deck responsibility from its owner": (
             "from mtgdb.deck.model import Deck" in sources_by_name["mtgdb/ui/app.py"]
             and ("from mtgdb.deck.io import deck_from_text, "

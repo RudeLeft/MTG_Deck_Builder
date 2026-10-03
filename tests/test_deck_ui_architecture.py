@@ -60,6 +60,62 @@ def _own_returns(function):
     return found
 
 
+def _arena_warning_agreement_check():
+    """DECK-012: the warning's subject and verb agree at every count.
+
+    Exercised through the real mixin method with a recording dialog stub,
+    because the defect this catches -- "1 card ... aren't" -- lives in the
+    sentence rather than in any value a structural check can see.
+    """
+    from mtgdb.ui import deck_files as module
+    from mtgdb.ui.deck_files import (
+        ARENA_WARNING_NAME_LIMIT, DeckFileWorkflowMixin,
+    )
+
+    class _Recorder:
+        def __init__(self):
+            self.messages = []
+
+        def showwarning(self, title, message):
+            self.messages.append((title, message))
+
+    class _Harness(DeckFileWorkflowMixin):
+        pass
+
+    harness = _Harness()
+    recorder = _Recorder()
+    original = module.messagebox
+    try:
+        module.messagebox = recorder
+        harness._warn_unsupported_in_arena([])
+        quiet_when_playable = recorder.messages == []
+        harness._warn_unsupported_in_arena(["Subgoyf"])
+        harness._warn_unsupported_in_arena(
+            ["Subgoyf", "Cecily, Haunted Mage", "Sly Spy"])
+        overflowing = [f"Card {index}" for index in range(
+            ARENA_WARNING_NAME_LIMIT + 5)]
+        harness._warn_unsupported_in_arena(overflowing)
+    finally:
+        module.messagebox = original
+
+    one = recorder.messages[0][1]
+    three = recorder.messages[1][1]
+    many = recorder.messages[2][1]
+    return (
+        quiet_when_playable
+        and len(recorder.messages) == 3
+        and "1 card in this deck isn't" in one
+        and "aren't" not in one
+        and "1 cards" not in one
+        and "3 cards in this deck aren't" in three
+        and "isn't" not in three
+        # The listing is capped, and the remainder is counted rather than
+        # dropped silently.
+        and many.count("Card ") == ARENA_WARNING_NAME_LIMIT
+        and "+5 more" in many
+        and f"{len(overflowing)} cards in this deck aren't" in many)
+
+
 def _submitters_claiming_success(ui_directory):
     """DUI-020: UI methods that report submitted background work as finished.
 
@@ -386,6 +442,7 @@ def main():
         def __init__(self, path):
             self.path = path
             self.errors = []
+            self.warnings = []
 
         def asksaveasfilename(self, **_kwargs):
             return self.path
@@ -395,6 +452,10 @@ def main():
 
         def showerror(self, title, message):
             self.errors.append((title, message))
+
+        def showwarning(self, title, message):
+            # DECK-012 reports a card Proxic Arena cannot play through this.
+            self.warnings.append((title, message))
 
     def _close_dirty_session_saving_to(path):
         """Close a dirty session that saves to `path`; report what survived."""
@@ -428,7 +489,7 @@ def main():
     blocker.write_text("not a directory", encoding="utf-8")
     failed_closed, failed_harness, failed_dialogs = (
         _close_dirty_session_saving_to(str(blocker / "deck.txt")))
-    good_closed, good_harness, _good_dialogs = (
+    good_closed, good_harness, good_dialogs = (
         _close_dirty_session_saving_to(
             str(Path(_close_dir) / "good deck.txt")))
     good_file_written = (Path(_close_dir) / "good deck.txt").is_file()
@@ -490,6 +551,17 @@ def main():
             deck_survived_failed_save),
         "a completed save closes the session and writes the file": (
             session_closes_after_a_real_write),
+        # DECK-012. The test deck holds a card Proxic Arena has no script for,
+        # so the warning fires -- and the save still completed and the session
+        # still closed, because the warning reports rather than interrupts.
+        "the unplayable-card warning agrees in number at every count":
+            _arena_warning_agreement_check(),
+        "an unplayable card warns without disturbing the completed save": (
+            session_closes_after_a_real_write
+            and len(good_dialogs.warnings) == 1
+            and good_dialogs.warnings[0][0] == "Not playable in Proxic Arena"
+            and "Test Card" in good_dialogs.warnings[0][1]
+            and good_dialogs.errors == []),
         "no UI method reports submitted background work as finished": (
             _submitters_claiming_success(ROOT / "mtgdb" / "ui") == []),
         "failed save is reported as not written and keeps the session": (

@@ -7,11 +7,20 @@ import re
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+from mtgdb.deck.arena_support import (
+    load_supported_names, unsupported_deck_names,
+)
 from mtgdb.deck.file_jobs import submit_deck_file_job
 from mtgdb.deck.io import deck_from_text, read_deck_text, save_deck_text
 from mtgdb.deck.model import Deck
+from mtgdb.ui.assets import ARENA_SUPPORTED_CARDS_FILE, _asset_path
 
 log = logging.getLogger("mtg")
+
+# As many unsupported names as the Open Deck warning lists, for the same
+# reason: a dialog is not a report, and a deck of unknown cards would make
+# one taller than the screen.
+ARENA_WARNING_NAME_LIMIT = 30
 
 
 class DeckFileWorkflowMixin:
@@ -161,15 +170,31 @@ class DeckFileWorkflowMixin:
             return False
         detached = self._detached_deck_copy(deck)
 
-        def saved(_result):
+        def save_and_check():
+            # The Arena check runs here rather than on Tk so no disk read or
+            # JSON parse lands on the UI thread (DUI-017), and it runs AFTER
+            # the decklist is durably written: once the file exists the save
+            # has happened, so nothing this check does may raise through the
+            # job and let a completed save be reported as a failure.
+            save_deck_text(path, detached)
+            try:
+                supported = load_supported_names(
+                    _asset_path(ARENA_SUPPORTED_CARDS_FILE))
+                return unsupported_deck_names(detached, supported)
+            except Exception:
+                log.exception(
+                    "Arena playability check failed after saving %s", path)
+                return []
+
+        def saved(unsupported):
             session.path = path
             session.dirty = False
             self._render_deck_tabs()
             log.info("Saved deck %r to %s", getattr(deck, "name", "?"), path)
             self._status(f"Saved {os.path.basename(path)}")
+            self._warn_unsupported_in_arena(unsupported)
 
-        future = submit_deck_file_job(
-            save_deck_text, path, detached, name="mtg-deck-save")
+        future = submit_deck_file_job(save_and_check, name="mtg-deck-save")
         if wait:
             return self._await_deck_file_job(
                 future, saved, error_title="Save failed")
@@ -179,6 +204,34 @@ class DeckFileWorkflowMixin:
 
     def _save_deck(self):
         return self._save_session_as(self.deck_sessions.active_index)
+
+
+    def _warn_unsupported_in_arena(self, unsupported):
+        """Name the saved deck's cards Proxic Arena will not find on import.
+
+        Shown after the write, so it reports rather than interrupts: the deck
+        is already on disk and the rest of it imports normally. A deck Arena
+        can play in full says nothing at all.
+        """
+        if not unsupported:
+            return
+        shown = list(unsupported[:ARENA_WARNING_NAME_LIMIT])
+        remaining = len(unsupported) - len(shown)
+        listing = "\n".join(shown)
+        if remaining:
+            listing += f"\n+{remaining} more"
+        # Subject and verb are chosen together: a count that pluralizes while
+        # the verb stays fixed reads as "1 card ... aren't".
+        counted = (
+            "1 card in this deck isn't" if len(unsupported) == 1
+            else f"{len(unsupported)} cards in this deck aren't")
+        log.info(
+            "Deck carries %d name(s) Proxic Arena cannot play", len(unsupported))
+        messagebox.showwarning(
+            "Not playable in Proxic Arena",
+            f"Saved. {counted} in Proxic Arena's card pool and won't "
+            f"import:\n\n{listing}\n\n"
+            "The rest of the deck will import normally.")
 
 
     def _json_safe_value(self, value):
