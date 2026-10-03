@@ -126,6 +126,12 @@ def _internal_import_allowed(module, imported):
         return imported.startswith(("mtgdb.search.", "mtgdb.database.", "mtgdb.core."))
     if module.startswith("mtgdb/deck/"):
         return imported.startswith(("mtgdb.deck.", "mtgdb.core."))
+    if module.startswith("mtgdb/arena/"):
+        # Naming and packaging only. The card-art download, its cache and its
+        # HTTP policy stay in printing and are injected by the caller, so this
+        # package reaches neither printing nor the network itself.
+        return imported in {
+            "mtgdb.core.atomic_files", "mtgdb.core.background_jobs"}
     if module in {"mtgdb/database/authorities.py", "mtgdb/database/constants.py"}:
         return False
     if module == "mtgdb/database/db.py":

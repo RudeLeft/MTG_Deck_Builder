@@ -60,44 +60,6 @@ def _own_returns(function):
     return found
 
 
-def _arena_warning_sentences_check():
-    """DECK-012: the notice's sentences, composed apart from its widgets.
-
-    Checked here without a Tk root. The lead carries no count, so it reads the
-    same however many cards are listed and needs no subject/verb agreement --
-    the defect an earlier count-carrying lead could produce was "1 card ...
-    are not", which lives in the sentence rather than in any value a
-    structural check can see.
-    """
-    from mtgdb.ui.deck_files import ARENA_WARNING_NAME_LIMIT, arena_warning_text
-
-    expected_lead = (
-        "The following cards in your deck are not in the Proxic Arena card "
-        "pool and will not play properly")
-    one_lead, one_shown, one_rest, one_closing = arena_warning_text(["Subgoyf"])
-    many = ["Subgoyf", "Cecily, Haunted Mage", "Sly Spy"]
-    many_lead, many_shown, many_rest, _closing = arena_warning_text(many)
-    overflowing = [
-        f"Card {index}" for index in range(ARENA_WARNING_NAME_LIMIT + 5)]
-    over_lead, over_shown, over_rest, _over_closing = arena_warning_text(
-        overflowing)
-    return (
-        one_lead == expected_lead
-        and one_shown == ["Subgoyf"]
-        and one_rest == 0
-        and one_closing == "The rest of the deck will play without issue."
-        # One sentence at every count, so no agreement can drift.
-        and many_lead == expected_lead
-        and over_lead == expected_lead
-        and many_shown == many
-        and many_rest == 0
-        # The heading says the deck was saved; the lead does not repeat it.
-        and not one_lead.startswith("Deck Saved")
-        # The listing is capped and the remainder counted, not dropped.
-        and len(over_shown) == ARENA_WARNING_NAME_LIMIT
-        and over_rest == 5)
-
-
 def _submitters_claiming_success(ui_directory):
     """DUI-020: UI methods that report submitted background work as finished.
 
@@ -442,11 +404,7 @@ def main():
         session = DeckSession(deck=deck, path=None, dirty=True)
         harness = _CloseHarness([session])
         dialogs = _Dialogs(path)
-        # DECK-012 presents its notice as an app-owned Toplevel, so the
-        # dialog itself is stubbed here rather than tkinter.messagebox.
-        arena_notices = []
-        harness._show_arena_warning_dialog = (
-            lambda *args: arena_notices.append(args))
+
         saved_dialog = df_module.filedialog
         saved_error = df_module.messagebox
         saved_confirm = deck_module.messagebox
@@ -459,7 +417,7 @@ def main():
             df_module.filedialog = saved_dialog
             df_module.messagebox = saved_error
             deck_module.messagebox = saved_confirm
-        return closed, harness, dialogs, arena_notices
+        return closed, harness, dialogs
 
     # VER-011 registered cleanup rather than a context manager: without the
     # fix the save runs on a worker thread that outlives this block, and a
@@ -470,9 +428,9 @@ def main():
     # it fails inside save_deck_text rather than in the dialog.
     blocker = Path(_close_dir) / "blocker.txt"
     blocker.write_text("not a directory", encoding="utf-8")
-    failed_closed, failed_harness, failed_dialogs, failed_notices = (
+    failed_closed, failed_harness, failed_dialogs = (
         _close_dirty_session_saving_to(str(blocker / "deck.txt")))
-    good_closed, good_harness, good_dialogs, good_notices = (
+    good_closed, good_harness, good_dialogs = (
         _close_dirty_session_saving_to(
             str(Path(_close_dir) / "good deck.txt")))
     good_file_written = (Path(_close_dir) / "good deck.txt").is_file()
@@ -534,21 +492,6 @@ def main():
             deck_survived_failed_save),
         "a completed save closes the session and writes the file": (
             session_closes_after_a_real_write),
-        # DECK-012. The test deck holds a card Proxic Arena has no script for,
-        # so the warning fires -- and the save still completed and the session
-        # still closed, because the warning reports rather than interrupts.
-        "the unplayable-card notice reads the same at every count":
-            _arena_warning_sentences_check(),
-        "an unplayable card warns without disturbing the completed save": (
-            session_closes_after_a_real_write
-            and len(good_notices) == 1
-            and good_notices[0][1] == ["Test Card"]
-            and good_notices[0][0].startswith("The following cards in your deck")
-            and good_dialogs.errors == []
-            # A failed write never reaches the notice: there is no saved deck
-            # to report on.
-            and failed_notices == []
-            and len(failed_dialogs.errors) == 1),
         "no UI method reports submitted background work as finished": (
             _submitters_claiming_success(ROOT / "mtgdb" / "ui") == []),
         "failed save is reported as not written and keeps the session": (

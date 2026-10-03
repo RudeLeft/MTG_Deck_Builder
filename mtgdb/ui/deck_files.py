@@ -5,46 +5,17 @@ import logging
 import os
 import re
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
-from mtgdb.deck.arena_support import (
-    load_supported_names, unsupported_deck_names,
-)
 from mtgdb.deck.file_jobs import submit_deck_file_job
 from mtgdb.deck.io import deck_from_text, read_deck_text, save_deck_text
 from mtgdb.deck.model import Deck
-from mtgdb.ui.assets import ARENA_SUPPORTED_CARDS_FILE, _asset_path
-from mtgdb.ui.components import AppButton, autohide_scrollbar
-from mtgdb.ui.tokens import FONT_BODY, PALETTE
 
 log = logging.getLogger("mtg")
 
 # As many unsupported names as the Open Deck warning lists, for the same
 # reason: a dialog is not a report, and a deck of unknown cards would make
 # one taller than the screen.
-ARENA_WARNING_NAME_LIMIT = 30
-ARENA_WARNING_HEADING = "DECK SAVED"
-ARENA_WARNING_WINDOW_TITLE = "Deck Saved"
-ARENA_WARNING_LEAD = (
-    "The following cards in your deck are not in the Proxic Arena card pool "
-    "and will not play properly")
-ARENA_WARNING_CLOSING = "The rest of the deck will play without issue."
-
-
-def arena_warning_text(unsupported):
-    """Return the notice's lead line, listed names, overflow count, and closing.
-
-    The wording lives apart from the widgets so the sentences can be checked
-    without a Tk root. The lead carries no count and so needs no subject/verb
-    agreement, and it does not repeat that the deck was saved: the dialog's
-    own heading says that, and both together read it twice.
-    """
-    shown = list(unsupported[:ARENA_WARNING_NAME_LIMIT])
-    return (
-        ARENA_WARNING_LEAD, shown, len(unsupported) - len(shown),
-        ARENA_WARNING_CLOSING)
-
-
 class DeckFileWorkflowMixin:
     """Own deck-file dialogs while parsing/serialization/durability stay off Tk."""
 
@@ -72,11 +43,19 @@ class DeckFileWorkflowMixin:
         on_success(result)
         return True
 
-    def _poll_deck_file_job(self, future, on_success, *, error_title):
+    def _poll_deck_file_job(
+            self, future, on_success, *, error_title, on_error=None):
+        """Poll one deck-file job, reporting a failure through *on_error*.
+
+        A long job owns a progress popup that MUST come down however the job
+        ends, so a failure runs *on_error* before the error is reported rather
+        than leaving the popup on screen over a modal message.
+        """
         if not future.done():
             try:
                 self.after(20, lambda: self._poll_deck_file_job(
-                    future, on_success, error_title=error_title))
+                    future, on_success, error_title=error_title,
+                    on_error=on_error))
             except tk.TclError:
                 pass
             return
@@ -84,6 +63,8 @@ class DeckFileWorkflowMixin:
             result = future.result()
         except Exception as exc:
             log.exception("%s", error_title)
+            if on_error is not None:
+                on_error()
             messagebox.showerror(error_title, str(exc))
             return
         on_success(result)
@@ -192,31 +173,19 @@ class DeckFileWorkflowMixin:
             return False
         detached = self._detached_deck_copy(deck)
 
-        def save_and_check():
-            # The Arena check runs here rather than on Tk so no disk read or
-            # JSON parse lands on the UI thread (DUI-017), and it runs AFTER
-            # the decklist is durably written: once the file exists the save
-            # has happened, so nothing this check does may raise through the
-            # job and let a completed save be reported as a failure.
-            save_deck_text(path, detached)
-            try:
-                supported = load_supported_names(
-                    _asset_path(ARENA_SUPPORTED_CARDS_FILE))
-                return unsupported_deck_names(detached, supported)
-            except Exception:
-                log.exception(
-                    "Arena playability check failed after saving %s", path)
-                return []
-
-        def saved(unsupported):
+        def saved(_result):
             session.path = path
             session.dirty = False
             self._render_deck_tabs()
             log.info("Saved deck %r to %s", getattr(deck, "name", "?"), path)
             self._status(f"Saved {os.path.basename(path)}")
-            self._warn_unsupported_in_arena(unsupported)
 
-        future = submit_deck_file_job(save_and_check, name="mtg-deck-save")
+        # Save Deck As writes an ordinary decklist and says nothing about
+        # Proxic Arena: a deck is saved for many reasons, most of them nothing
+        # to do with Arena. The playability check belongs to Proxic Arena
+        # Export, which is the action that states that intent (DECK-012).
+        future = submit_deck_file_job(
+            save_deck_text, path, detached, name="mtg-deck-save")
         if wait:
             return self._await_deck_file_job(
                 future, saved, error_title="Save failed")
@@ -226,96 +195,6 @@ class DeckFileWorkflowMixin:
 
     def _save_deck(self):
         return self._save_session_as(self.deck_sessions.active_index)
-
-
-    def _warn_unsupported_in_arena(self, unsupported):
-        """Name the saved deck's cards Proxic Arena will not find on import.
-
-        Shown after the write, so it reports rather than interrupts: the deck
-        is already on disk and the rest of it plays normally. A deck Arena can
-        play in full says nothing at all.
-        """
-        if not unsupported:
-            return
-        log.info(
-            "Deck carries %d name(s) Proxic Arena cannot play", len(unsupported))
-        self._show_arena_warning_dialog(*arena_warning_text(unsupported))
-
-
-    def _show_arena_warning_dialog(self, lead, shown, remaining, closing):
-        """Present the notice as an app-owned dark dialog, not a native one.
-
-        A native `messagebox` paints the host platform's own grey chrome and
-        reads as a different application beside the charcoal/gold popups, the
-        way comparison notices did before CMP-012. This mirrors the Basic
-        Format Check dialog: one gold `DialogTitle.TLabel`, a bordered dark
-        list whose scrollbar appears only when it overflows (UI-016), and a
-        single compact secondary `Close` (UI-012).
-        """
-        p = PALETTE
-        popup = self._create_hidden_popup(
-            ARENA_WARNING_WINDOW_TITLE, transient=self)
-        popup.configure(bg=p["border"])
-        popup.protocol("WM_DELETE_WINDOW", popup.destroy)
-
-        shell = tk.Frame(popup, bg=p["surface"], padx=18, pady=16)
-        shell.pack(fill="both", expand=True, padx=1, pady=1)
-
-        ttk.Label(
-            shell, text=ARENA_WARNING_HEADING, style="DialogTitle.TLabel"
-        ).pack(anchor="w", pady=(0, 10))
-
-        # UI-017: a left-justified classic label is anchored west, or the text
-        # block is centered inside a label wider than itself.
-        tk.Label(
-            shell, text=lead, bg=p["surface"], fg=p["text"], font=FONT_BODY,
-            justify="left", anchor="w", wraplength=520
-        ).pack(anchor="w", fill="x", pady=(0, 10))
-
-        list_shell = tk.Frame(
-            shell, bg=p["border"], highlightthickness=1,
-            highlightbackground=p["border"])
-        list_shell.pack(fill="both", expand=True)
-        list_shell.rowconfigure(0, weight=1)
-        list_shell.columnconfigure(0, weight=1)
-
-        names = tk.Listbox(
-            list_shell, activestyle="none", exportselection=False,
-            background=p["input"], foreground=p["text"],
-            selectbackground=p["accent"],
-            selectforeground=p["on_accent"],
-            highlightthickness=0, relief="flat", bd=0,
-            height=min(max(len(shown), 3), 12),
-            font=FONT_BODY)
-        scroll = ttk.Scrollbar(
-            list_shell, orient="vertical", command=names.yview,
-            style="Dark.Vertical.TScrollbar")
-        names.configure(yscrollcommand=autohide_scrollbar(scroll))
-        names.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns")
-        self._register_scrollable(names)
-
-        for name in shown:
-            names.insert("end", f"  {name}")
-        if remaining:
-            # Counted rather than dropped silently.
-            names.insert("end", f"  +{remaining} more")
-
-        tk.Label(
-            shell, text=closing, bg=p["surface"], fg=p["text"], font=FONT_BODY,
-            justify="left", anchor="w", wraplength=520
-        ).pack(anchor="w", fill="x", pady=(10, 0))
-
-        foot = tk.Frame(shell, bg=p["surface"])
-        foot.pack(fill="x", pady=(12, 0))
-        AppButton(
-            foot, text="Close", role="compact", command=popup.destroy
-        ).pack(side="right")
-
-        popup.bind("<Escape>", lambda _e: popup.destroy())
-        self._present_hidden_popup(
-            popup, preferred_width=560, preferred_height=420,
-            min_width=460, min_height=300, grab=True, fit_content=True)
 
 
     def _json_safe_value(self, value):

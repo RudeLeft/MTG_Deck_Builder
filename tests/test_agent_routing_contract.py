@@ -39,6 +39,7 @@ SOURCE_MARKERS = {
     "mtgdb/deck/legality.py": ("_FORMAT_RULES =", "def legality_problems("),
     "mtgdb/deck/arena_support.py": (
         "def normalize_card_name(", "def unsupported_deck_names("),
+    "mtgdb/arena/export.py": ("def art_filename(", "def build_export("),
     "mtgdb/deck/sessions.py": ("class DeckSession", "class DeckSessionManager"),
     "mtgdb/database/authorities.py": ("CATALOG_AUTHORITIES =", "SUBTYPE_AUTHORITIES ="),
     "mtgdb/database/constants.py": ("CONTENT_TYPES =", "PLAYABLE_LEGALITY_STATUSES"),
@@ -74,6 +75,8 @@ SOURCE_MARKERS = {
     "mtgdb/ui/comparison_controls.py": ("class ComparisonFeatureMixin", "def _open_comparison_window("),
     "mtgdb/ui/deck.py": ("class DeckEditorMixin", "def _build_deck_pane("),
     "mtgdb/ui/deck_files.py": ("class DeckFileWorkflowMixin", "def _open_deck("),
+    "mtgdb/ui/arena_export.py": (
+        "class ArenaExportMixin", "def _export_arena("),
     "mtgdb/ui/deck_stats.py": ("class DeckStatsMixin", "def _render_legality("),
     "mtgdb/ui/workspace.py": ("WORKSPACE_AUTOSAVE_MS", "class WorkspaceMixin"),
     "mtgdb/ui/database_sync.py": ("class DatabaseSyncMixin", "def _poll_sync_events("),

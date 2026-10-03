@@ -829,54 +829,12 @@ def main():
             _arena_shipped_asset_check(),
         "the Arena name asset has a refresh tool with a safe contract":
             _arena_refresh_script_check(),
-        "the Arena check runs off Tk and cannot fail a written deck": (
-            # The decklist is durably written before the check runs, and
-            # the check's own failure returns no names rather than raising
-            # through the job, where it would report a completed save as a
-            # failure.
-            "save_deck_text(path, detached)"
-            in sources_by_name["mtgdb/ui/deck_files.py"]
-            and 'submit_deck_file_job(save_and_check, name="mtg-deck-save")'
-            in sources_by_name["mtgdb/ui/deck_files.py"]
-            and "self._warn_unsupported_in_arena(unsupported)"
-            in sources_by_name["mtgdb/ui/deck_files.py"]
-            and sources_by_name["mtgdb/ui/deck_files.py"].index("save_deck_text(path, detached)")
-            < sources_by_name["mtgdb/ui/deck_files.py"].index(
-                "unsupported_deck_names(detached, supported)")
-            # JSON export is a backup, not an Arena import path.
-            and "_warn_unsupported_in_arena" not in
-            sources_by_name["mtgdb/ui/deck_files.py"].split("def _export_all_decks_json")[1]),
-        "the Arena notice is an app-owned dark dialog, not a native one": (
-            # A native messagebox paints the host platform's grey chrome
-            # and reads as a different application beside the
-            # charcoal/gold popups, the way comparison notices did before
-            # CMP-012.
-            "def _show_arena_warning_dialog(" in sources_by_name["mtgdb/ui/deck_files.py"]
-            and "self._create_hidden_popup(" in sources_by_name["mtgdb/ui/deck_files.py"]
-            and "self._present_hidden_popup(" in sources_by_name["mtgdb/ui/deck_files.py"]
-            and 'style="DialogTitle.TLabel"' in sources_by_name["mtgdb/ui/deck_files.py"]
-            and "PALETTE" in sources_by_name["mtgdb/ui/deck_files.py"]
-            and "autohide_scrollbar(" in sources_by_name["mtgdb/ui/deck_files.py"]
-            and 'AppButton(' in sources_by_name["mtgdb/ui/deck_files.py"]
-            and 'text="Close", role="compact"' in sources_by_name["mtgdb/ui/deck_files.py"]
-            # The notice never routes through tkinter.messagebox. Open Deck,
-            # Paste and JSON export still use it for their own failures, so
-            # the prohibition is scoped to this method's own body, and to
-            # calls (`messagebox.`) rather than the word, which its docstring
-            # names to say what it is not.
-            and "messagebox." not in sources_by_name[
-                "mtgdb/ui/deck_files.py"].split(
-                    "def _show_arena_warning_dialog")[1].split(
-                        "\n    def ")[0]
-            # The save path reaches the dialog, not a native warning.
-            and "messagebox" not in sources_by_name[
-                "mtgdb/ui/deck_files.py"].split(
-                    "def _warn_unsupported_in_arena")[1].split(
-                        "\n    def ")[0]),
         "the Arena asset location belongs to the shared asset owner": (
             'ARENA_SUPPORTED_CARDS_FILE = "arena/supported_cards.json"'
             in (ROOT / "mtgdb/ui/assets.py").read_text(encoding="utf-8")
-            and "arena/supported_cards.json" not in sources_by_name["mtgdb/ui/deck_files.py"]
+            # Neither the consumer nor the comparison spells the path itself.
+            and "arena/supported_cards.json" not in
+            (ROOT / "mtgdb/ui/arena_export.py").read_text(encoding="utf-8")
             and "arena/supported_cards.json" not in
             sources_by_name["mtgdb/deck/arena_support.py"]),
         "production UI imports each deck responsibility from its owner": (
